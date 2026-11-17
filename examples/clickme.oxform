@@ -1,0 +1,73 @@
+{
+  "name": "Form1",
+  "caption": "OxidizedBASIC Click Counter",
+  "width": 340,
+  "height": 240,
+  "controls": [
+    {
+      "name": "Label1",
+      "kind": "Label",
+      "rect": { "left": 16, "top": 16, "width": 300, "height": 22 },
+      "caption": "Clicks: 0",
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0
+    },
+    {
+      "name": "Command1",
+      "kind": "CommandButton",
+      "rect": { "left": 16, "top": 48, "width": 100, "height": 30 },
+      "caption": "Click Me",
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0
+    },
+    {
+      "name": "Command2",
+      "kind": "CommandButton",
+      "rect": { "left": 124, "top": 48, "width": 100, "height": 30 },
+      "caption": "Reset",
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0
+    },
+    {
+      "name": "Text1",
+      "kind": "TextBox",
+      "rect": { "left": 16, "top": 90, "width": 208, "height": 24 },
+      "caption": "",
+      "text": "type here...",
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0
+    },
+    {
+      "name": "Label2",
+      "kind": "Label",
+      "rect": { "left": 16, "top": 122, "width": 300, "height": 22 },
+      "caption": "(echo)",
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0
+    },
+    {
+      "name": "List1",
+      "kind": "ListBox",
+      "rect": { "left": 16, "top": 150, "width": 208, "height": 60 },
+      "caption": "",
+      "items": ["Apple", "Banana", "Cherry"],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0
+    },
+    {
+      "name": "Timer1",
+      "kind": "Timer",
+      "rect": { "left": 0, "top": 0, "width": 0, "height": 0 },
+      "caption": "",
+      "enabled": true,
+      "visible": false,
+      "intervalMs": 1000
+    }
+  ]
+}

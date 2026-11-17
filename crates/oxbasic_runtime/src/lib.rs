@@ -277,6 +277,80 @@ impl<'out> Interpreter<'out> {
         self.exec_block(&stmts, &mut f).map(|_| ()).map_err(|e| e.to_string())
     }
 
+    /// Names of every user-defined `Sub`/`Function` (for event wiring).
+    pub fn proc_names(&self) -> Vec<String> {
+        self.decls.iter().map(|d| d.name.clone()).collect()
+    }
+
+    /// Invoke a BASIC `Sub`/`Function` by name with evaluated argument
+    /// values — the Phase 2 UI event bridge (spec §5.1:
+    /// `runtime.evaluate_sub("Command1_Click", vec![])`).
+    ///
+    /// Parameters are bound by value (ByVal semantics). Returns the
+    /// function value, or `Empty` for a `Sub`.
+    pub fn evaluate_sub(&mut self, name: &str, args: &[Variant]) -> ExecResult<Variant> {
+        let ln = name.to_lowercase();
+        let idx = match self.proc_index.get(&ln) {
+            Some(&i) => i,
+            None => return err(35, &format!("Sub or Function not defined: {}", name)),
+        };
+        if self.depth > 400 {
+            return err(28, "out of stack space");
+        }
+        let decl = self.decls[idx].clone();
+        let mut callee = Frame::proc(&decl);
+        let nparams = decl.params.len();
+        let has_param_array = decl.params.iter().any(|p| p.param_array);
+        if args.len() > nparams && !has_param_array {
+            return err(450, &format!("wrong number of arguments for {}", name));
+        }
+        for (i, p) in decl.params.iter().enumerate() {
+            if p.param_array {
+                let start = i.min(args.len());
+                let items: Vec<Variant> = args[start..].to_vec();
+                let n = items.len();
+                callee.locals.insert(
+                    p.name.to_lowercase(),
+                    Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(
+                        VbArray { dims: vec![n], data: items },
+                    ))))),
+                );
+                break;
+            }
+            if i >= args.len() {
+                if !p.optional {
+                    return err(449, &format!("argument not optional: {}", p.name));
+                }
+                let v = match &p.default {
+                    Some(d) => {
+                        // defaults are constant expressions; evaluate in a
+                        // scratch main frame
+                        let mut scratch = Frame::main();
+                        self.eval(d, &mut scratch)?
+                    }
+                    None => Variant::Empty,
+                };
+                callee
+                    .locals
+                    .insert(p.name.to_lowercase(), Rc::new(RefCell::new(v)));
+                continue;
+            }
+            let v = match &p.ty {
+                Some(t) => coerce_typed(&args[i], t)?,
+                None => args[i].clone(),
+            };
+            callee
+                .locals
+                .insert(p.name.to_lowercase(), Rc::new(RefCell::new(v)));
+        }
+        self.depth += 1;
+        let body = decl.body.clone();
+        let flow = self.exec_block(&body, &mut callee);
+        self.depth -= 1;
+        flow?;
+        Ok(callee.ret)
+    }
+
     // -- scope helpers ------------------------------------------------------
 
     fn lookup_rc(&self, f: &Frame, name: &str) -> Option<Rc<RefCell<Variant>>> {

@@ -1,19 +1,28 @@
-//! GPUI & GPUI Kit widget mapping runtime engine (Phase 2 bridge).
+//! GPUI & GPUI Kit widget mapping runtime engine.
 //!
-//! This crate maps classic Visual BASIC controls to high-performance
-//! GPU-rendered GPUI Kit components and routes GPUI input events to BASIC
-//! event handler subroutines, per §5 of the technical specification.
-//!
-//! Phase 1 ships the mapping table and the event dispatcher registry in a
-//! render-backend-agnostic form. Phase 2 wires these to the real GPUI
-//! (`gpui`, `gpui-component`, `gpui-base`) crates once the Zed-based
-//! toolchain is pinned, keeping this API stable:
+//! Phase 2 of the roadmap: this crate maps classic Visual BASIC controls
+//! to high-performance GPU-rendered GPUI elements and routes GPUI input
+//! events to BASIC event handler subroutines, per §5 of the technical
+//! specification:
 //!
 //! ```ignore
 //! button.on_click(cx.listener(|this, _event, window_cx| {
 //!     this.runtime.evaluate_sub("Command1_Click", vec![]);
 //! }));
 //! ```
+//!
+//! - [`form`] holds the render-agnostic form model (`.oxform` JSON,
+//!   layout coordinates, properties) and the [`FormDispatcher`] event
+//!   engine — usable and tested without a GUI.
+//! - `gpui_backend` (behind the `gpui` feature) renders a [`FormSpec`]
+//!   as a real GPU-accelerated GPUI window and drives the dispatcher
+//!   from GPUI input/timer events.
+
+mod form;
+#[cfg(feature = "gpui")]
+pub mod gpui_backend;
+
+pub use form::*;
 
 use std::collections::HashMap;
 

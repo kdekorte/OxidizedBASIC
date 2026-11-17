@@ -9,7 +9,7 @@ license.workspace = true
 oxbasic_ast = { workspace = true }
 oxbasic_parser = { workspace = true }
 oxbasic_runtime = { workspace = true }
-# oxbasic_ui joins this binary in Phase 2 when the GPUI window opens.
+oxbasic_ui = { workspace = true, features = ["gpui"] }
 
 [[bin]]
 name = "oxbasic"
