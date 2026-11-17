@@ -6,6 +6,8 @@
 //!   oxbasic ide              launch the IDE (Phase 3 placeholder)
 //!   oxbasic version          print version
 
+mod ide;
+
 use oxbasic_runtime::{ConsoleOutput, Interpreter};
 use std::io::{BufRead, Write};
 
@@ -15,7 +17,7 @@ fn main() {
         Some("run") => cmd_run(&args[2..]),
         Some("repl") => cmd_repl(),
         Some("gui") => cmd_gui(&args[2..]),
-        Some("ide") => cmd_ide(),
+        Some("ide") => cmd_ide(&args[2..]),
         Some("version") | Some("--version") => {
             println!("oxbasic {} (Phase 1: parser + interpreter)", env!("CARGO_PKG_VERSION"))
         }
@@ -26,7 +28,7 @@ fn main() {
             eprintln!("  oxbasic run <file.bas>   run a BASIC program");
             eprintln!("  oxbasic gui <form.oxform> <file.bas>   open a GPUI form window");
             eprintln!("  oxbasic repl             interactive immediate window");
-            eprintln!("  oxbasic ide              launch the IDE (Phase 3 placeholder)");
+            eprintln!("  oxbasic ide [file.bas] [form.oxform]   launch the visual IDE");
             eprintln!("  oxbasic version          print version");
             std::process::exit(2);
         }
@@ -93,11 +95,13 @@ fn cmd_repl() {
     }
 }
 
-fn cmd_ide() {
-    // Phase 3 per the roadmap: GPUI form designer, tree-sitter editor,
-    // property inspector, and debugger. The CLI ships first.
-    println!("OxidizedBASIC IDE (GPUI) is under development — Phase 3 of the roadmap.");
-    println!("For now, use: oxbasic run <file.bas>  /  oxbasic gui <form.oxform> <file.bas>  /  oxbasic repl");
+/// `oxbasic ide [file.bas] [form.oxform]` — Phase 3: launch the visual
+/// IDE (form designer, syntax-highlighted editor, property inspector,
+/// output pane, and debugger with breakpoints / step / watch).
+fn cmd_ide(args: &[String]) {
+    let bas = args.first().map(|s| s.as_str());
+    let oxform = args.get(1).map(|s| s.as_str());
+    ide::run_ide(bas, oxform);
 }
 
 /// `oxbasic gui <form.oxform> <program.bas>` — Phase 2 GPUI element

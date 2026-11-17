@@ -6,7 +6,7 @@ Full syntax and semantic compatibility with Visual Basic 6.0 / classic VBA
 is the goal; GPUI-based GUI rendering and the visual IDE follow in later
 phases.
 
-## Status — Phases 1 & 2 complete
+## Status — Phases 1, 2 & 3 complete
 
 ### Phase 1: syntax parser & core runtime
 - **Parser** (`oxbasic_parser`): `pest` grammar for the classic VB6/VBA
@@ -43,15 +43,40 @@ phases.
   runs module-level code, fires `Form_Load`, and serves events until
   the window closes.
 
+### Phase 3: the visual IDE
+- **`oxbasic ide [file.bas] [form.oxform]`** launches a GPUI IDE window:
+  - **Code editor** with BASIC syntax highlighting (keywords, strings,
+    numbers, comments), keyboard editing with cursor, auto-indent after
+    `Then`/`Do`, and a clickable **breakpoint gutter** (red dots).
+  - **Visual form designer**: the form canvas renders the `.oxform`
+    layout; click to select controls, **drag to move** them, and add
+    Button / Label / TextBox / Timer controls from the toolbar.
+  - **Property inspector**: live-editable Caption, Text, Items,
+    Left/Top/Width/Height, and Timer interval for the selected control;
+    `Save Form` writes the `.oxform` JSON, `Save Code` the `.bas` file.
+  - **Debugger**: Run / Step / Stop toolbar controls. The program runs
+    on a background thread with a debug hook — **breakpoints by source
+    line** (the parser now emits line markers), **step-over** semantics,
+    pause/continue, and abort. While paused, the editor highlights the
+    current line and the **Watch pane** shows every local and global
+    variable with its value.
+  - **Output pane** streams `Print`/`MsgBox` output live from the
+    running program.
+- **Runtime debugger API**: `Interpreter::set_debug_hook` /
+    `set_breakpoints` with `PausedInfo` (line, procedure, depth, locals,
+    globals) and `DebugAction` (Continue / StepOver / Abort) — usable
+    headless (see the debugger integration tests).
+
 ## Usage
 
 ```sh
 cargo build -p oxbasic_ide
+./target/debug/oxbasic ide examples/clickme.bas examples/clickme.oxform  # the IDE
 ./target/debug/oxbasic run examples/demo.bas                    # console program
 ./target/debug/oxbasic gui examples/clickme.oxform \
                       examples/clickme.bas                      # GPUI form app
 ./target/debug/oxbasic repl                                     # immediate window
-cargo test --workspace                                          # 45 tests
+cargo test --workspace                                          # 50 tests
 ```
 
 `.oxform` layout files are JSON:
@@ -80,9 +105,9 @@ crates/
 ├── oxbasic_parser/      # Grammar (pest), lexer, parser
 ├── oxbasic_runtime/     # Interpreter, Variant system, stdlib
 ├── oxbasic_ui/          # Form model + event dispatcher + GPUI backend
-└── oxbasic_ide/         # `oxbasic` CLI binary (run / gui / repl)
+└── oxbasic_ide/         # `oxbasic` CLI binary (ide / gui / run / repl)
 examples/                # hello.bas, demo.bas, fib.bas, clickme.bas + .oxform
-scripts/                 # gui_smoke.sh — GUI launch smoke test
+scripts/                 # gui_smoke.sh, ide_smoke.sh — launch smoke tests
 ```
 
 ## Standard library (builtins)
@@ -109,16 +134,19 @@ xcodebuild -downloadComponent MetalToolchain
 ## Known limitations
 
 - GUI control *properties* (e.g. `Label1.Caption = "x"` from BASIC) are
-  not yet writable from program code — the form renders from the
-  `.oxform` spec; property binding arrives with the Phase 3 designer.
-- `MsgBox` prints to the console attached to the GUI process (a native
-  GPUI dialog ships with Phase 3).
+  not yet writable from program code — edit them in the IDE's property
+  inspector; runtime property binding is a follow-up.
+- The IDE's Run/Step executes the program with module-level code and
+  event subs (a click in the designer doesn't fire `Command1_Click`
+  yet — use `oxbasic gui` for live form events).
+- The IDE's editor is line-based (no mouse text selection yet); the
+  debugger supports breakpoints, step-over, and watch (no step-into).
+- `MsgBox` prints to the console/output pane (a native GPUI dialog is a
+  follow-up).
 - `Resume`/`Resume Next` resume precisely when the handler sits at the
   same block level as the failing statement (the common VB idiom).
 - No `ReDim`, file I/O, or `Mid`-statement yet.
 
 ## Roadmap
 
-- Phase 3: visual Form Designer, tree-sitter editor, property inspector,
-  debugger
 - Phase 4: Cranelift JIT backend and `.app` packaging

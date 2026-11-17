@@ -42,7 +42,11 @@ pub fn parse(src: &str) -> Result<Program, String> {
                             Rule::FuncDecl => {
                                 items.push(Item::Proc(proc_decl(s, ProcKind::Function)?))
                             }
-                            _ => items.push(Item::Stmt(stmt(s)?)),
+                            _ => {
+                                let line = s.line_col().0;
+                                items.push(Item::Stmt(Stmt::LineMarker(line)));
+                                items.push(Item::Stmt(stmt(s)?));
+                            }
                         }
                     }
                 }
@@ -104,7 +108,11 @@ fn stmt_list_stmts(pair: Pair<Rule>) -> Result<Vec<Stmt>, String> {
     for s in pair.into_inner() {
         match s.as_rule() {
             Rule::SubDecl | Rule::FuncDecl => return err("procedures cannot be nested"),
-            _ => out.push(stmt(s)?),
+            _ => {
+                let line = s.line_col().0;
+                out.push(Stmt::LineMarker(line));
+                out.push(stmt(s)?);
+            }
         }
     }
     Ok(out)
@@ -745,7 +753,23 @@ mod tests {
     #[test]
     fn parses_simple_program() {
         let prog = parse("Dim x As Long\nx = 42\nPrint \"x =\"; x\n").unwrap();
-        assert_eq!(prog.items.len(), 3);
+        // statements (excluding source-line markers)
+        let stmts = prog
+            .items
+            .iter()
+            .filter(|i| !matches!(i, Item::Stmt(Stmt::LineMarker(_))))
+            .count();
+        assert_eq!(stmts, 3);
+        // each statement is preceded by its line marker
+        let markers = prog
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stmt(Stmt::LineMarker(l)) => Some(*l),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(markers, vec![1, 2, 3]);
     }
 
     #[test]

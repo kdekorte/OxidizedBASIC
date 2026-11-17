@@ -228,3 +228,107 @@ fn print_separators_and_trailing() {
     assert_eq!(run("Print \"a\";\nPrint \"b\"\n"), "ab\n");
 }
 
+#[test]
+fn debugger_steps_and_watches() {
+    use oxbasic_runtime::{DebugAction, Interpreter, Output, PausedInfo};
+
+    struct Sink(String);
+    impl Output for Sink {
+        fn write(&mut self, s: &str) {
+            self.0.push_str(s);
+        }
+    }
+
+    let src = "Dim Total As Long\nTotal = 0\nFor i = 1 To 3\n  Total = Total + i\nNext\nPrint Total\n";
+    let prog = oxbasic_parser::parse(src).unwrap();
+    let mut sink = Sink(String::new());
+    let mut rt = Interpreter::new(&prog, &mut sink);
+
+    let pauses: std::rc::Rc<std::cell::RefCell<Vec<PausedInfo>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let steps = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    {
+        let pauses = pauses.clone();
+        let steps = steps.clone();
+        rt.set_debug_hook(Box::new(move |info: &PausedInfo| {
+            pauses.borrow_mut().push(info.clone());
+            steps.set(steps.get() + 1);
+            if steps.get() >= 6 {
+                DebugAction::Continue
+            } else {
+                DebugAction::StepOver
+            }
+        }));
+    }
+    rt.run().unwrap();
+
+    let p = pauses.borrow();
+    assert!(p.len() >= 6);
+    // "break on start": first pause is module-level, before `Dim` on line 1
+    assert_eq!(p[0].line, 1);
+    assert_eq!(p[0].proc, "");
+    // after stepping, watches show the running total
+    let total = p.iter().rev().find_map(|info| {
+        info.globals
+            .iter()
+            .find(|(k, _)| k == "total")
+            .map(|(_, v)| v.clone())
+    });
+    assert!(total.is_some());
+    assert_eq!(sink.0, " 6 \n");
+}
+
+#[test]
+fn debugger_breakpoints() {
+    use oxbasic_runtime::{DebugAction, Interpreter, Output};
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
+
+    struct Sink(String);
+    impl Output for Sink {
+        fn write(&mut self, s: &str) {
+            self.0.push_str(s);
+        }
+    }
+
+    let src = "x = 1\ny = 2\nz = x + y\nPrint z\n";
+    let prog = oxbasic_parser::parse(src).unwrap();
+    let mut sink = Sink(String::new());
+    let mut rt = Interpreter::new(&prog, &mut sink);
+
+    let bps: Arc<Mutex<HashSet<usize>>> = Arc::new(Mutex::new(HashSet::from([3])));
+    rt.set_breakpoints(bps);
+    let lines = std::rc::Rc::new(std::cell::RefCell::new(Vec::<usize>::new()));
+    {
+        let lines = lines.clone();
+        rt.set_debug_hook(Box::new(move |info: &oxbasic_runtime::PausedInfo| {
+            lines.borrow_mut().push(info.line);
+            DebugAction::Continue
+        }));
+    }
+    rt.run().unwrap();
+    // break-on-start (line 1), then the breakpoint on line 3
+    assert_eq!(*lines.borrow(), vec![1, 3]);
+    assert_eq!(sink.0, " 3 \n");
+}
+
+#[test]
+fn debugger_abort() {
+    use oxbasic_runtime::{DebugAction, Interpreter, Output};
+
+    struct Sink(String);
+    impl Output for Sink {
+        fn write(&mut self, s: &str) {
+            self.0.push_str(s);
+        }
+    }
+
+    let src = "For i = 1 To 1000000\n  x = i\nNext\n";
+    let prog = oxbasic_parser::parse(src).unwrap();
+    let mut sink = Sink(String::new());
+    let mut rt = Interpreter::new(&prog, &mut sink);
+    rt.set_debug_hook(Box::new(|_| DebugAction::Abort));
+    let err = rt.run().unwrap_err();
+    assert_eq!(err.number, oxbasic_runtime::DEBUG_ABORT);
+}
+

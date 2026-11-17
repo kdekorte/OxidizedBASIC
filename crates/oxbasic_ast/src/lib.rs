@@ -59,6 +59,8 @@ pub struct ConstDecl {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
+    /// Source line marker emitted before each statement (debugger support).
+    LineMarker(usize),
     Label(String),
     Dim(Vec<VarDecl>),
     Const(Vec<ConstDecl>),

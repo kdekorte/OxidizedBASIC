@@ -10,6 +10,7 @@ oxbasic_ast = { workspace = true }
 oxbasic_parser = { workspace = true }
 oxbasic_runtime = { workspace = true }
 oxbasic_ui = { workspace = true, features = ["gpui"] }
+gpui = "0.2.2"
 
 [[bin]]
 name = "oxbasic"

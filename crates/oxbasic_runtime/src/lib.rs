@@ -142,6 +142,8 @@ pub(crate) struct Frame {
     err_pos: usize,
     err_number: i32,
     err_desc: String,
+    /// Source line of the statement about to execute (debugger support).
+    current_line: usize,
 }
 
 impl Frame {
@@ -157,6 +159,7 @@ impl Frame {
             err_pos: 0,
             err_number: 0,
             err_desc: String::new(),
+            current_line: 0,
         }
     }
 
@@ -175,6 +178,7 @@ impl Frame {
             err_pos: 0,
             err_number: 0,
             err_desc: String::new(),
+            current_line: 0,
         }
     }
 }
@@ -191,7 +195,44 @@ pub struct Interpreter<'out> {
     pub(crate) option_explicit: bool,
     pub(crate) rng: Cell<u64>,
     pub(crate) depth: usize,
+    /// Debugger: source lines with breakpoints (shared with the IDE).
+    breakpoints: Option<std::sync::Arc<std::sync::Mutex<std::collections::HashSet<usize>>>>,
+    /// Debugger: pause again when execution returns to this call depth.
+    step_depth: Option<usize>,
+    /// Debugger: called when a breakpoint or step lands.
+    debug_hook: Option<Box<dyn FnMut(&PausedInfo) -> DebugAction>>,
 }
+
+/// Debugger pause notification: where execution stopped and what the
+/// variables hold (values rendered as display strings).
+#[derive(Clone, Debug)]
+pub struct PausedInfo {
+    /// 1-based source line of the statement about to execute.
+    pub line: usize,
+    /// Procedure name ("" for module-level code).
+    pub proc: String,
+    /// Current call depth (0 = module level).
+    pub depth: usize,
+    /// Local variables of the current frame: (name, display value).
+    pub locals: Vec<(String, String)>,
+    /// Module-level (global) variables: (name, display value).
+    pub globals: Vec<(String, String)>,
+}
+
+/// What the debugger tells the interpreter to do after a pause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugAction {
+    /// Run until the next breakpoint.
+    Continue,
+    /// Execute the current statement, then pause at the next statement
+    /// at the same (or shallower) call depth.
+    StepOver,
+    /// Stop the program.
+    Abort,
+}
+
+/// Trappable "execution aborted by the debugger" error number.
+pub const DEBUG_ABORT: i32 = 9998;
 
 /// Parse and run a whole program against an output sink.
 pub fn run_program(prog: &Program, out: &mut dyn Output) -> ExecResult<()> {
@@ -233,6 +274,9 @@ impl<'out> Interpreter<'out> {
             option_explicit: false,
             rng: Cell::new(0x9E3779B97F4A7C15),
             depth: 0,
+            breakpoints: None,
+            step_depth: None,
+            debug_hook: None,
         };
         it.add_program(prog);
         it
@@ -280,6 +324,65 @@ impl<'out> Interpreter<'out> {
     /// Names of every user-defined `Sub`/`Function` (for event wiring).
     pub fn proc_names(&self) -> Vec<String> {
         self.decls.iter().map(|d| d.name.clone()).collect()
+    }
+
+    /// Share the breakpoint set with a debugger (e.g. the IDE). The set
+    /// holds 1-based source line numbers and may be mutated while running.
+    pub fn set_breakpoints(
+        &mut self,
+        breakpoints: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<usize>>>,
+    ) {
+        self.breakpoints = Some(breakpoints);
+    }
+
+    /// Install the debugger pause hook. It is called whenever a
+    /// breakpoint or a pending step lands, and decides how to proceed.
+    /// Installing the hook also breaks at the first statement
+    /// ("break on start").
+    pub fn set_debug_hook(&mut self, hook: Box<dyn FnMut(&PausedInfo) -> DebugAction>) {
+        self.debug_hook = Some(hook);
+        self.step_depth = Some(0);
+    }
+
+    /// Debugger: called before each statement; blocks inside the hook.
+    fn debug_check(&mut self, f: &mut Frame) -> ExecResult<()> {
+        if self.debug_hook.is_none() {
+            return Ok(());
+        }
+        let at_breakpoint = self
+            .breakpoints
+            .as_ref()
+            .map(|b| b.lock().map(|b| b.contains(&f.current_line)).unwrap_or(false))
+            .unwrap_or(false);
+        let step_due = match self.step_depth {
+            Some(d) => self.depth <= d,
+            None => false,
+        };
+        if !at_breakpoint && !step_due {
+            return Ok(());
+        }
+        let info = PausedInfo {
+            line: f.current_line,
+            proc: f.name.clone(),
+            depth: self.depth,
+            locals: f
+                .locals
+                .iter()
+                .map(|(k, v)| (k.clone(), debug_repr(&v.borrow())))
+                .collect(),
+            globals: self
+                .globals
+                .iter()
+                .map(|(k, v)| (k.clone(), debug_repr(&v.borrow())))
+                .collect(),
+        };
+        let action = (self.debug_hook.as_mut().unwrap())(&info);
+        match action {
+            DebugAction::Continue => self.step_depth = None,
+            DebugAction::StepOver => self.step_depth = Some(self.depth),
+            DebugAction::Abort => return err(DEBUG_ABORT, "execution aborted by the debugger"),
+        }
+        Ok(())
     }
 
     /// Invoke a BASIC `Sub`/`Function` by name with evaluated argument
@@ -477,6 +580,13 @@ impl<'out> Interpreter<'out> {
                 i += 1;
                 continue;
             }
+            if let Stmt::LineMarker(l) = &stmts[i] {
+                f.current_line = *l;
+                i += 1;
+                continue;
+            }
+            // Debugger: pause on breakpoints / pending steps.
+            self.debug_check(f)?;
             match self.exec_stmt(&stmts[i], f) {
                 Ok(flow) => match flow {
                     Flow::Normal => {}
@@ -532,6 +642,7 @@ impl<'out> Interpreter<'out> {
 
     fn exec_stmt(&mut self, s: &Stmt, f: &mut Frame) -> ExecResult<Flow> {
         match s {
+            Stmt::LineMarker(_) => Ok(Flow::Normal),
             Stmt::Label(_) => Ok(Flow::Normal),
             Stmt::OptionExplicit => {
                 self.option_explicit = true;
@@ -1210,6 +1321,24 @@ fn is_integral(v: &Variant) -> bool {
         v,
         Variant::Integer(_) | Variant::Long(_) | Variant::Boolean(_) | Variant::Empty
     )
+}
+
+/// Compact debugger display of a value (for watch panes).
+pub(crate) fn debug_repr(v: &Variant) -> String {
+    match v {
+        Variant::Empty => "Empty".into(),
+        Variant::Null => "Null".into(),
+        Variant::Nothing => "Nothing".into(),
+        Variant::Boolean(b) => if *b { "True" } else { "False" }.into(),
+        Variant::Integer(x) => x.to_string(),
+        Variant::Long(x) => x.to_string(),
+        Variant::Single(x) => fmt_num(*x as f64),
+        Variant::Double(x) => fmt_num(*x),
+        Variant::Currency(x) => fmt_num(*x),
+        Variant::Date(d) => format_date(*d),
+        Variant::String(s) => format!("\"{}\"", s),
+        Variant::Array(a) => format!("[{} items]", a.borrow().data.len()),
+    }
 }
 
 fn default_for_type(ty: Option<&str>) -> Variant {
