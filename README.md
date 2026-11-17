@@ -76,7 +76,7 @@ cargo build -p oxbasic_ide
 ./target/debug/oxbasic gui examples/clickme.oxform \
                       examples/clickme.bas                      # GPUI form app
 ./target/debug/oxbasic repl                                     # immediate window
-cargo test --workspace                                          # 50 tests
+cargo test --workspace                                          # 52 tests
 ```
 
 `.oxform` layout files are JSON:

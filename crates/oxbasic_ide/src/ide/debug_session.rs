@@ -110,3 +110,75 @@ impl DebugSession {
         let _ = self.cmd_tx.send(cmd);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::channel;
+
+    #[test]
+    fn run_session_streams_output_and_finishes() {
+        let (evt_tx, evt_rx) = channel();
+        let bps = Arc::new(Mutex::new(HashSet::new()));
+        let src = "For i = 1 To 3\n  Print i;\nNext\nPrint \"\"\n".to_string();
+        let session = DebugSession::start(src, bps, evt_tx);
+        session.send(DebugCommand::Run);
+
+        let mut output = String::new();
+        let mut finished = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !finished && std::time::Instant::now() < deadline {
+            match evt_rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                Ok(DebugEvent::Output(s)) => output.push_str(&s),
+                Ok(DebugEvent::Finished(_)) => finished = true,
+                Ok(DebugEvent::Failed(e)) => panic!("parse failed: {}", e),
+                Ok(DebugEvent::Paused(_)) => session.send(DebugCommand::Continue),
+                Err(_) => {}
+            }
+        }
+        assert!(finished, "session did not finish");
+        assert_eq!(output, " 1  2  3 \n");
+    }
+
+    #[test]
+    fn step_session_pauses_at_each_statement() {
+        let (evt_tx, evt_rx) = channel();
+        let bps = Arc::new(Mutex::new(HashSet::new()));
+        let src = "x = 1\nx = 2\n".to_string();
+        let session = DebugSession::start(src, bps, evt_tx);
+        session.send(DebugCommand::Step);
+
+        // first pause: line 1
+        match evt_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            DebugEvent::Paused(info) => assert_eq!(info.line, 1),
+            other => panic!("expected pause, got {:?}", other.kind_name()),
+        }
+        session.send(DebugCommand::StepOver);
+        // second pause: line 2 — with the updated variable
+        match evt_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            DebugEvent::Paused(info) => {
+                assert_eq!(info.line, 2);
+                assert!(info.globals.iter().any(|(k, v)| k == "x" && v == "1"));
+            }
+            other => panic!("expected pause, got {:?}", other.kind_name()),
+        }
+        session.send(DebugCommand::Continue);
+        // program terminates
+        match evt_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            DebugEvent::Finished(_) => {}
+            other => panic!("expected finish, got {:?}", other.kind_name()),
+        }
+    }
+
+    impl DebugEvent {
+        fn kind_name(&self) -> &'static str {
+            match self {
+                DebugEvent::Paused(_) => "Paused",
+                DebugEvent::Output(_) => "Output",
+                DebugEvent::Finished(_) => "Finished",
+                DebugEvent::Failed(_) => "Failed",
+            }
+        }
+    }
+}
+

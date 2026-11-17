@@ -60,10 +60,13 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
                 }),
                 ..Default::default()
             },
-            |_, cx| {
+            |win, cx| {
                 let bas = bas_path.clone();
                 let oxform = oxform_path.clone();
-                cx.new(|cx| Ide::new(bas.as_deref(), oxform.as_deref(), cx))
+                let entity = cx.new(|cx| Ide::new(bas.as_deref(), oxform.as_deref(), cx));
+                // start with the editor focused so typing works immediately
+                win.focus(&entity.read(cx).editor_focus);
+                entity
             },
         )
         .expect("failed to open IDE window");
@@ -136,7 +139,7 @@ Print \"Total = \" & CStr(Total)
             None => default_form(),
         };
 
-        let ide = Ide {
+        let mut ide = Ide {
             bas_path: bas_path.map(|s| s.to_string()),
             oxform_path: oxform_path.map(|s| s.to_string()),
             lines,
@@ -156,6 +159,17 @@ Print \"Total = \" & CStr(Total)
             evt_rx,
             evt_tx,
         };
+
+        // Start with the editor focused so typing works immediately, and
+        // leave a hint in the output pane.
+        ide.output.push_str(
+            "oxbasic IDE\n\
+             \u{2022} click in the editor and type to edit code\n\
+             \u{2022} click a line number to toggle a breakpoint\n\
+             \u{2022} Run executes the program (output appears here); Step pauses at each statement\n\
+             \u{2022} in the designer, click a control to select it, drag to move, edit properties below\n\
+             \u{2022} Save Form / Save Code write .oxform / .bas files\n",
+        );
 
         // Poll debug events and pump them into the entity.
         let rx = ide.evt_rx.clone();
@@ -632,12 +646,9 @@ impl Ide {
             }))
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(|this: &mut Ide, _ev: &MouseDownEvent, _win, _cx| {
-                    this.status = if this.session.is_some() {
-                        this.status.clone()
-                    } else {
-                        "Ready".to_string()
-                    };
+                cx.listener(|this: &mut Ide, _ev: &MouseDownEvent, win, _cx| {
+                    // click-to-type: focus the editor
+                    win.focus(&this.editor_focus);
                 }),
             )
             .child(list)
