@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/oxbasic_ast",
+    "crates/oxbasic_parser",
+    "crates/oxbasic_runtime",
+    "crates/oxbasic_ui",
+    "crates/oxbasic_ide",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+oxbasic_ast = { path = "crates/oxbasic_ast" }
+oxbasic_parser = { path = "crates/oxbasic_parser" }
+oxbasic_runtime = { path = "crates/oxbasic_runtime" }
+pest = "2.7"
+pest_derive = "2.7"
+
+[profile.release]
+lto = true

@@ -1,0 +1,8 @@
+[package]
+name = "oxbasic_ast"
+description = "AST data structures & symbol definitions for OxidizedBASIC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

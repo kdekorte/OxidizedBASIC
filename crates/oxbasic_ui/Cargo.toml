@@ -1,0 +1,8 @@
+[package]
+name = "oxbasic_ui"
+description = "GPUI & GPUI Kit widget mapping runtime engine (Phase 2 bridge)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

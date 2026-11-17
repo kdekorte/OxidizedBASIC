@@ -1,0 +1,10 @@
+[package]
+name = "oxbasic_runtime"
+description = "Interpreter, Variant system, stdlib for OxidizedBASIC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oxbasic_ast = { workspace = true }
+oxbasic_parser = { workspace = true }

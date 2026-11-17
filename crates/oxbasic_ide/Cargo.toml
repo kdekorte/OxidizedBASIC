@@ -1,0 +1,16 @@
+[package]
+name = "oxbasic_ide"
+description = "OxidizedBASIC desktop IDE application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oxbasic_ast = { workspace = true }
+oxbasic_parser = { workspace = true }
+oxbasic_runtime = { workspace = true }
+# oxbasic_ui joins this binary in Phase 2 when the GPUI window opens.
+
+[[bin]]
+name = "oxbasic"
+path = "src/main.rs"

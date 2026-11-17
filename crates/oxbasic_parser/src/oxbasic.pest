@@ -1,0 +1,227 @@
+// OxidizedBASIC grammar — classic VB6/VBA statement subset (Phase 1).
+// Case-insensitive keywords, line-oriented statements, VB operator
+// precedence. WHITESPACE excludes newlines so statement boundaries survive.
+// Every keyword is wrapped in an atomic `kw_*` rule so the !IdentChar
+// boundary guard is checked immediately after the keyword (implicit
+// whitespace skipping would otherwise break the guard).
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE = _{ "\r\n" | "\n" | "\r" }
+COMMENT = _{ ( "'" | kw_rem ) ~ (!NEWLINE ~ ANY)* }
+
+kw_rem = @{ ^"rem" ~ !IdentChar }
+kw_if = @{ ^"if" ~ !IdentChar }
+kw_then = @{ ^"then" ~ !IdentChar }
+kw_else = @{ ^"else" ~ !IdentChar }
+kw_elseif = @{ ^"elseif" ~ !IdentChar }
+kw_end = @{ ^"end" ~ !IdentChar }
+kw_select = @{ ^"select" ~ !IdentChar }
+kw_case = @{ ^"case" ~ !IdentChar }
+kw_for = @{ ^"for" ~ !IdentChar }
+kw_each = @{ ^"each" ~ !IdentChar }
+kw_in = @{ ^"in" ~ !IdentChar }
+kw_to = @{ ^"to" ~ !IdentChar }
+kw_step = @{ ^"step" ~ !IdentChar }
+kw_next = @{ ^"next" ~ !IdentChar }
+kw_do = @{ ^"do" ~ !IdentChar }
+kw_loop = @{ ^"loop" ~ !IdentChar }
+kw_while = @{ ^"while" ~ !IdentChar }
+kw_until = @{ ^"until" ~ !IdentChar }
+kw_wend = @{ ^"wend" ~ !IdentChar }
+kw_sub = @{ ^"sub" ~ !IdentChar }
+kw_function = @{ ^"function" ~ !IdentChar }
+kw_property = @{ ^"property" ~ !IdentChar }
+kw_exit = @{ ^"exit" ~ !IdentChar }
+kw_dim = @{ ^"dim" ~ !IdentChar }
+kw_static = @{ ^"static" ~ !IdentChar }
+kw_public = @{ ^"public" ~ !IdentChar }
+kw_private = @{ ^"private" ~ !IdentChar }
+kw_friend = @{ ^"friend" ~ !IdentChar }
+kw_global = @{ ^"global" ~ !IdentChar }
+kw_const = @{ ^"const" ~ !IdentChar }
+kw_set = @{ ^"set" ~ !IdentChar }
+kw_call = @{ ^"call" ~ !IdentChar }
+kw_goto = @{ ^"goto" ~ !IdentChar }
+kw_on = @{ ^"on" ~ !IdentChar }
+kw_error = @{ ^"error" ~ !IdentChar }
+kw_resume = @{ ^"resume" ~ !IdentChar }
+kw_option = @{ ^"option" ~ !IdentChar }
+kw_explicit = @{ ^"explicit" ~ !IdentChar }
+kw_new = @{ ^"new" ~ !IdentChar }
+kw_as = @{ ^"as" ~ !IdentChar }
+kw_byval = @{ ^"byval" ~ !IdentChar }
+kw_byref = @{ ^"byref" ~ !IdentChar }
+kw_optional = @{ ^"optional" ~ !IdentChar }
+kw_paramarray = @{ ^"paramarray" ~ !IdentChar }
+kw_debug = @{ ^"debug" ~ !IdentChar }
+kw_print = @{ ^"print" ~ !IdentChar }
+kw_mod = @{ ^"mod" ~ !IdentChar }
+kw_and = @{ ^"and" ~ !IdentChar }
+kw_or = @{ ^"or" ~ !IdentChar }
+kw_not = @{ ^"not" ~ !IdentChar }
+kw_xor = @{ ^"xor" ~ !IdentChar }
+kw_eqv = @{ ^"eqv" ~ !IdentChar }
+kw_imp = @{ ^"imp" ~ !IdentChar }
+kw_is = @{ ^"is" ~ !IdentChar }
+kw_true = @{ ^"true" ~ !IdentChar }
+kw_false = @{ ^"false" ~ !IdentChar }
+kw_empty = @{ ^"empty" ~ !IdentChar }
+kw_null = @{ ^"null" ~ !IdentChar }
+kw_nothing = @{ ^"nothing" ~ !IdentChar }
+
+Program = { SOI ~ Line* ~ EOI }
+Line = { LineContent? ~ NEWLINE | LineContent ~ &EOI }
+Lines = _{ Line* }
+LineContent = _{ LabelDef ~ StatementList? | StatementList }
+StatementList = { Statement ~ (":" ~ Statement)* }
+LabelDef = { !ReservedKw ~ Ident ~ ":" }
+
+
+// Identifiers that may never start a bare statement call or label;
+// without this guard block keywords (Case, Else, Loop, ...) would be
+// swallowed as zero-argument procedure calls.
+ReservedKw = _{
+      kw_if | kw_then | kw_else | kw_elseif | kw_end | kw_select | kw_case
+    | kw_for | kw_each | kw_in | kw_to | kw_step | kw_next
+    | kw_do | kw_loop | kw_while | kw_until | kw_wend
+    | kw_sub | kw_function | kw_exit | kw_dim | kw_const | kw_set
+    | kw_call | kw_goto | kw_on | kw_error | kw_resume | kw_option
+    | kw_mod | kw_and | kw_or | kw_not | kw_xor | kw_eqv | kw_imp
+    | kw_is | kw_new | kw_byval | kw_byref
+    | kw_public | kw_private | kw_static | kw_global | kw_optional | kw_paramarray
+}
+
+Statement = _{
+      OptionStmt
+    | IfStmt
+    | SelectStmt
+    | ForEachStmt
+    | ForStmt
+    | DoStmt
+    | WhileStmt
+    | SubDecl
+    | FuncDecl
+    | DimStmt
+    | ConstStmt
+    | SetStmt
+    | OnErrorStmt
+    | ResumeStmt
+    | ExitStmt
+    | GoToStmt
+    | EndStmt
+    | PrintStmt
+    | LetStmt
+    | CallStmt
+    | ExprCallStmt
+}
+
+OptionStmt = { kw_option ~ kw_explicit }
+
+IfStmt = { kw_if ~ Expr ~ kw_then ~ (BlockIf | LineIf) }
+BlockIf = { NEWLINE ~ Lines ~ ElseIfBlock* ~ ElseBlock? ~ kw_end ~ kw_if }
+ElseIfBlock = { kw_elseif ~ Expr ~ kw_then ~ NEWLINE ~ Lines }
+ElseBlock = { kw_else ~ NEWLINE ~ Lines }
+LineIf = { StatementList ~ (kw_else ~ StatementList)? }
+
+SelectStmt = { kw_select ~ kw_case ~ Expr ~ NEWLINE ~ Lines ~ CaseArm+ ~ kw_end ~ kw_select }
+CaseArm = _{ CaseElseBlock | CaseBlock }
+CaseBlock = { kw_case ~ CaseItems ~ NEWLINE ~ Lines }
+CaseElseBlock = { kw_case ~ kw_else ~ NEWLINE ~ Lines }
+CaseItems = { CaseItem ~ ("," ~ CaseItem)* }
+CaseItem = { kw_is ~ CompOp ~ Expr | Expr ~ (kw_to ~ Expr)? }
+
+ForEachStmt = { kw_for ~ kw_each ~ Ident ~ kw_in ~ Expr ~ NEWLINE ~ Lines ~ kw_next ~ Ident? }
+ForStmt = { kw_for ~ Ident ~ (kw_as ~ TypeName)? ~ "=" ~ Expr ~ kw_to ~ Expr ~ (kw_step ~ Expr)? ~ NEWLINE ~ Lines ~ kw_next ~ Ident? }
+
+DoStmt = { kw_do ~ (DoPre | DoPost) }
+DoCond = { (kw_while | kw_until) ~ Expr }
+DoPre = { DoCond ~ NEWLINE ~ Lines ~ kw_loop }
+DoPost = { NEWLINE ~ Lines ~ kw_loop ~ DoCond? }
+WhileStmt = { kw_while ~ Expr ~ NEWLINE ~ Lines ~ kw_wend }
+
+SubDecl = { Visibility? ~ kw_sub ~ Ident ~ Params? ~ NEWLINE ~ Lines ~ kw_end ~ kw_sub }
+FuncDecl = { Visibility? ~ kw_function ~ Ident ~ Params? ~ (kw_as ~ TypeName)? ~ NEWLINE ~ Lines ~ kw_end ~ kw_function }
+Visibility = _{ (kw_public | kw_private | kw_friend) }
+
+Params = { "(" ~ Param? ~ ("," ~ Param)* ~ ")" }
+Param = { ParamMod* ~ Ident ~ ("(" ~ ")")? ~ (kw_as ~ TypeName)? ~ ("=" ~ Expr)? }
+ParamMod = _{ (kw_optional | kw_byval | kw_byref | kw_paramarray) }
+
+DimStmt = { (kw_dim | kw_static | kw_public | kw_private | kw_global) ~ VarDecl ~ ("," ~ VarDecl)* }
+VarDecl = { Ident ~ ArrayDims? ~ (kw_as ~ kw_new? ~ TypeName)? }
+ArrayDims = { "(" ~ (Expr ~ ("," ~ Expr)*)? ~ ")" }
+TypeName = { Ident ~ ("." ~ Ident)* }
+
+ConstStmt = { kw_const ~ ConstDecl ~ ("," ~ ConstDecl)* }
+ConstDecl = { Ident ~ "=" ~ Expr }
+
+SetStmt = { kw_set ~ PostfixExpr ~ "=" ~ Expr }
+
+OnErrorStmt = { kw_on ~ kw_error ~ (OnErrGoto | OnErrResumeNext) }
+OnErrGoto = { kw_goto ~ (^"0" | Ident) }
+OnErrResumeNext = { kw_resume ~ kw_next }
+
+ResumeStmt = { kw_resume ~ (ResumeNextKw | Ident)? }
+ResumeNextKw = { kw_next }
+
+ExitStmt = { kw_exit ~ (kw_sub | kw_function | kw_property | kw_for | kw_do) }
+GoToStmt = { kw_goto ~ Ident }
+
+// ---- Expressions (VB precedence: arithmetic > & > comparison > Not > And > Or > Xor > Eqv > Imp)
+Expr = { ImpExpr }
+ImpExpr = { EqvExpr ~ (kw_imp ~ EqvExpr)* }
+EqvExpr = { XorExpr ~ (kw_eqv ~ XorExpr)* }
+XorExpr = { OrExpr ~ (kw_xor ~ OrExpr)* }
+OrExpr = { AndExpr ~ (kw_or ~ AndExpr)* }
+AndExpr = { NotExpr ~ (kw_and ~ NotExpr)* }
+NotExpr = { kw_not ~ NotExpr | CmpExpr }
+CmpExpr = { ConcatExpr ~ (CompOp ~ ConcatExpr)* }
+CompOp = { ">=" | "<=" | "<>" | "=" | "<" | ">" }
+ConcatExpr = { AddExpr ~ ("&" ~ AddExpr)* }
+AddExpr = { MulExpr ~ (AddOp ~ MulExpr)* }
+AddOp = { "+" | "-" }
+MulExpr = { IntDivExpr ~ (MulOp ~ IntDivExpr)* }
+MulOp = { "*" | "/" }
+IntDivExpr = { ModExpr ~ ("\\" ~ ModExpr)* }
+ModExpr = { PowExpr ~ (kw_mod ~ PowExpr)* }
+PowExpr = { Unary ~ ("^" ~ Unary)* }
+Unary = { Sign ~ Unary | PostfixExpr }
+Sign = { "+" | "-" }
+
+PostfixExpr = { PrimaryExpr ~ Postfix* }
+Postfix = _{ ArgParens | MemberAccess }
+ArgParens = { "(" ~ (Expr ~ ("," ~ Expr)*)? ~ ")" }
+MemberAccess = { "." ~ Ident }
+
+PrimaryExpr = _{
+      StringLit
+    | Number
+    | KeywordLit
+    | "(" ~ Expr ~ ")"
+    | Ident
+}
+KeywordLit = { kw_true | kw_false | kw_empty | kw_null | kw_nothing }
+
+StringLit = @{ "\"" ~ StringChar* ~ "\"" }
+StringChar = _{ "\"\"" | !("\"" | NEWLINE) ~ ANY }
+Number = @{ (^"&h" ~ HexDigits) | (^"&o" ~ OctDigits) | DecNum }
+HexDigits = { HEX_DIGIT+ }
+OctDigits = { OctDigit+ }
+OctDigit = _{ '0'..'7' }
+DecNum = @{ (Digit+ ~ ("." ~ Digit*)? | "." ~ Digit+) ~ Exp? }
+Exp = @{ ^"e" ~ ("+" | "-")? ~ Digit+ }
+Digit = _{ '0'..'9' }
+Ident = @{ (ASCII_ALPHA | "_") ~ IdentChar* }
+IdentChar = _{ ASCII_ALPHANUMERIC | "_" }
+
+EndStmt = { kw_end }
+
+PrintStmt = { (kw_debug ~ ".")? ~ kw_print ~ PrintArgs? }
+PrintArgs = { Expr ~ (PSep ~ Expr)* ~ PSep? }
+PSep = { ";" | "," }
+
+LetStmt = { PostfixExpr ~ "=" ~ Expr }
+CallStmt = { kw_call ~ PostfixExpr }
+ExprCallStmt = { !ReservedKw ~ Ident ~ MemberTail ~ BareArgs? }
+MemberTail = { ("." ~ Ident)* }
+BareArgs = _{ Expr ~ ("," ~ Expr)* }
