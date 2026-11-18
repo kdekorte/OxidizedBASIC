@@ -1,6 +1,6 @@
 //! End-to-end tests: parse + run BASIC programs and check the output.
 
-use oxbasic_runtime::{Output, run_source};
+use oxbasic_runtime::{run_source, Output};
 
 struct Buf(String);
 
@@ -25,7 +25,10 @@ fn hello_world() {
 fn arithmetic_and_precedence() {
     assert_eq!(run("Print 2 + 3 * 4 ^ 2\n"), " 50 \n");
     // comma pads the print position to a multiple of 14
-    assert_eq!(run("Print 10 \\ 3, 10 Mod 3\n"), format!(" 3 {} 1 \n", " ".repeat(11)));
+    assert_eq!(
+        run("Print 10 \\ 3, 10 Mod 3\n"),
+        format!(" 3 {} 1 \n", " ".repeat(11))
+    );
     assert_eq!(run("Print 7 / 2\n"), " 3.5 \n");
 }
 
@@ -239,7 +242,8 @@ fn debugger_steps_and_watches() {
         }
     }
 
-    let src = "Dim Total As Long\nTotal = 0\nFor i = 1 To 3\n  Total = Total + i\nNext\nPrint Total\n";
+    let src =
+        "Dim Total As Long\nTotal = 0\nFor i = 1 To 3\n  Total = Total + i\nNext\nPrint Total\n";
     let prog = oxbasic_parser::parse(src).unwrap();
     let mut sink = Sink(String::new());
     let mut rt = Interpreter::new(&prog, &mut sink);
@@ -331,4 +335,3 @@ fn debugger_abort() {
     let err = rt.run().unwrap_err();
     assert_eq!(err.number, oxbasic_runtime::DEBUG_ABORT);
 }
-

@@ -90,6 +90,123 @@ fn every_toolbox_button_adds_its_control_with_vb6_defaults(cx: &mut gpui::TestAp
     }
 }
 
+/// Simulate a left-button drag from `from` by `(dx, dy)` px.
+pub(super) fn drag_by(
+    cx: &mut gpui::VisualTestContext,
+    from: gpui::Point<gpui::Pixels>,
+    dx: f32,
+    dy: f32,
+) {
+    let to = gpui::Point::new(from.x + px(dx), from.y + px(dy));
+    cx.simulate_event(gpui::MouseDownEvent {
+        button: gpui::MouseButton::Left,
+        position: from,
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseMoveEvent {
+        position: to,
+        pressed_button: Some(gpui::MouseButton::Left),
+        modifiers: gpui::Modifiers::none(),
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        button: gpui::MouseButton::Left,
+        position: to,
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+    });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn resize_handles_resize_the_selected_control(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    ide.update(cx, |ide, cx| {
+        ide.add_control(ControlKind::CommandButton);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let before = ide.read_with(cx, |ide, _| {
+        let r = ide.form.controls[0].rect;
+        (r.left, r.top, r.width, r.height)
+    });
+
+    // select the control by clicking its body, so the handles appear
+    let body = cx
+        .debug_bounds(sel("designer-control-0".into()))
+        .expect("control is drawn");
+    cx.simulate_click(body.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.selected, Some(0), "the click selects the control");
+    });
+
+    // drag the south-east handle 30 right and 10 down: it must grow the
+    // control and move no edges
+    let se = cx
+        .debug_bounds(sel("designer-handle-0-1-1".into()))
+        .expect("SE handle is drawn");
+    drag_by(cx, se.center(), 30.0, 10.0);
+    ide.read_with(cx, |ide, _| {
+        let r = ide.form.controls[0].rect;
+        assert_eq!(
+            (r.left, r.top),
+            (before.0, before.1),
+            "the SE handle moves no edges"
+        );
+        assert_eq!(
+            (r.width, r.height),
+            (before.2 + 30.0, before.3 + 10.0),
+            "the SE handle grows the control"
+        );
+    });
+
+    // then the north-west handle 8 left and 4 up: it moves left/top and
+    // keeps the bottom-right corner fixed
+    let before = ide.read_with(cx, |ide, _| {
+        let r = ide.form.controls[0].rect;
+        (r.left, r.top, r.width, r.height)
+    });
+    let nw = cx
+        .debug_bounds(sel("designer-handle-0--1--1".into()))
+        .expect("NW handle is drawn");
+    drag_by(cx, nw.center(), -8.0, -4.0);
+    ide.read_with(cx, |ide, _| {
+        let r = ide.form.controls[0].rect;
+        assert_eq!(
+            (r.left, r.top),
+            (before.0 - 8.0, before.1 - 4.0),
+            "the NW handle moves the top-left corner"
+        );
+        assert_eq!(
+            (r.width, r.height),
+            (before.2 + 8.0, before.3 + 4.0),
+            "the NW handle keeps the bottom-right corner fixed"
+        );
+    });
+}
+
+#[gpui::test]
+fn the_forms_own_handles_resize_the_form(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    cx.run_until_parked();
+
+    // with no control selected the form is selected (VB's convention here);
+    // drag its bottom-right handle 50 right and 40 down
+    let se = cx
+        .debug_bounds(sel("designer-handle-form-1-1".into()))
+        .expect("the form's SE handle is drawn");
+    drag_by(cx, se.center(), 50.0, 40.0);
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(
+            (ide.form.width, ide.form.height),
+            (400.0 + 50.0, 500.0 + 40.0),
+            "the SE handle grows the form"
+        );
+    });
+}
+
 #[gpui::test]
 fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppContext) {
     let (ide, cx) = ide_window(cx);

@@ -71,7 +71,6 @@ pub struct VbError {
     pub description: String,
 }
 
-
 // ---------------------------------------------------------------------------
 // Output abstraction (console / test buffers / future GPUI bridge)
 // ---------------------------------------------------------------------------
@@ -287,7 +286,8 @@ impl<'out> Interpreter<'out> {
         for item in &prog.items {
             match item {
                 Item::Proc(p) => {
-                    self.proc_index.insert(p.name.to_lowercase(), self.decls.len());
+                    self.proc_index
+                        .insert(p.name.to_lowercase(), self.decls.len());
                     self.decls.push(Rc::new(p.clone()));
                 }
                 Item::Stmt(s) => self.top_level.push(s.clone()),
@@ -310,7 +310,8 @@ impl<'out> Interpreter<'out> {
             .iter()
             .filter_map(|i| match i {
                 Item::Proc(p) => {
-                    self.proc_index.insert(p.name.to_lowercase(), self.decls.len());
+                    self.proc_index
+                        .insert(p.name.to_lowercase(), self.decls.len());
                     self.decls.push(Rc::new(p.clone()));
                     None
                 }
@@ -318,7 +319,9 @@ impl<'out> Interpreter<'out> {
             })
             .collect();
         let mut f = Frame::main();
-        self.exec_block(&stmts, &mut f).map(|_| ()).map_err(|e| e.to_string())
+        self.exec_block(&stmts, &mut f)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     /// Names of every user-defined `Sub`/`Function` (for event wiring).
@@ -352,7 +355,11 @@ impl<'out> Interpreter<'out> {
         let at_breakpoint = self
             .breakpoints
             .as_ref()
-            .map(|b| b.lock().map(|b| b.contains(&f.current_line)).unwrap_or(false))
+            .map(|b| {
+                b.lock()
+                    .map(|b| b.contains(&f.current_line))
+                    .unwrap_or(false)
+            })
             .unwrap_or(false);
         let step_due = match self.step_depth {
             Some(d) => self.depth <= d,
@@ -415,7 +422,10 @@ impl<'out> Interpreter<'out> {
                 callee.locals.insert(
                     p.name.to_lowercase(),
                     Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(
-                        VbArray { dims: vec![n], data: items },
+                        VbArray {
+                            dims: vec![n],
+                            data: items,
+                        },
                     ))))),
                 );
                 break;
@@ -559,7 +569,6 @@ fn builtin_constants() -> HashMap<String, Variant> {
     c
 }
 
-
 // ---------------------------------------------------------------------------
 // Statement execution
 // ---------------------------------------------------------------------------
@@ -590,9 +599,7 @@ impl<'out> Interpreter<'out> {
             match self.exec_stmt(&stmts[i], f) {
                 Ok(flow) => match flow {
                     Flow::Normal => {}
-                    Flow::ExitDo | Flow::ExitFor | Flow::ExitProc | Flow::Halt => {
-                        return Ok(flow)
-                    }
+                    Flow::ExitDo | Flow::ExitFor | Flow::ExitProc | Flow::Halt => return Ok(flow),
                     Flow::Goto(l) => match labels.get(&l.to_lowercase()) {
                         Some(&j) => {
                             i = j;
@@ -638,7 +645,6 @@ impl<'out> Interpreter<'out> {
         }
         Ok(Flow::Normal)
     }
-
 
     fn exec_stmt(&mut self, s: &Stmt, f: &mut Frame) -> ExecResult<Flow> {
         match s {
@@ -694,7 +700,11 @@ impl<'out> Interpreter<'out> {
                     None => Ok(Flow::Normal),
                 }
             }
-            Stmt::Select { expr, arms, else_body } => {
+            Stmt::Select {
+                expr,
+                arms,
+                else_body,
+            } => {
                 let subject = self.eval(expr, f)?;
                 for arm in arms {
                     let mut hit = false;
@@ -732,7 +742,10 @@ impl<'out> Interpreter<'out> {
                 ResumeKind::Next => Flow::ResumeNext,
                 ResumeKind::Label(l) => Flow::ResumeLabel(l.clone()),
             }),
-            Stmt::Print { items, trailing_sep } => {
+            Stmt::Print {
+                items,
+                trailing_sep,
+            } => {
                 self.exec_print(items, *trailing_sep, f)?;
                 Ok(Flow::Normal)
             }
@@ -744,7 +757,12 @@ impl<'out> Interpreter<'out> {
         }
     }
 
-    fn case_matches(&mut self, subject: &Variant, item: &CaseItem, f: &mut Frame) -> ExecResult<bool> {
+    fn case_matches(
+        &mut self,
+        subject: &Variant,
+        item: &CaseItem,
+        f: &mut Frame,
+    ) -> ExecResult<bool> {
         match item {
             CaseItem::Value(e) => {
                 let v = self.eval(e, f)?;
@@ -763,12 +781,17 @@ impl<'out> Interpreter<'out> {
     }
 }
 
-
 /// Loop statements, split out to keep `exec_stmt` manageable.
 impl<'out> Interpreter<'out> {
     fn exec_loop_stmt(&mut self, s: &Stmt, f: &mut Frame) -> ExecResult<Flow> {
         match s {
-            Stmt::For { var, start, end, step, body } => {
+            Stmt::For {
+                var,
+                start,
+                end,
+                step,
+                body,
+            } => {
                 let sv = self.eval(start, f)?;
                 let ev = self.eval(end, f)?;
                 let stv = match step {
@@ -860,7 +883,6 @@ impl<'out> Interpreter<'out> {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Assignment, Print, Calls
 // ---------------------------------------------------------------------------
@@ -892,7 +914,10 @@ impl<'out> Interpreter<'out> {
                         }
                         // auto-create a dynamic array
                         let rc = Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(
-                            VbArray { dims: vec![], data: vec![] },
+                            VbArray {
+                                dims: vec![],
+                                data: vec![],
+                            },
                         )))));
                         let ln = name.to_lowercase();
                         if f.is_main {
@@ -938,7 +963,12 @@ impl<'out> Interpreter<'out> {
         }
     }
 
-    fn exec_print(&mut self, items: &[PrintItem], trailing_sep: bool, f: &mut Frame) -> ExecResult<()> {
+    fn exec_print(
+        &mut self,
+        items: &[PrintItem],
+        trailing_sep: bool,
+        f: &mut Frame,
+    ) -> ExecResult<()> {
         let mut line = String::new();
         for item in items {
             let v = self.eval(&item.expr, f)?;
@@ -1010,10 +1040,12 @@ impl<'out> Interpreter<'out> {
                 }
             }
         }
-        err(424, "object required (COM/class objects arrive in a later phase)")
+        err(
+            424,
+            "object required (COM/class objects arrive in a later phase)",
+        )
     }
 }
-
 
 /// Call a user procedure or builtin. Returns the function value.
 impl<'out> Interpreter<'out> {
@@ -1044,7 +1076,10 @@ impl<'out> Interpreter<'out> {
                     callee.locals.insert(
                         p.name.to_lowercase(),
                         Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(
-                            VbArray { dims: vec![items.len()], data: items },
+                            VbArray {
+                                dims: vec![items.len()],
+                                data: items,
+                            },
                         ))))),
                     );
                     break;
@@ -1057,10 +1092,13 @@ impl<'out> Interpreter<'out> {
                         Some(d) => self.eval(d, f)?,
                         None => Variant::Empty,
                     };
-                    callee.locals
+                    callee
+                        .locals
                         .insert(p.name.to_lowercase(), Rc::new(RefCell::new(v)));
                     if let Some(t) = &p.ty {
-                        callee.local_types.insert(p.name.to_lowercase(), t.to_lowercase());
+                        callee
+                            .local_types
+                            .insert(p.name.to_lowercase(), t.to_lowercase());
                     }
                     continue;
                 }
@@ -1099,12 +1137,15 @@ impl<'out> Interpreter<'out> {
                             Some(t) => coerce_typed(&v, t)?,
                             None => v,
                         };
-                        callee.locals
+                        callee
+                            .locals
                             .insert(p.name.to_lowercase(), Rc::new(RefCell::new(v)));
                     }
                 }
                 if let Some(t) = &p.ty {
-                    callee.local_types.insert(p.name.to_lowercase(), t.to_lowercase());
+                    callee
+                        .local_types
+                        .insert(p.name.to_lowercase(), t.to_lowercase());
                 }
             }
             self.depth += 1;
@@ -1123,7 +1164,6 @@ impl<'out> Interpreter<'out> {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Expression evaluation
@@ -1145,9 +1185,7 @@ impl<'out> Interpreter<'out> {
             Expr::Call { name, args } => {
                 // Array element read or procedure call.
                 let ln = name.to_lowercase();
-                if !self.proc_index.contains_key(&ln)
-                    && !stdlib::is_builtin(&ln)
-                    && args.len() == 1
+                if !self.proc_index.contains_key(&ln) && !stdlib::is_builtin(&ln) && args.len() == 1
                 {
                     if let Some(rc) = self.lookup_rc(f, name) {
                         let borrowed = rc.borrow();
@@ -1213,7 +1251,6 @@ impl<'out> Interpreter<'out> {
         Ok(Variant::Empty)
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Variant coercions
@@ -1343,9 +1380,7 @@ pub(crate) fn debug_repr(v: &Variant) -> String {
 
 fn default_for_type(ty: Option<&str>) -> Variant {
     match ty {
-        Some(t) if t.to_ascii_lowercase().contains("string") => {
-            Variant::String(String::new())
-        }
+        Some(t) if t.to_ascii_lowercase().contains("string") => Variant::String(String::new()),
         Some(t) if t.to_ascii_lowercase().contains("boolean") => Variant::Boolean(false),
         Some(t) if t.to_ascii_lowercase().contains("date") => Variant::Date(0.0),
         _ => Variant::Empty,
@@ -1368,7 +1403,6 @@ pub(crate) fn coerce_typed(v: &Variant, ty: &str) -> ExecResult<Variant> {
         _ => v.clone(), // variant / object / unknown
     })
 }
-
 
 // ---------------------------------------------------------------------------
 // Operators
@@ -1412,7 +1446,11 @@ fn binary_op(op: &BinaryOp, l: &Variant, r: &Variant) -> ExecResult<Variant> {
     use BinaryOp::*;
     match op {
         Eq | Ne | Lt | Gt | Le | Ge => Ok(Variant::Boolean(compare(l, r, *op)?)),
-        Concat => Ok(Variant::String(format!("{}{}", to_string(l)?, to_string(r)?))),
+        Concat => Ok(Variant::String(format!(
+            "{}{}",
+            to_string(l)?,
+            to_string(r)?
+        ))),
         Add => {
             if let (Variant::String(a), Variant::String(b)) = (l, r) {
                 return Ok(Variant::String(format!("{}{}", a, b)));
@@ -1507,7 +1545,6 @@ fn binary_op(op: &BinaryOp, l: &Variant, r: &Variant) -> ExecResult<Variant> {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Date helpers (VB serial dates: day 0 = 1899-12-30)
 // ---------------------------------------------------------------------------
@@ -1556,4 +1593,3 @@ pub(crate) fn format_date(serial: f64) -> String {
         format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, hh, mm, ss)
     }
 }
-

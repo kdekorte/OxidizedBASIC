@@ -184,7 +184,7 @@ pub struct Ide {
     // form designer
     form: FormSpec,
     selected: Option<usize>,
-    drag: Option<(usize, f32, f32)>, // control idx, last pointer position
+    drag: Option<DesignDrag>, // moving or resizing a control, with the last pointer position
     // property inspector buffers: (control idx or FORM_IDX, prop) -> live text
     prop_bufs: HashMap<(usize, &'static str), String>,
     /// one focus handle per inspector field, so keystrokes always edit the
@@ -1198,11 +1198,13 @@ impl Render for Ide {
             .track_focus(&self.designer_focus)
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _win, cx| {
                 this.update_scrollbar_drag(ev, cx);
+                this.update_designer_drag(ev, cx);
             }))
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _ev: &gpui::MouseUpEvent, _win, _cx| {
                     this.scrollbar_drag = None;
+                    this.drag = None;
                 }),
             )
             .flex()
@@ -1870,8 +1872,11 @@ impl Ide {
                                 this.drag = None;
                                 this.open_default_event(Some(idx), cx);
                             } else if !is_timer || this.form.controls[idx].rect.width > 0.0 {
-                                this.drag =
-                                    Some((idx, f32::from(ev.position.x), f32::from(ev.position.y)));
+                                this.drag = Some(DesignDrag::Move(
+                                    idx,
+                                    f32::from(ev.position.x),
+                                    f32::from(ev.position.y),
+                                ));
                             }
                             cx.notify();
                         }),
@@ -1892,6 +1897,93 @@ impl Ide {
                         .border_color(rgb(ACCENT))
                         .border_dashed(),
                 );
+                // ...and VB's eight resize handles on it. A Timer has none:
+                // its designer icon is fixed-size.
+                if !is_timer {
+                    for h in ResizeHandle::ALL {
+                        let (hx, hy) = h.center(&c.rect);
+                        let sel_name = format!("designer-handle-{}-{}-{}", idx, h.dx, h.dy);
+                        form_area = form_area.child(
+                            div()
+                                .absolute()
+                                .debug_selector(move || sel_name.clone())
+                                .left(px(hx - RESIZE_HANDLE / 2.0))
+                                .top(px(hy - RESIZE_HANDLE / 2.0))
+                                .w(px(RESIZE_HANDLE))
+                                .h(px(RESIZE_HANDLE))
+                                .bg(rgb(PANEL))
+                                .border_1()
+                                .border_color(rgb(ACCENT))
+                                .rounded_sm()
+                                .on_mouse_down(
+                                    gpui::MouseButton::Left,
+                                    cx.listener(
+                                        move |this: &mut Ide, ev: &MouseDownEvent, win, cx| {
+                                            // the handle owns its pointer-down
+                                            // event; a drag from it resizes
+                                            cx.stop_propagation();
+                                            this.select(Some(idx));
+                                            win.focus(&this.designer_focus);
+                                            this.drag = Some(DesignDrag::Resize(
+                                                idx,
+                                                h,
+                                                f32::from(ev.position.x),
+                                                f32::from(ev.position.y),
+                                            ));
+                                            cx.notify();
+                                        },
+                                    ),
+                                ),
+                        );
+                    }
+                }
+            }
+        }
+
+        // the form itself, when it (not a control) is selected, gets VB's
+        // sizing handles on its bottom, right and bottom-right edges
+        if selected.is_none() {
+            let form_rect = Rect {
+                left: 0.0,
+                top: 0.0,
+                width: form.width,
+                height: form.height,
+            };
+            for h in [
+                ResizeHandle { dx: 1, dy: 0 },
+                ResizeHandle { dx: 0, dy: 1 },
+                ResizeHandle { dx: 1, dy: 1 },
+            ] {
+                let (hx, hy) = h.center(&form_rect);
+                let sel_name = format!("designer-handle-form-{}-{}", h.dx, h.dy);
+                form_area = form_area.child(
+                    div()
+                        .absolute()
+                        .debug_selector(move || sel_name.clone())
+                        .left(px(hx - RESIZE_HANDLE / 2.0))
+                        .top(px(hy - RESIZE_HANDLE / 2.0))
+                        .w(px(RESIZE_HANDLE))
+                        .h(px(RESIZE_HANDLE))
+                        .bg(rgb(PANEL))
+                        .border_1()
+                        .border_color(rgb(ACCENT))
+                        .rounded_sm()
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |this: &mut Ide, ev: &MouseDownEvent, win, cx| {
+                                cx.stop_propagation();
+                                this.select(None);
+                                win.focus(&this.designer_focus);
+                                this.drag = Some(DesignDrag::Resize(
+                                    FORM_IDX,
+                                    h,
+                                    f32::from(ev.position.x),
+                                    f32::from(ev.position.y),
+                                ));
+                                cx.notify();
+                            }),
+                        ),
+                );
             }
         }
 
@@ -1909,32 +2001,124 @@ impl Ide {
             .justify_start()
             .p_4()
             .child(form_area)
-            .on_mouse_move(
-                cx.listener(|this: &mut Ide, ev: &MouseMoveEvent, _win, cx| {
-                    if let Some((idx, last_x, last_y)) = this.drag {
-                        if !ev.dragging() {
-                            this.drag = None;
-                            return;
-                        }
-                        let x = f32::from(ev.position.x);
-                        let y = f32::from(ev.position.y);
-                        let c = &mut this.form.controls[idx];
-                        c.rect.left = (c.rect.left + x - last_x).max(0.0).round();
-                        c.rect.top = (c.rect.top + y - last_y).max(0.0).round();
-                        this.drag = Some((idx, x, y));
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_mouse_up(
-                gpui::MouseButton::Left,
-                cx.listener(|this: &mut Ide, _ev: &gpui::MouseUpEvent, _win, _cx| {
-                    this.drag = None;
-                }),
-            )
             .child(self.scrollbar_overlays("designer", &self.designer_scroll, cx))
     }
+    /// Track a designer drag — moving or resizing a control, or resizing the
+    /// form — while the button is held. On the workspace root (not just the
+    /// designer pane), so a drag keeps working when the pointer crosses into
+    /// another pane.
+    fn update_designer_drag(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if !ev.dragging() {
+            self.drag = None;
+            return;
+        }
+        let x = f32::from(ev.position.x);
+        let y = f32::from(ev.position.y);
+        let drag = match self.drag {
+            Some(DesignDrag::Move(idx, last_x, last_y)) => {
+                let c = &mut self.form.controls[idx];
+                c.rect.left = (c.rect.left + x - last_x).max(0.0).round();
+                c.rect.top = (c.rect.top + y - last_y).max(0.0).round();
+                Some(DesignDrag::Move(idx, x, y))
+            }
+            Some(DesignDrag::Resize(idx, h, last_x, last_y)) => {
+                let (dx, dy) = (h.dx as f32, h.dy as f32);
+                if idx == FORM_IDX {
+                    // the form's own handles grow its bottom and right edges
+                    if dx > 0.0 {
+                        self.form.width = (self.form.width + x - last_x).max(MIN_FORM).round();
+                    }
+                    if dy > 0.0 {
+                        self.form.height = (self.form.height + y - last_y).max(MIN_FORM).round();
+                    }
+                    Some(DesignDrag::Resize(idx, h, x, y))
+                } else {
+                    let c = &mut self.form.controls[idx];
+                    // the right/bottom handles grow the size; the left/top
+                    // ones move that edge, keeping the opposite one (and the
+                    // form's border) fixed
+                    if dx > 0.0 {
+                        c.rect.width = (c.rect.width + x - last_x).max(MIN_CONTROL);
+                    } else if dx < 0.0 {
+                        let mut d = (x - last_x).min(c.rect.width - MIN_CONTROL);
+                        if c.rect.left + d < 0.0 {
+                            d = -c.rect.left;
+                        }
+                        c.rect.left += d;
+                        c.rect.width -= d;
+                    }
+                    if dy > 0.0 {
+                        c.rect.height = (c.rect.height + y - last_y).max(MIN_CONTROL);
+                    } else if dy < 0.0 {
+                        let mut d = (y - last_y).min(c.rect.height - MIN_CONTROL);
+                        if c.rect.top + d < 0.0 {
+                            d = -c.rect.top;
+                        }
+                        c.rect.top += d;
+                        c.rect.height -= d;
+                    }
+                    c.rect.left = c.rect.left.round();
+                    c.rect.top = c.rect.top.round();
+                    c.rect.width = c.rect.width.round();
+                    c.rect.height = c.rect.height.round();
+                    Some(DesignDrag::Resize(idx, h, x, y))
+                }
+            }
+            None => None,
+        };
+        let changed = drag.is_some();
+        self.drag = drag;
+        if changed {
+            cx.notify();
+        }
+    }
 }
+
+/// What a pointer drag over the designer is doing to a control.
+#[derive(Clone, Copy)]
+enum DesignDrag {
+    /// Moving the control: its index and the last pointer position.
+    Move(usize, f32, f32),
+    /// Resizing it with a handle: index, handle, last pointer position.
+    Resize(usize, ResizeHandle, f32, f32),
+}
+
+/// One of the eight handles of a selected control's outline: offsets (-1, 0
+/// or 1) from the control's centre along each axis. `(0, 0)` — the centre —
+/// is the control's body, which drags to move it.
+#[derive(Clone, Copy)]
+struct ResizeHandle {
+    dx: i8,
+    dy: i8,
+}
+
+impl ResizeHandle {
+    /// VB's eight handles: the four corners and the side midpoints.
+    const ALL: [ResizeHandle; 8] = [
+        ResizeHandle { dx: -1, dy: -1 },
+        ResizeHandle { dx: 0, dy: -1 },
+        ResizeHandle { dx: 1, dy: -1 },
+        ResizeHandle { dx: -1, dy: 0 },
+        ResizeHandle { dx: 1, dy: 0 },
+        ResizeHandle { dx: -1, dy: 1 },
+        ResizeHandle { dx: 0, dy: 1 },
+        ResizeHandle { dx: 1, dy: 1 },
+    ];
+
+    /// Where the handle's square is centred on the control's outline.
+    fn center(&self, r: &Rect) -> (f32, f32) {
+        let x = r.left + r.width * (self.dx as f32 + 1.0) / 2.0;
+        let y = r.top + r.height * (self.dy as f32 + 1.0) / 2.0;
+        (x, y)
+    }
+}
+
+/// A side of the square a resize handle is drawn as, in px.
+const RESIZE_HANDLE: f32 = 6.5;
+/// The smallest width/height dragging a handle can leave a control with.
+const MIN_CONTROL: f32 = 8.0;
+/// The smallest width/height the form's own handles can leave it with.
+const MIN_FORM: f32 = 60.0;
 
 /// A live program's form, running in its own OS window. In classic VB the
 /// form defines the application's window: its controls look and behave as

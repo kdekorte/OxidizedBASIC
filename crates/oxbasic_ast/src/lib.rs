@@ -64,7 +64,10 @@ pub enum Stmt {
     Label(String),
     Dim(Vec<VarDecl>),
     Const(Vec<ConstDecl>),
-    Assign { target: Expr, value: Expr },
+    Assign {
+        target: Expr,
+        value: Expr,
+    },
     If {
         arms: Vec<IfArm>,
         else_body: Option<Vec<Stmt>>,
@@ -182,13 +185,30 @@ pub enum Expr {
     Var(String),
     /// `Name(arg1, arg2)` — also used for array indexing; the runtime
     /// decides whether `name` is an array element or a procedure call.
-    Call { name: String, args: Vec<Expr> },
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
     /// `obj.Member` property access (e.g. `Err.Number`).
-    Member { obj: Box<Expr>, name: String },
+    Member {
+        obj: Box<Expr>,
+        name: String,
+    },
     /// `obj.Method(args)` (e.g. `Err.Clear`).
-    MethodCall { obj: Box<Expr>, name: String, args: Vec<Expr> },
-    Unary { op: UnaryOp, expr: Box<Expr> },
-    Binary { op: BinaryOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    MethodCall {
+        obj: Box<Expr>,
+        name: String,
+        args: Vec<Expr>,
+    },
+    Unary {
+        op: UnaryOp,
+        expr: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone)]

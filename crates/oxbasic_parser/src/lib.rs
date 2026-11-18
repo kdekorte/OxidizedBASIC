@@ -26,8 +26,8 @@ fn filter_kw<'a>(pairs: Pairs<'a, Rule>) -> impl Iterator<Item = Pair<'a, Rule>>
 ///
 /// Returns a human-readable error (with position) on failure.
 pub fn parse(src: &str) -> Result<Program, String> {
-    let mut pairs = OxbasicParser::parse(Rule::Program, src)
-        .map_err(|e| format!("syntax error: {}", e))?;
+    let mut pairs =
+        OxbasicParser::parse(Rule::Program, src).map_err(|e| format!("syntax error: {}", e))?;
     let pair = pairs.next().ok_or_else(|| "empty input".to_string())?;
     let mut items = Vec::new();
     for line in pair.into_inner() {
@@ -139,7 +139,13 @@ fn proc_decl(pair: Pair<Rule>, kind: ProcKind) -> Result<ProcDecl, String> {
             _ => body.extend(lines_stmts_one(child)?),
         }
     }
-    Ok(ProcDecl { kind, name, params, ret_type, body })
+    Ok(ProcDecl {
+        kind,
+        name,
+        params,
+        ret_type,
+        body,
+    })
 }
 
 fn param(pair: Pair<Rule>) -> Result<Param, String> {
@@ -185,7 +191,6 @@ fn param(pair: Pair<Rule>) -> Result<Param, String> {
     Ok(p)
 }
 
-
 fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
     match pair.as_rule() {
         Rule::OptionStmt => Ok(Stmt::OptionExplicit),
@@ -200,9 +205,7 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                     match c.as_rule() {
                         Rule::Ident => name = c.as_str().to_string(),
                         Rule::ArrayDims => {
-                            dims = Some(
-                                c.into_inner().map(expr).collect::<Result<_, _>>()?,
-                            );
+                            dims = Some(c.into_inner().map(expr).collect::<Result<_, _>>()?);
                         }
                         Rule::TypeName => ty = Some(type_name(c)),
                         _ => {}
@@ -240,13 +243,18 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             let block = children.next().unwrap();
             match block.as_rule() {
                 Rule::BlockIf => {
-                    let mut arms = vec![IfArm { cond, body: Vec::new() }];
+                    let mut arms = vec![IfArm {
+                        cond,
+                        body: Vec::new(),
+                    }];
                     let mut else_body = None;
                     for child in block.into_inner() {
                         match child.as_rule() {
-                            Rule::Line => {
-                                arms.last_mut().unwrap().body.extend(lines_stmts_one(child)?)
-                            }
+                            Rule::Line => arms
+                                .last_mut()
+                                .unwrap()
+                                .body
+                                .extend(lines_stmts_one(child)?),
                             Rule::ElseIfBlock => {
                                 let mut ec = filter_kw(child.into_inner());
                                 let c = expr(ec.next().unwrap())?;
@@ -254,8 +262,7 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                                 arms.push(IfArm { cond: c, body });
                             }
                             Rule::ElseBlock => {
-                                else_body =
-                                    Some(lines_stmts(child)?);
+                                else_body = Some(lines_stmts(child)?);
                             }
                             _ => {}
                         }
@@ -270,7 +277,10 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                         None => None,
                     };
                     Ok(Stmt::If {
-                        arms: vec![IfArm { cond, body: then_body }],
+                        arms: vec![IfArm {
+                            cond,
+                            body: then_body,
+                        }],
                         else_body,
                     })
                 }
@@ -302,10 +312,15 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                     }
                     Rule::CaseElseBlock => {
                         else_body = Some(lines_stmts(child)?);
-                    }                    _ => {}
+                    }
+                    _ => {}
                 }
             }
-            Ok(Stmt::Select { expr: subject, arms, else_body })
+            Ok(Stmt::Select {
+                expr: subject,
+                arms,
+                else_body,
+            })
         }
         Rule::ForEachStmt => {
             let mut var = String::new();
@@ -326,7 +341,11 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                     _ => body.extend(lines_stmts_one(child)?),
                 }
             }
-            Ok(Stmt::ForEach { var, coll: coll.unwrap(), body })
+            Ok(Stmt::ForEach {
+                var,
+                coll: coll.unwrap(),
+                body,
+            })
         }
         Rule::ForStmt => {
             let mut var = String::new();
@@ -406,7 +425,10 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                         Rule::PSep => {
                             let sep = child.as_str().chars().next().unwrap();
                             if let Some(e) = pending.take() {
-                                items.push(PrintItem { expr: e, sep: Some(sep) });
+                                items.push(PrintItem {
+                                    expr: e,
+                                    sep: Some(sep),
+                                });
                             }
                             // A separator in final position suppresses the newline.
                             trailing = true;
@@ -419,7 +441,10 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                     trailing = false;
                 }
             }
-            Ok(Stmt::Print { items, trailing_sep: trailing })
+            Ok(Stmt::Print {
+                items,
+                trailing_sep: trailing,
+            })
         }
         Rule::ExitStmt => {
             let word = pair
@@ -477,7 +502,11 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                     args,
                     bare: false,
                 }),
-                other => Ok(Stmt::Call { target: other, args: vec![], bare: false }),
+                other => Ok(Stmt::Call {
+                    target: other,
+                    args: vec![],
+                    bare: false,
+                }),
             }
         }
         Rule::ExprCallStmt => {
@@ -498,7 +527,11 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                     obj: Box::new(acc),
                     name: seg.clone(),
                 });
-            Ok(Stmt::Call { target, args, bare: true })
+            Ok(Stmt::Call {
+                target,
+                args,
+                bare: true,
+            })
         }
         Rule::SubDecl | Rule::FuncDecl => err("procedures cannot be nested"),
         r => err(&format!("internal: unexpected statement rule {:?}", r)),
@@ -675,7 +708,6 @@ fn op_chain(pair: Pair<Rule>, map: fn(&str) -> BinaryOp) -> Result<Expr, String>
     Ok(lhs.unwrap())
 }
 
-
 /// `PostfixExpr`: a primary followed by `(args)` / `.member` tails.
 fn postfix_expr(pair: Pair<Rule>) -> Result<Expr, String> {
     let mut children = pair.into_inner();
@@ -684,8 +716,7 @@ fn postfix_expr(pair: Pair<Rule>) -> Result<Expr, String> {
     for child in children {
         match child.as_rule() {
             Rule::ArgParens => {
-                let args: Vec<Expr> =
-                    child.into_inner().map(expr).collect::<Result<_, _>>()?;
+                let args: Vec<Expr> = child.into_inner().map(expr).collect::<Result<_, _>>()?;
                 base = match base {
                     Expr::Var(name) => Expr::Call { name, args },
                     Expr::Member { obj, name } => Expr::MethodCall { obj, name, args },
@@ -719,7 +750,9 @@ fn primary(pair: Pair<Rule>) -> Result<Expr, String> {
                 let v = i64::from_str_radix(oct, 8).map_err(|e| e.to_string())?;
                 Ok(Expr::Lit(Lit::Int(v as i32)))
             } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
-                Ok(Expr::Lit(Lit::Double(s.parse::<f64>().map_err(|e| e.to_string())?)))
+                Ok(Expr::Lit(Lit::Double(
+                    s.parse::<f64>().map_err(|e| e.to_string())?,
+                )))
             } else {
                 match s.parse::<i32>() {
                     Ok(v) => Ok(Expr::Lit(Lit::Int(v))),
@@ -740,7 +773,10 @@ fn primary(pair: Pair<Rule>) -> Result<Expr, String> {
                 "empty" => Ok(Expr::Lit(Lit::Empty)),
                 "null" => Ok(Expr::Lit(Lit::Null)),
                 "nothing" => Ok(Expr::Lit(Lit::Nothing)),
-                _ => err(&format!("internal: unexpected primary {:?}", pair.as_rule())),
+                _ => err(&format!(
+                    "internal: unexpected primary {:?}",
+                    pair.as_rule()
+                )),
             }
         }
     }
@@ -837,4 +873,3 @@ mod tests {
         assert!(parse("For i = 1\n").is_err());
     }
 }
-

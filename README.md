@@ -52,8 +52,10 @@ phases.
     handler, inserting a `Private Sub Object_Event(...)` placeholder if it
     doesn't exist. Double-clicking a control opens its default event.
   - **Visual form designer**: the form canvas renders the `.oxform`
-    layout; click to select controls, **drag to move** them, and add
-    Button / Label / TextBox / Timer controls from the toolbox. The
+    layout; click to select controls, **drag to move** them and **drag
+    the eight selection handles** to resize them (like VB6), and add
+    controls from the toolbox. With the form itself selected, handles
+    on its bottom and right edges resize the form. The
     designer shows no code; Timers appear as ◷ icons.
   - **Property inspector**: `(Name)` (renames the control and its
     `Name_Event` handlers and references in code), Caption, Text, Items,

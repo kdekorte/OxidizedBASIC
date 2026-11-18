@@ -7,17 +7,82 @@ use crate::*;
 pub(crate) fn is_builtin(name: &str) -> bool {
     matches!(
         name,
-        "abs" | "sqr" | "int" | "fix" | "sgn" | "sin" | "cos" | "tan" | "atn" | "exp" | "log"
-            | "rnd" | "randomize" | "hex" | "oct"
-            | "len" | "left" | "right" | "mid" | "ucase" | "lcase" | "trim" | "ltrim"
-            | "rtrim" | "instr" | "instrrev" | "replace" | "space" | "string" | "strreverse"
-            | "chr" | "asc" | "cstr" | "str" | "val" | "format" | "split" | "join" | "strcomp"
-            | "cint" | "clng" | "cdbl" | "csng" | "cbool" | "ccur" | "cvar" | "cdate"
-            | "isnumeric" | "isarray" | "isempty" | "isnull" | "isdate" | "vartype" | "typename"
-            | "array" | "ubound" | "lbound"
-            | "now" | "date" | "time" | "year" | "month" | "day" | "hour" | "minute"
-            | "second" | "weekday" | "dateserial" | "timeserial" | "datevalue" | "dateadd"
-            | "msgbox" | "inputbox" | "beep" | "doevents" | "iif"
+        "abs"
+            | "sqr"
+            | "int"
+            | "fix"
+            | "sgn"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "atn"
+            | "exp"
+            | "log"
+            | "rnd"
+            | "randomize"
+            | "hex"
+            | "oct"
+            | "len"
+            | "left"
+            | "right"
+            | "mid"
+            | "ucase"
+            | "lcase"
+            | "trim"
+            | "ltrim"
+            | "rtrim"
+            | "instr"
+            | "instrrev"
+            | "replace"
+            | "space"
+            | "string"
+            | "strreverse"
+            | "chr"
+            | "asc"
+            | "cstr"
+            | "str"
+            | "val"
+            | "format"
+            | "split"
+            | "join"
+            | "strcomp"
+            | "cint"
+            | "clng"
+            | "cdbl"
+            | "csng"
+            | "cbool"
+            | "ccur"
+            | "cvar"
+            | "cdate"
+            | "isnumeric"
+            | "isarray"
+            | "isempty"
+            | "isnull"
+            | "isdate"
+            | "vartype"
+            | "typename"
+            | "array"
+            | "ubound"
+            | "lbound"
+            | "now"
+            | "date"
+            | "time"
+            | "year"
+            | "month"
+            | "day"
+            | "hour"
+            | "minute"
+            | "second"
+            | "weekday"
+            | "dateserial"
+            | "timeserial"
+            | "datevalue"
+            | "dateadd"
+            | "msgbox"
+            | "inputbox"
+            | "beep"
+            | "doevents"
+            | "iif"
     )
 }
 
@@ -112,7 +177,9 @@ impl<'out> Interpreter<'out> {
             }
 
             // -- strings ---------------------------------------------------
-            "len" => Ok(Variant::Long(want_str(args, 0)?.encode_utf16().count() as i32)),
+            "len" => Ok(Variant::Long(
+                want_str(args, 0)?.encode_utf16().count() as i32
+            )),
             "left" => {
                 let s = want_str(args, 0)?;
                 let n = want_i64(args, 1)?.max(0) as usize;
@@ -122,7 +189,9 @@ impl<'out> Interpreter<'out> {
                 let s = want_str(args, 0)?;
                 let n = want_i64(args, 1)?.max(0) as usize;
                 let cnt = s.chars().count();
-                Ok(Variant::String(s.chars().skip(cnt.saturating_sub(n)).collect()))
+                Ok(Variant::String(
+                    s.chars().skip(cnt.saturating_sub(n)).collect(),
+                ))
             }
             "mid" => {
                 let s = want_str(args, 0)?;
@@ -146,7 +215,11 @@ impl<'out> Interpreter<'out> {
             "rtrim" => Ok(Variant::String(want_str(args, 0)?.trim_end().to_string())),
             "instr" => {
                 let (start, hay, needle) = if args.len() >= 3 {
-                    (want_i64(args, 0)? as usize, want_str(args, 1)?, want_str(args, 2)?)
+                    (
+                        want_i64(args, 0)? as usize,
+                        want_str(args, 1)?,
+                        want_str(args, 2)?,
+                    )
                 } else {
                     (0, want_str(args, 0)?, want_str(args, 1)?)
                 };
@@ -229,9 +302,12 @@ impl<'out> Interpreter<'out> {
             }
             "iif" => {
                 let c = to_bool(arg(args, 0)?)?;
-                Ok(if c { arg(args, 1)?.clone() } else { arg(args, 2)?.clone() })
+                Ok(if c {
+                    arg(args, 1)?.clone()
+                } else {
+                    arg(args, 2)?.clone()
+                })
             }
-
 
             // -- conversions ------------------------------------------------
             "cint" | "clng" => Ok(Variant::Long(to_i32(arg(args, 0)?)?)),
@@ -295,7 +371,10 @@ impl<'out> Interpreter<'out> {
             "array" => {
                 let n = args.len();
                 Ok(Variant::Array(std::rc::Rc::new(std::cell::RefCell::new(
-                    VbArray { dims: vec![n], data: args.to_vec() },
+                    VbArray {
+                        dims: vec![n],
+                        data: args.to_vec(),
+                    },
                 ))))
             }
             "ubound" | "lbound" => {
@@ -303,7 +382,11 @@ impl<'out> Interpreter<'out> {
                     Variant::Array(a) => a,
                     _ => return err(13, "type mismatch: expected an array"),
                 };
-                let dim = if args.len() > 1 { want_i64(args, 1)? } else { 1 };
+                let dim = if args.len() > 1 {
+                    want_i64(args, 1)?
+                } else {
+                    1
+                };
                 let b = arr.borrow();
                 if b.dims.is_empty() {
                     return if name == "ubound" {
@@ -324,15 +407,24 @@ impl<'out> Interpreter<'out> {
             }
             "split" => {
                 let s = want_str(args, 0)?;
-                let d = if args.len() > 1 { want_str(args, 1)? } else { " ".into() };
+                let d = if args.len() > 1 {
+                    want_str(args, 1)?
+                } else {
+                    " ".into()
+                };
                 let parts: Vec<Variant> = if d.is_empty() {
                     s.chars().map(|c| Variant::String(c.to_string())).collect()
                 } else {
-                    s.split(d.as_str()).map(|p| Variant::String(p.to_string())).collect()
+                    s.split(d.as_str())
+                        .map(|p| Variant::String(p.to_string()))
+                        .collect()
                 };
                 let n = parts.len();
                 Ok(Variant::Array(std::rc::Rc::new(std::cell::RefCell::new(
-                    VbArray { dims: vec![n], data: parts },
+                    VbArray {
+                        dims: vec![n],
+                        data: parts,
+                    },
                 ))))
             }
             "join" => {
@@ -340,14 +432,17 @@ impl<'out> Interpreter<'out> {
                     Variant::Array(a) => a.borrow().data.clone(),
                     _ => return err(13, "type mismatch: Join requires an array"),
                 };
-                let d = if args.len() > 1 { want_str(args, 1)? } else { " ".into() };
+                let d = if args.len() > 1 {
+                    want_str(args, 1)?
+                } else {
+                    " ".into()
+                };
                 let mut parts = Vec::new();
                 for v in arr {
                     parts.push(to_string(&v)?);
                 }
                 Ok(Variant::String(parts.join(&d)))
             }
-
 
             // -- dates -----------------------------------------------------
             "now" => Ok(Variant::Date(now_serial())),
@@ -397,11 +492,8 @@ impl<'out> Interpreter<'out> {
                     "M" => {
                         let (y, m, dd) = civil_from_days(d.floor() as i64);
                         let total = y * 12 + (m as i64 - 1) + n as i64;
-                        days_from_civil(
-                            total.div_euclid(12),
-                            (total.rem_euclid(12) + 1) as u32,
-                            dd,
-                        ) as f64
+                        days_from_civil(total.div_euclid(12), (total.rem_euclid(12) + 1) as u32, dd)
+                            as f64
                             + d.fract()
                     }
                     "D" | "Y" | "W" => d + n,
@@ -434,7 +526,11 @@ impl<'out> Interpreter<'out> {
 
             "format" => {
                 let v = arg(args, 0)?.clone();
-                let pat = if args.len() > 1 { want_str(args, 1)? } else { String::new() };
+                let pat = if args.len() > 1 {
+                    want_str(args, 1)?
+                } else {
+                    String::new()
+                };
                 format_value(&v, &pat)
             }
 
@@ -521,6 +617,8 @@ fn parse_date_str(s: &str) -> ExecResult<Variant> {
             return Ok(Variant::Date(days_from_civil(y, a as u32, b) as f64));
         }
     }
-    err(13, &format!("type mismatch: cannot convert \"{}\" to date", s))
+    err(
+        13,
+        &format!("type mismatch: cannot convert \"{}\" to date", s),
+    )
 }
-
