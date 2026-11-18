@@ -19,7 +19,10 @@ fn main() {
         Some("gui") => cmd_gui(&args[2..]),
         Some("ide") => cmd_ide(&args[2..]),
         Some("version") | Some("--version") => {
-            println!("oxbasic {} (Phase 1: parser + interpreter)", env!("CARGO_PKG_VERSION"))
+            println!(
+                "oxbasic {} (Phase 1: parser + interpreter)",
+                env!("CARGO_PKG_VERSION")
+            )
         }
         _ => {
             eprintln!("OxidizedBASIC — a Rust-native classic BASIC suite");

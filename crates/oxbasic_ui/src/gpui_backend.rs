@@ -2,33 +2,28 @@
 //! [`FormSpec`] as a real GPU-accelerated GPUI window and routes GPUI
 //! input events to BASIC subroutines through the [`FormDispatcher`].
 //!
-//! Classic control → element mapping (spec §5):
+//! Controls are drawn by [`crate::gpui_controls`] — the same code the
+//! IDE's designer and run window use — and behave as in VB6:
 //!
-//! | BASIC control | GPUI element |
-//! |---------------|--------------|
-//! | `Form`        | GPUI window, absolutely-positioned children |
-//! | `CommandButton` | stateful `div` with hover/active states + `on_click` |
-//! | `Label`       | text `div` |
-//! | `TextBox`     | focusable `div` with key handling → `Change` events |
-//! | `Frame`       | bordered container `div` |
-//! | `ListBox`     | column of clickable item rows |
-//! | `PictureBox`  | colored `div` |
-//! | `Timer`       | async background timer task → `Timer` event |
+//! | Control | Run-time behaviour |
+//! |---------|--------------------|
+//! | `CommandButton` | `Click` |
+//! | `Label` | `Click` |
+//! | `TextBox` | click to focus, type: `Change` per edit; `Click` |
+//! | `ListBox` | click an item to select it: `Click` |
+//! | `ComboBox` | ▾ drops the list (`DropDown`); picking an item sets `Text` (`Click`); Styles 0/1 accept typing (`Change`) |
+//! | `Frame`, `PictureBox` | `Click` |
+//! | `Timer` | async background timer task -> `Timer` |
 
+use crate::gpui_controls::{
+    edit_text, paint_control, z_order, ControlLook, ControlState, Part, FORM_BACK,
+};
 use crate::{ControlKind, FormDispatcher, FormSpec};
 use gpui::{
-    App, AppContext as _, Application, Bounds, Context, FocusHandle, KeyDownEvent, SharedString,
-    Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
+    div, prelude::*, px, size, App, Application, Bounds, Context, FocusHandle, KeyDownEvent,
+    MouseButton, MouseDownEvent, SharedString, Window, WindowBounds, WindowOptions,
 };
 use std::collections::HashMap;
-
-/// Classic VB form gray.
-const FORM_BG: u32 = 0xECE9D8;
-const BUTTON_BG: u32 = 0xE1E1E1;
-const BUTTON_BG_HOVER: u32 = 0xD9E4F2;
-const BUTTON_BG_ACTIVE: u32 = 0xB8CCE0;
-const CONTROL_BORDER: u32 = 0x8E8E8E;
-const TEXT_COLOR: u32 = 0x1A1A1A;
 
 /// The window root: owns the form, the dispatcher, and the closure that
 /// invokes BASIC subs (`runtime.evaluate_sub`).
@@ -37,12 +32,10 @@ pub struct FormWindow {
     dispatcher: FormDispatcher,
     /// Invokes a BASIC sub by name.
     evaluate: Box<dyn FnMut(&str) -> Result<(), String>>,
-    /// Live `Text` content per TextBox control.
-    text_values: HashMap<String, String>,
-    /// Focus handles per TextBox.
-    focus: HashMap<String, FocusHandle>,
-    /// Click counters per button.
-    counters: HashMap<String, u32>,
+    /// Run-time state (text, selection, open list) per control.
+    state: Vec<ControlState>,
+    /// Focus handles per control that takes the keyboard.
+    focus: HashMap<usize, FocusHandle>,
 }
 
 impl FormWindow {
@@ -52,32 +45,32 @@ impl FormWindow {
         evaluate: Box<dyn FnMut(&str) -> Result<(), String>>,
         cx: &mut Context<Self>,
     ) -> FormWindow {
+        let state = form.controls.iter().map(ControlState::new).collect();
         let mut focus = HashMap::new();
-        let mut text_values = HashMap::new();
-        for c in &form.controls {
-            if c.kind == ControlKind::TextBox {
-                focus.insert(c.name.clone(), cx.focus_handle());
-                text_values.insert(c.name.clone(), c.text().to_string());
+        for (i, c) in form.controls.iter().enumerate() {
+            if matches!(
+                c.kind,
+                ControlKind::TextBox | ControlKind::ComboBox | ControlKind::ListBox
+            ) {
+                focus.insert(i, cx.focus_handle());
             }
         }
 
-        // Async timers (spec §5: Timer → non-blocking async loop).
+        // Async timers (spec §5: Timer -> non-blocking async loop).
         for c in &form.controls {
             if c.kind == ControlKind::Timer && c.enabled && c.interval_ms > 0 {
                 let name = c.name.clone();
                 let interval = std::time::Duration::from_millis(c.interval_ms);
-                cx.spawn(async move |this, cx| {
-                    loop {
-                        cx.background_executor().timer(interval).await;
-                        if this
-                            .update(cx, |this, cx| {
-                                this.fire(&name, "Timer");
-                                cx.notify();
-                            })
-                            .is_err()
-                        {
-                            break; // window closed
-                        }
+                cx.spawn(async move |this, cx| loop {
+                    cx.background_executor().timer(interval).await;
+                    if this
+                        .update(cx, |this, cx| {
+                            this.fire(&name, "Timer");
+                            cx.notify();
+                        })
+                        .is_err()
+                    {
+                        break; // window closed
                     }
                 })
                 .detach();
@@ -88,9 +81,8 @@ impl FormWindow {
             form,
             dispatcher,
             evaluate,
-            text_values,
+            state,
             focus,
-            counters: HashMap::new(),
         };
         // Form_Load fires when the form comes up (classic VB lifecycle):
         // both the conventional `Form_Load` and `<FormName>_Load`.
@@ -107,148 +99,138 @@ impl FormWindow {
             eprintln!("oxbasic: {}", e);
         }
     }
+
+    /// Close every dropped-down combo list except `keep`'s.
+    fn close_lists(&mut self, keep: Option<usize>) {
+        for (i, s) in self.state.iter_mut().enumerate() {
+            if Some(i) != keep {
+                s.dropped = false;
+            }
+        }
+    }
 }
 
 impl Render for FormWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mut root = div()
+            .id("form-window")
             .relative()
             .size_full()
-            .bg(rgb(FORM_BG))
-            .text_color(rgb(TEXT_COLOR));
+            .bg(gpui::rgb(FORM_BACK))
+            .text_color(gpui::rgb(0x1D1D1F))
+            // a click on the form itself closes any open combo list
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this: &mut FormWindow, _ev: &MouseDownEvent, _win, cx| {
+                    this.close_lists(None);
+                    cx.notify();
+                }),
+            );
 
-        for control in self.form.controls.clone() {
-            if !control.visible || control.kind == ControlKind::Timer {
+        let form = self.form.clone();
+        for idx in z_order(&form) {
+            let c = &form.controls[idx];
+            if !c.visible || c.kind == ControlKind::Timer {
                 continue;
             }
-            root = root.child(render_control(&control, self, cx));
+            let look = ControlLook {
+                design: false,
+                text: self.state[idx].text.clone(),
+                list_index: self.state[idx].list_index,
+                dropped: self.state[idx].dropped,
+                focused: self
+                    .focus
+                    .get(&idx)
+                    .is_some_and(|f| f.contains_focused(window, cx)),
+            };
+            let mut hook = |part: Part,
+                            el: gpui::Stateful<gpui::Div>,
+                            cx: &mut Context<FormWindow>|
+             -> gpui::Stateful<gpui::Div> {
+                wire(idx, c.kind, part, el, cx, self.focus.get(&idx).cloned())
+            };
+            root = root.child(paint_control(c, &look, &mut hook, cx));
         }
         root
     }
 }
 
-fn render_control(
-    control: &crate::ControlSpec,
-    state: &mut FormWindow,
+/// Attach the run-time behaviour of `part` of control `idx`.
+fn wire(
+    idx: usize,
+    kind: ControlKind,
+    part: Part,
+    el: gpui::Stateful<gpui::Div>,
     cx: &mut Context<FormWindow>,
+    focus: Option<FocusHandle>,
 ) -> gpui::Stateful<gpui::Div> {
-    let positioned = div()
-        .id(SharedString::from(control.name.clone()))
-        .absolute()
-        .left(px(control.rect.left))
-        .top(px(control.rect.top))
-        .w(px(control.rect.width))
-        .h(px(control.rect.height));
-
-    match control.kind {
-        ControlKind::CommandButton => positioned
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgb(BUTTON_BG))
-            .border_1()
-            .border_color(rgb(CONTROL_BORDER))
-            .rounded_sm()
-            .hover(|s| s.bg(rgb(BUTTON_BG_HOVER)))
-            .active(|s| s.bg(rgb(BUTTON_BG_ACTIVE)))
-            .child(SharedString::from(control.caption.clone()))
-            .on_click({
-                let name = control.name.clone();
-                cx.listener(
-                    move |this: &mut FormWindow, _ev: &gpui::ClickEvent, _win, _cx| {
-                        *this.counters.entry(name.clone()).or_insert(0) += 1;
-                        this.fire(&name, "Click");
-                    },
-                )
-            }),
-        ControlKind::Label => positioned
-            .flex()
-            .items_start()
-            .child(SharedString::from(control.caption.clone())),
-        ControlKind::TextBox => {
-            let name = control.name.clone();
-            let fh = state
-                .focus
-                .get(&name)
-                .cloned()
-                .expect("focus handle for textbox");
-            let text = state.text_values.get(&name).cloned().unwrap_or_default();
-            positioned
-                .track_focus(&fh)
-                .border_1()
-                .border_color(rgb(CONTROL_BORDER))
-                .bg(rgb(0xFFFFFF))
-                .flex()
-                .items_center()
-                .pl_2()
-                .child(SharedString::from(text))
-                .on_key_down(cx.listener(
-                    move |this: &mut FormWindow, ev: &KeyDownEvent, _win, cx| {
-                        let key = ev.keystroke.key.as_str();
-                        let cur = this.text_values.entry(name.clone()).or_default();
-                        if key == "backspace" {
-                            cur.pop();
-                        } else if key == "enter" || key == "tab" {
-                            // let navigation keys through
-                        } else if key.chars().count() == 1 {
-                            cur.push(key.chars().next().unwrap());
+    let el = match &focus {
+        Some(f) if matches!(part, Part::Body) => el.track_focus(f),
+        _ => el,
+    };
+    let focus_click = focus.clone();
+    el.on_mouse_down(
+        MouseButton::Left,
+        cx.listener(
+            move |this: &mut FormWindow, _ev: &MouseDownEvent, win, cx| {
+                cx.stop_propagation();
+                let name = this.form.controls[idx].name.clone();
+                if let Some(f) = &focus_click {
+                    win.focus(f);
+                }
+                match part {
+                    Part::Arrow | Part::Field if kind == ControlKind::ComboBox => {
+                        let editable = this.form.controls[idx].style == 0;
+                        // The ▾ button toggles the list; so does the field of a
+                        // Dropdown List (Style 2), as in VB.
+                        if part == Part::Arrow || !editable {
+                            let open = !this.state[idx].dropped;
+                            this.close_lists(Some(idx));
+                            this.state[idx].dropped = open;
+                            if open {
+                                this.fire(&name, "DropDown");
+                            }
+                        } else {
+                            this.close_lists(None);
                         }
-                        let changed = name.clone();
-                        this.fire(&changed, "Change");
-                        cx.notify();
-                    },
-                ))
-        }
-        ControlKind::Frame => positioned
-            .border_1()
-            .border_color(rgb(CONTROL_BORDER))
-            .p_1()
-            .child(SharedString::from(control.caption.clone())),
-        ControlKind::ListBox => {
-            let mut list = positioned
-                .border_1()
-                .border_color(rgb(CONTROL_BORDER))
-                .bg(rgb(0xFFFFFF))
-                .flex()
-                .flex_col();
-            for (i, item) in control.items.iter().enumerate() {
-                let name = control.name.clone();
-                list = list.child(
-                    div()
-                        .id((SharedString::from(control.name.clone()), i))
-                        .pl_2()
-                        .flex()
-                        .items_center()
-                        .h_6()
-                        .hover(|s| s.bg(rgb(BUTTON_BG_HOVER)))
-                        .child(SharedString::from(item.clone()))
-                        .on_click(cx.listener(
-                            move |this: &mut FormWindow, _ev: &gpui::ClickEvent, _win, _cx| {
-                                this.fire(&name, "Click");
-                            },
-                        )),
-                );
+                    }
+                    Part::ListItem(i) | Part::DropItem(i) => {
+                        let spec = this.form.controls[idx].clone();
+                        let was = this.state[idx].text.clone();
+                        this.state[idx].pick(&spec, i);
+                        this.close_lists(None);
+                        if kind == ControlKind::ComboBox && this.state[idx].text != was {
+                            this.fire(&name, "Change");
+                        }
+                        this.fire(&name, "Click");
+                    }
+                    _ => {
+                        this.close_lists(None);
+                        this.fire(&name, "Click");
+                    }
+                }
+                cx.notify();
+            },
+        ),
+    )
+    .on_key_down(
+        cx.listener(move |this: &mut FormWindow, ev: &KeyDownEvent, _win, cx| {
+            let spec = this.form.controls[idx].clone();
+            let editable = match kind {
+                ControlKind::TextBox => true,
+                ControlKind::ComboBox => spec.style != 2,
+                _ => false,
+            };
+            if !editable {
+                return;
             }
-            list
-        }
-        ControlKind::ComboBox | ControlKind::PictureBox => positioned
-            .border_1()
-            .border_color(rgb(CONTROL_BORDER))
-            .bg(rgb(control.color.unwrap_or(BUTTON_BG)))
-            .flex()
-            .items_center()
-            .pl_2()
-            .child(SharedString::from(if control.kind == ControlKind::ComboBox {
-                control
-                    .items
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| control.caption.clone())
-            } else {
-                control.caption.clone()
-            })),
-        ControlKind::Timer => unreachable!("timers are not rendered"),
-    }
+            if edit_text(&mut this.state[idx].text, &ev.keystroke) {
+                this.state[idx].list_index = None;
+                this.fire(&spec.name, "Change");
+                cx.notify();
+            }
+        }),
+    )
 }
 
 /// Open the GPUI window for a form and run the app loop until the window
@@ -278,4 +260,3 @@ pub fn run_form_window(
         cx.activate(true);
     });
 }
-

@@ -1,73 +1,169 @@
 {
   "name": "Form1",
   "caption": "OxidizedBASIC Click Counter",
-  "width": 340,
-  "height": 240,
+  "width": 340.0,
+  "height": 300.0,
   "controls": [
     {
       "name": "Label1",
       "kind": "Label",
-      "rect": { "left": 16, "top": 16, "width": 300, "height": 22 },
+      "rect": {
+        "left": 16.0,
+        "top": 16.0,
+        "width": 250.0,
+        "height": 22.0
+      },
       "caption": "Clicks: 0",
+      "text": null,
+      "items": [],
       "enabled": true,
       "visible": true,
-      "intervalMs": 0
+      "intervalMs": 0,
+      "color": null
     },
     {
       "name": "Command1",
       "kind": "CommandButton",
-      "rect": { "left": 16, "top": 48, "width": 100, "height": 30 },
+      "rect": {
+        "left": 16.0,
+        "top": 48.0,
+        "width": 100.0,
+        "height": 30.0
+      },
       "caption": "Click Me",
+      "text": null,
+      "items": [],
       "enabled": true,
       "visible": true,
-      "intervalMs": 0
+      "intervalMs": 0,
+      "color": null
     },
     {
       "name": "Command2",
       "kind": "CommandButton",
-      "rect": { "left": 124, "top": 48, "width": 100, "height": 30 },
+      "rect": {
+        "left": 124.0,
+        "top": 48.0,
+        "width": 100.0,
+        "height": 30.0
+      },
       "caption": "Reset",
+      "text": null,
+      "items": [],
       "enabled": true,
       "visible": true,
-      "intervalMs": 0
+      "intervalMs": 0,
+      "color": null
     },
     {
       "name": "Text1",
       "kind": "TextBox",
-      "rect": { "left": 16, "top": 90, "width": 208, "height": 24 },
+      "rect": {
+        "left": 16.0,
+        "top": 90.0,
+        "width": 208.0,
+        "height": 24.0
+      },
       "caption": "",
       "text": "type here...",
+      "items": [],
       "enabled": true,
       "visible": true,
-      "intervalMs": 0
+      "intervalMs": 0,
+      "color": null
     },
     {
       "name": "Label2",
       "kind": "Label",
-      "rect": { "left": 16, "top": 122, "width": 300, "height": 22 },
+      "rect": {
+        "left": 16.0,
+        "top": 122.0,
+        "width": 250.0,
+        "height": 22.0
+      },
       "caption": "(echo)",
+      "text": null,
+      "items": [],
       "enabled": true,
       "visible": true,
-      "intervalMs": 0
+      "intervalMs": 0,
+      "color": null
     },
     {
       "name": "List1",
       "kind": "ListBox",
-      "rect": { "left": 16, "top": 150, "width": 208, "height": 60 },
+      "rect": {
+        "left": 16.0,
+        "top": 150.0,
+        "width": 208.0,
+        "height": 60.0
+      },
       "caption": "",
-      "items": ["Apple", "Banana", "Cherry"],
+      "text": null,
+      "items": [
+        "Apple",
+        "Banana",
+        "Cherry"
+      ],
       "enabled": true,
       "visible": true,
-      "intervalMs": 0
+      "intervalMs": 0,
+      "color": null
     },
     {
       "name": "Timer1",
       "kind": "Timer",
-      "rect": { "left": 0, "top": 0, "width": 0, "height": 0 },
+      "rect": {
+        "left": 0.0,
+        "top": 0.0,
+        "width": 0.0,
+        "height": 0.0
+      },
       "caption": "",
+      "text": null,
+      "items": [],
       "enabled": true,
       "visible": false,
-      "intervalMs": 1000
+      "intervalMs": 1000,
+      "color": null
+    },
+    {
+      "name": "Combo1",
+      "kind": "ComboBox",
+      "rect": {
+        "left": 128.0,
+        "top": 229.0,
+        "width": 100.0,
+        "height": 28.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [
+        "one",
+        "two",
+        "three"
+      ],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null
+    },
+    {
+      "name": "Label3",
+      "kind": "Label",
+      "rect": {
+        "left": 11.0,
+        "top": 229.0,
+        "width": 100.0,
+        "height": 28.0
+      },
+      "caption": "List",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null
     }
   ]
 }

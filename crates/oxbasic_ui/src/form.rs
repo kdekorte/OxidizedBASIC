@@ -62,7 +62,12 @@ pub struct Rect {
 
 impl Rect {
     pub fn new(left: f32, top: f32, width: f32, height: f32) -> Rect {
-        Rect { left, top, width, height }
+        Rect {
+            left,
+            top,
+            width,
+            height,
+        }
     }
 }
 
@@ -94,10 +99,45 @@ pub struct ControlSpec {
     /// Fill color for PictureBox, as 0xRRGGBB.
     #[serde(default)]
     pub color: Option<u32>,
+    /// `Style` (ComboBox): 0 = Dropdown Combo (editable text + drop-down
+    /// list), 1 = Simple Combo (editable text + always-visible list),
+    /// 2 = Dropdown List (pick only). Other kinds ignore it.
+    #[serde(default)]
+    pub style: u8,
 }
 
 fn default_true() -> bool {
     true
+}
+
+impl ControlKind {
+    /// Size in pixels a control gets when dropped from the toolbox, close
+    /// to VB6's defaults (a Timer has no size: it is invisible at run time).
+    pub fn default_size(&self) -> (f32, f32) {
+        match self {
+            ControlKind::CommandButton => (96.0, 28.0),
+            ControlKind::Label => (100.0, 20.0),
+            ControlKind::TextBox => (120.0, 24.0),
+            ControlKind::Frame => (160.0, 100.0),
+            ControlKind::ListBox => (120.0, 84.0),
+            ControlKind::ComboBox => (120.0, 24.0),
+            ControlKind::PictureBox => (100.0, 100.0),
+            ControlKind::Timer => (0.0, 0.0),
+        }
+    }
+
+    /// Whether the control has a `Caption` property in VB6.
+    pub fn has_caption(&self) -> bool {
+        matches!(
+            self,
+            ControlKind::CommandButton | ControlKind::Label | ControlKind::Frame
+        )
+    }
+
+    /// Whether the control has an editable `Text` property in VB6.
+    pub fn has_text(&self) -> bool {
+        matches!(self, ControlKind::TextBox | ControlKind::ComboBox)
+    }
 }
 
 impl ControlSpec {
@@ -155,6 +195,7 @@ impl FormSpec {
             visible: true,
             interval_ms: 0,
             color: None,
+            style: 0,
         })
     }
 
@@ -171,6 +212,7 @@ impl FormSpec {
             visible: true,
             interval_ms: 0,
             color: None,
+            style: 0,
         })
     }
 
@@ -187,6 +229,7 @@ impl FormSpec {
             visible: true,
             interval_ms: 0,
             color: None,
+            style: 0,
         })
     }
 
@@ -203,6 +246,7 @@ impl FormSpec {
             visible: false,
             interval_ms,
             color: None,
+            style: 0,
         })
     }
 
@@ -224,7 +268,6 @@ impl FormSpec {
     }
 }
 
-
 /// The event dispatch engine connecting UI events to BASIC subroutines.
 ///
 /// `on_sub` receives the fully-derived handler name (e.g.
@@ -238,7 +281,10 @@ pub struct FormDispatcher {
 
 impl FormDispatcher {
     pub fn new(form: FormSpec) -> FormDispatcher {
-        FormDispatcher { form, registry: EventRegistry::default() }
+        FormDispatcher {
+            form,
+            registry: EventRegistry::default(),
+        }
     }
 
     pub fn form(&self) -> &FormSpec {
@@ -277,7 +323,12 @@ impl FormDispatcher {
     }
 
     /// Dispatch a UI event to BASIC: `dispatch("Command1", "Click", &mut rt)`.
-    pub fn dispatch<F>(&self, control: &str, event: &str, evaluate_sub: &mut F) -> Result<(), String>
+    pub fn dispatch<F>(
+        &self,
+        control: &str,
+        event: &str,
+        evaluate_sub: &mut F,
+    ) -> Result<(), String>
     where
         F: FnMut(&str) -> Result<(), String>,
     {
@@ -309,7 +360,10 @@ mod tests {
         let back = FormSpec::from_oxform(&json).unwrap();
         assert_eq!(back.name, "Form1");
         assert_eq!(back.controls.len(), 4);
-        assert_eq!(back.control_by_name("command1").unwrap().kind, ControlKind::CommandButton);
+        assert_eq!(
+            back.control_by_name("command1").unwrap().kind,
+            ControlKind::CommandButton
+        );
         assert_eq!(back.control_by_name("text1").unwrap().text(), "type here");
         assert_eq!(back.control_by_name("timer1").unwrap().interval_ms, 250);
         assert_eq!(back.controls[0].rect.left, 16.0);
@@ -317,8 +371,14 @@ mod tests {
 
     #[test]
     fn control_kind_parsing() {
-        assert_eq!(ControlKind::from_basic_name("CommandButton"), Some(ControlKind::CommandButton));
-        assert_eq!(ControlKind::from_basic_name("textbox"), Some(ControlKind::TextBox));
+        assert_eq!(
+            ControlKind::from_basic_name("CommandButton"),
+            Some(ControlKind::CommandButton)
+        );
+        assert_eq!(
+            ControlKind::from_basic_name("textbox"),
+            Some(ControlKind::TextBox)
+        );
         assert_eq!(ControlKind::from_basic_name("nope"), None);
         assert_eq!(ControlKind::Timer.basic_name(), "Timer");
     }
@@ -357,6 +417,30 @@ mod tests {
         assert!(d2.handlers_for("Form1", "Load").is_empty());
     }
 
+    #[test]
+    fn missing_event_handlers_are_noops_and_defined_handler_errors_propagate() {
+        let mut form = FormSpec::new("Form1", "Demo", 300.0, 200.0);
+        form.text_box("Text1", "", Rect::new(10.0, 10.0, 100.0, 24.0));
+        form.button("Command1", "OK", Rect::new(10.0, 40.0, 80.0, 24.0));
+        let mut dispatcher = FormDispatcher::new(form);
+        dispatcher.wire_defined_subs(["Command1_Click"]);
+        let mut calls = Vec::new();
+        let mut evaluate = |name: &str| -> Result<(), String> {
+            calls.push(name.to_string());
+            Err("handler failed".to_string())
+        };
+
+        dispatcher
+            .dispatch("Text1", "Click", &mut evaluate)
+            .unwrap();
+        dispatcher.dispatch("Form", "Load", &mut evaluate).unwrap();
+        assert_eq!(
+            dispatcher.dispatch("command1", "click", &mut evaluate),
+            Err("Command1_Click failed: handler failed".to_string())
+        );
+        assert_eq!(calls, vec!["Command1_Click"]);
+    }
+
     /// End-to-end with the real interpreter: a click runs BASIC code.
     #[test]
     fn dispatch_runs_basic() {
@@ -389,7 +473,10 @@ mod tests {
         let v = rt
             .evaluate_sub(
                 "Add",
-                &[oxbasic_runtime::Variant::Long(3), oxbasic_runtime::Variant::Long(4)],
+                &[
+                    oxbasic_runtime::Variant::Long(3),
+                    oxbasic_runtime::Variant::Long(4),
+                ],
             )
             .unwrap();
         assert!(matches!(v, oxbasic_runtime::Variant::Long(7)));
@@ -397,5 +484,3 @@ mod tests {
         assert!(rt.evaluate_sub("Nope", &[]).is_err());
     }
 }
-
-

@@ -15,13 +15,70 @@ pub enum Tok {
 }
 
 const KEYWORDS: &[&str] = &[
-    "if", "then", "else", "elseif", "end", "select", "case", "for", "each", "in", "to",
-    "step", "next", "do", "loop", "while", "until", "wend", "sub", "function", "exit",
-    "dim", "static", "public", "private", "global", "const", "set", "call", "goto", "on",
-    "error", "resume", "option", "explicit", "mod", "and", "or", "not", "xor", "eqv",
-    "imp", "is", "like", "as", "new", "byval", "byref", "optional", "paramarray",
-    "true", "false", "empty", "null", "nothing", "print", "rem",
+    "if",
+    "then",
+    "else",
+    "elseif",
+    "end",
+    "select",
+    "case",
+    "for",
+    "each",
+    "in",
+    "to",
+    "step",
+    "next",
+    "do",
+    "loop",
+    "while",
+    "until",
+    "wend",
+    "sub",
+    "function",
+    "exit",
+    "dim",
+    "static",
+    "public",
+    "private",
+    "global",
+    "const",
+    "set",
+    "call",
+    "goto",
+    "on",
+    "error",
+    "resume",
+    "option",
+    "explicit",
+    "mod",
+    "and",
+    "or",
+    "not",
+    "xor",
+    "eqv",
+    "imp",
+    "is",
+    "like",
+    "as",
+    "new",
+    "byval",
+    "byref",
+    "optional",
+    "paramarray",
+    "true",
+    "false",
+    "empty",
+    "null",
+    "nothing",
+    "print",
+    "rem",
 ];
+
+/// Whether `word` is a reserved BASIC keyword (case-insensitive) — such
+/// words can't name a control.
+pub fn is_keyword(word: &str) -> bool {
+    KEYWORDS.contains(&word.to_ascii_lowercase().as_str())
+}
 
 fn is_ident_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
@@ -72,9 +129,7 @@ pub fn tokenize_line(line: &str) -> Vec<(String, Tok)> {
             || (chars[i] == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit())
         {
             let mut j = i;
-            while j < chars.len()
-                && (chars[j].is_ascii_digit() || chars[j] == '.')
-            {
+            while j < chars.len() && (chars[j].is_ascii_digit() || chars[j] == '.') {
                 j += 1;
             }
             // exponent / hex suffix

@@ -6,7 +6,7 @@ Full syntax and semantic compatibility with Visual Basic 6.0 / classic VBA
 is the goal; GPUI-based GUI rendering and the visual IDE follow in later
 phases.
 
-## Status — Phases 1, 2 & 3 complete
+## Status — Phases 1 & 2 complete, Phase 3 (IDE) in progress
 
 ### Phase 1: syntax parser & core runtime
 - **Parser** (`oxbasic_parser`): `pest` grammar for the classic VB6/VBA
@@ -45,15 +45,21 @@ phases.
 
 ### Phase 3: the visual IDE
 - **`oxbasic ide [file.bas] [form.oxform]`** launches a GPUI IDE window:
-  - **Code editor** with BASIC syntax highlighting (keywords, strings,
-    numbers, comments), keyboard editing with cursor, auto-indent after
-    `Then`/`Do`, and a clickable **breakpoint gutter** (red dots).
+  - **Code window** (View Code / F7, or double-click a control): opens
+    the module in its own window. Its header has an object select box
+    (`(General)`, `Form`, every control) and, beside it, the event select
+    box for that object (bold = has code). Picking an event jumps to its
+    handler, inserting a `Private Sub Object_Event(...)` placeholder if it
+    doesn't exist. Double-clicking a control opens its default event.
   - **Visual form designer**: the form canvas renders the `.oxform`
     layout; click to select controls, **drag to move** them, and add
-    Button / Label / TextBox / Timer controls from the toolbar.
-  - **Property inspector**: live-editable Caption, Text, Items,
-    Left/Top/Width/Height, and Timer interval for the selected control;
-    `Save Form` writes the `.oxform` JSON, `Save Code` the `.bas` file.
+    Button / Label / TextBox / Timer controls from the toolbox. The
+    designer shows no code; Timers appear as ◷ icons.
+  - **Property inspector**: `(Name)` (renames the control and its
+    `Name_Event` handlers and references in code), Caption, Text, Items,
+    Left/Top/Width/Height, Timer interval; the form's own properties show
+    when nothing is selected. Names are validated as you type.
+
   - **Debugger**: Run / Step / Stop toolbar controls. The program runs
     on a background thread with a debug hook — **breakpoints by source
     line** (the parser now emits line markers), **step-over** semantics,
@@ -136,9 +142,12 @@ xcodebuild -downloadComponent MetalToolchain
 - GUI control *properties* (e.g. `Label1.Caption = "x"` from BASIC) are
   not yet writable from program code — edit them in the IDE's property
   inspector; runtime property binding is a follow-up.
-- The IDE's Run/Step executes the program with module-level code and
-  event subs (a click in the designer doesn't fire `Command1_Click`
-  yet — use `oxbasic gui` for live form events).
+- Run opens the form in its own OS window (closing it or Stop ends the
+  program). Only `Click` events are routed from that window so far;
+  TextBox typing, ListBox selection and Timers still need `oxbasic gui`.
+- Property-inspector editing and toolbox adding were reworked (per-field
+  focus, redraw on add) but have only been checked by build/tests, not
+  yet by hand.
 - The IDE's editor is line-based (no mouse text selection yet); the
   debugger supports breakpoints, step-over, and watch (no step-into).
 - `MsgBox` prints to the console/output pane (a native GPUI dialog is a

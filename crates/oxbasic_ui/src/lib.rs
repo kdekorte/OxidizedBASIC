@@ -21,6 +21,8 @@
 mod form;
 #[cfg(feature = "gpui")]
 pub mod gpui_backend;
+#[cfg(feature = "gpui")]
+pub mod gpui_controls;
 
 pub use form::*;
 
@@ -97,16 +99,143 @@ pub fn map_control(name: &str) -> Option<&'static str> {
         .map(|m| m.gpui_component)
 }
 
-/// The classic BASIC event names each control can raise.
-pub fn events_for_control(control: &str) -> &'static [&'static str] {
+const KEY_UPDOWN: &str = "KeyCode As Integer, Shift As Integer";
+const KEY_PRESS: &str = "KeyAscii As Integer";
+const MOUSE: &str = "Button As Integer, Shift As Integer, X As Single, Y As Single";
+
+/// The classic VB6 events each control kind raises, as
+/// `(event name, handler parameter list)`, sorted by name the way VB's
+/// procedure list shows them. The parameter list is what a generated
+/// `Private Sub <Control>_<Event>(…)` placeholder declares.
+pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)] {
     match control.to_ascii_lowercase().as_str() {
-        "commandbutton" => &["Click", "MouseDown", "MouseUp"],
-        "textbox" => &["Change", "KeyPress", "LostFocus"],
-        "form" => &["Load", "Unload", "Resize", "Click", "KeyPress"],
-        "timer" => &["Timer"],
-        "listbox" | "combobox" => &["Change", "Click"],
+        "commandbutton" => &[
+            ("Click", ""),
+            ("GotFocus", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+        ],
+        "label" => &[
+            ("Change", ""),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+        ],
+        "textbox" => &[
+            ("Change", ""),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("GotFocus", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+        ],
+        "frame" => &[
+            ("Click", ""),
+            ("DblClick", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+        ],
+        "listbox" => &[
+            ("Change", ""),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("GotFocus", ""),
+            ("ItemCheck", "Item As Integer"),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+            ("Scroll", ""),
+        ],
+        "combobox" => &[
+            ("Change", ""),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("DropDown", ""),
+            ("GotFocus", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LostFocus", ""),
+            ("Scroll", ""),
+        ],
+        "picturebox" => &[
+            ("Change", ""),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("GotFocus", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+            ("Paint", ""),
+            ("Resize", ""),
+        ],
+        "timer" => &[("Timer", "")],
+        "form" => &[
+            ("Activate", ""),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("Deactivate", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("Load", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+            ("Paint", ""),
+            ("QueryUnload", "Cancel As Integer, UnloadMode As Integer"),
+            ("Resize", ""),
+            ("Unload", "Cancel As Integer"),
+        ],
         _ => &[],
     }
+}
+
+/// The classic BASIC event names each control can raise.
+pub fn events_for_control(control: &str) -> Vec<&'static str> {
+    event_signatures(control).iter().map(|(e, _)| *e).collect()
+}
+
+/// The handler parameter list for `control`'s `event` (case-insensitive),
+/// or `None` when that control kind doesn't raise the event.
+pub fn event_params(control: &str, event: &str) -> Option<&'static str> {
+    event_signatures(control)
+        .iter()
+        .find(|(e, _)| e.eq_ignore_ascii_case(event))
+        .map(|(_, p)| *p)
+}
+
+/// The event VB's designer opens when a control is double-clicked
+/// (`Command1` → `Click`, `Text1` → `Change`, `Form` → `Load`, …).
+pub fn default_event(control: &str) -> Option<&'static str> {
+    Some(match control.to_ascii_lowercase().as_str() {
+        "commandbutton" | "label" | "frame" | "listbox" | "picturebox" => "Click",
+        "textbox" | "combobox" => "Change",
+        "timer" => "Timer",
+        "form" => "Load",
+        _ => return None,
+    })
 }
 
 /// Registry connecting GPUI input events to BASIC event-handler
@@ -130,7 +259,11 @@ pub struct EventRegistry {
 
 impl EventRegistry {
     fn key(control: &str, event: &str) -> String {
-        format!("{}_{}", control.to_ascii_lowercase(), event.to_ascii_lowercase())
+        format!(
+            "{}_{}",
+            control.to_ascii_lowercase(),
+            event.to_ascii_lowercase()
+        )
     }
 }
 
@@ -193,6 +326,38 @@ mod tests {
     fn control_events() {
         assert!(events_for_control("Timer").contains(&"Timer"));
         assert!(events_for_control("form").contains(&"Load"));
+        // a button doesn't raise Change
+        assert!(!events_for_control("CommandButton").contains(&"Change"));
+    }
+
+    #[test]
+    fn event_signatures_defaults_and_params() {
+        for kind in [
+            "CommandButton",
+            "Label",
+            "TextBox",
+            "Frame",
+            "ListBox",
+            "ComboBox",
+            "PictureBox",
+            "Timer",
+            "Form",
+        ] {
+            let events = events_for_control(kind);
+            assert!(!events.is_empty(), "{} has no events", kind);
+            let mut sorted = events.clone();
+            sorted.sort();
+            assert_eq!(events, sorted, "{} events must be sorted", kind);
+            let default = default_event(kind).expect("default event");
+            assert!(events.contains(&default), "{} default {}", kind, default);
+        }
+        assert_eq!(event_params("CommandButton", "click"), Some(""));
+        assert_eq!(
+            event_params("TextBox", "KeyPress"),
+            Some("KeyAscii As Integer")
+        );
+        assert_eq!(event_params("Form", "Unload"), Some("Cancel As Integer"));
+        assert_eq!(event_params("Timer", "Click"), None);
+        assert_eq!(default_event("Unknown"), None);
     }
 }
-

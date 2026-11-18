@@ -12,6 +12,9 @@ oxbasic_runtime = { workspace = true }
 oxbasic_ui = { workspace = true, features = ["gpui"] }
 gpui = "0.2.2"
 
+[dev-dependencies]
+gpui = { version = "0.2.2", features = ["test-support"] }
+
 [[bin]]
 name = "oxbasic"
 path = "src/main.rs"
