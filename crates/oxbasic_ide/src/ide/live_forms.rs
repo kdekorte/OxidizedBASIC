@@ -90,6 +90,11 @@ impl Ide {
     fn form_window_closed(&mut self, index: usize, cx: &mut Context<Self>) {
         self.form_windows.remove(&index);
         self.live_forms.remove(&index);
+        // the program unloads the form (and ends with its last one); with
+        // no window left it is over either way
+        if let Some(s) = &self.session {
+            s.send(DebugCommand::Closed(index));
+        }
         if self.live && self.form_windows.is_empty() {
             self.stop_program(cx);
         }

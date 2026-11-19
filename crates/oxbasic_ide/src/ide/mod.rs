@@ -627,6 +627,8 @@ impl Ide {
 }
 
 #[cfg(test)]
+mod multiform_tests;
+#[cfg(test)]
 mod project_tests;
 #[cfg(test)]
 mod toolbox_tests;

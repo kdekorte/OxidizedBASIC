@@ -35,6 +35,9 @@ pub enum DebugCommand {
     /// program's `Text1.Text` / `List1.ListIndex` must show it. Sent before
     /// the event it causes, so the handler already sees the new value.
     Edit(usize, UserEdit),
+    /// The user closed form `form`'s window: the form is unloaded, as if
+    /// the program had said `Unload`. The program ends with its last form.
+    Closed(usize),
 }
 
 /// Events the running program sends to the IDE.
@@ -303,7 +306,7 @@ fn run_program(
                     // typing while paused still reaches the form
                     Ok(DebugCommand::Edit(form, e)) => apply_edit(&host, form, e),
                     // events arriving while paused are dropped
-                    Ok(DebugCommand::Call(..)) => continue,
+                    Ok(DebugCommand::Call(..)) | Ok(DebugCommand::Closed(_)) => continue,
                 }
             }
         }));
@@ -394,6 +397,12 @@ fn serve(
                 *alive = flush_forms(host, rt, names, tx) && *alive;
             }
             Ok(DebugCommand::Edit(form, e)) => apply_edit(host, form, e),
+            // the user closed a window: that form is unloaded (its `Unload`
+            // handler isn't run — the window is already gone)
+            Ok(DebugCommand::Closed(form)) => {
+                h.borrow_mut().unload(form);
+                let _ = h.borrow_mut().take_commands();
+            }
             Ok(DebugCommand::Stop) | Err(_) => *alive = false,
             Ok(_) => {}
         }
