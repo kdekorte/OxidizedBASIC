@@ -234,6 +234,13 @@ pub trait ObjectHost {
     ) -> ExecResult<()>;
     /// Call `object.method args` (`List1.AddItem "a"`, `Text1.SetFocus`).
     fn call(&mut self, object: &ObjectRef, method: &str, args: &[Variant]) -> ExecResult<Variant>;
+    /// The form whose code is running (so a bare `Label1` means *its*
+    /// control). Empty when no form's code is.
+    fn context(&self) -> String {
+        String::new()
+    }
+    /// The interpreter entered code that belongs to form `ctx`.
+    fn set_context(&mut self, _ctx: &str) {}
 }
 
 /// The OxidizedBASIC interpreter.
@@ -256,6 +263,8 @@ pub struct Interpreter<'out> {
     debug_hook: Option<Box<dyn FnMut(&PausedInfo) -> DebugAction>>,
     /// The objects `Name.Member` resolves against (a form's controls).
     objects: Option<Rc<RefCell<dyn ObjectHost>>>,
+    /// `End` ran: the program is over, wherever it was.
+    ended: bool,
 }
 
 /// Debugger pause notification: where execution stopped and what the
@@ -333,6 +342,7 @@ impl<'out> Interpreter<'out> {
             step_depth: None,
             debug_hook: None,
             objects: None,
+            ended: false,
         };
         it.add_program(prog);
         it
@@ -364,6 +374,13 @@ impl<'out> Interpreter<'out> {
         let mut f = Frame::main();
         self.exec_block(&stmts, &mut f)?;
         Ok(())
+    }
+
+    /// Whether the program ran `End`. A caller serving events checks this
+    /// after each call: `End` inside a nested `Sub` only unwinds that call,
+    /// but the program as a whole is over.
+    pub fn has_ended(&self) -> bool {
+        self.ended
     }
 
     /// Execute one source snippet in the global (main) scope (REPL).
@@ -522,10 +539,29 @@ impl<'out> Interpreter<'out> {
         }
         self.depth += 1;
         let body = decl.body.clone();
+        let prev = self.enter_context(&decl.name);
         let flow = self.exec_block(&body, &mut callee);
+        self.leave_context(prev);
         self.depth -= 1;
         flow?;
         Ok(callee.ret)
+    }
+
+    /// A procedure named `Form2__Command1_Click` belongs to form `Form2`:
+    /// tell the host, so a bare `Label1` in it means that form's control.
+    /// Returns the form that was running, to restore on leaving.
+    fn enter_context(&mut self, proc_name: &str) -> Option<String> {
+        let host = self.objects.as_ref()?;
+        let (form, _) = proc_name.split_once("__")?;
+        let prev = host.borrow().context();
+        host.borrow_mut().set_context(form);
+        Some(prev)
+    }
+
+    fn leave_context(&mut self, prev: Option<String>) {
+        if let (Some(prev), Some(host)) = (prev, &self.objects) {
+            host.borrow_mut().set_context(&prev);
+        }
     }
 
     // -- scope helpers ------------------------------------------------------
@@ -675,7 +711,12 @@ impl<'out> Interpreter<'out> {
             self.debug_check(f)?;
             match self.exec_stmt(&stmts[i], f) {
                 Ok(flow) => match flow {
-                    Flow::Normal => {}
+                    Flow::Normal => {
+                        // `End` inside a called Sub unwinds every caller too
+                        if self.ended {
+                            return Ok(Flow::Halt);
+                        }
+                    }
                     Flow::ExitDo | Flow::ExitFor | Flow::ExitProc | Flow::Halt => return Ok(flow),
                     Flow::Goto(l) => match labels.get(&l.to_lowercase()) {
                         Some(&j) => {
@@ -731,7 +772,10 @@ impl<'out> Interpreter<'out> {
                 self.option_explicit = true;
                 Ok(Flow::Normal)
             }
-            Stmt::End => Ok(Flow::Halt),
+            Stmt::End => {
+                self.ended = true;
+                Ok(Flow::Halt)
+            }
             Stmt::Dim(decls) => {
                 for d in decls {
                     let dims = match &d.dims {
@@ -1140,6 +1184,24 @@ impl<'out> Interpreter<'out> {
                 self.call_member(obj, name, args, f)?;
             }
             Expr::Var(name) => {
+                // `Unload Me` / `Load Form2`: the argument names an object,
+                // it isn't a value
+                let lower = name.to_ascii_lowercase();
+                if (lower == "unload" || lower == "load") && args.len() == 1 {
+                    if let Expr::Var(target) = &args[0] {
+                        if self.is_host_object(target, f) {
+                            let host = self.objects.clone().expect("is_host_object needs a host");
+                            let object = ObjectRef {
+                                name: target.clone(),
+                                index: None,
+                            };
+                            let method = if lower == "unload" { "Unload" } else { "Load" };
+                            let result = host.borrow_mut().call(&object, method, &[]);
+                            result?;
+                            return Ok(());
+                        }
+                    }
+                }
                 self.call_proc(name, args, f)?;
             }
             other => {
@@ -1307,7 +1369,9 @@ impl<'out> Interpreter<'out> {
             }
             self.depth += 1;
             let body = decl.body.clone();
+            let prev = self.enter_context(&decl.name);
             let flow = self.exec_block(&body, &mut callee);
+            self.leave_context(prev);
             self.depth -= 1;
             flow?;
             Ok(callee.ret)

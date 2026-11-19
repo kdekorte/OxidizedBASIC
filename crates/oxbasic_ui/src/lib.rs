@@ -26,6 +26,7 @@ pub mod gpui_controls;
 
 pub mod host;
 pub mod project;
+pub mod project_host;
 pub use form::*;
 
 use std::collections::HashMap;

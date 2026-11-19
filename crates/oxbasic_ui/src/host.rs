@@ -59,6 +59,8 @@ pub struct FormSnapshot {
     /// The control the program gave the focus to (`Text1.SetFocus`), if it
     /// did since the last snapshot.
     pub focus: Option<usize>,
+    /// Which form of the project this is (0 for a single-form program).
+    pub form_index: usize,
 }
 
 impl FormSnapshot {
@@ -158,6 +160,19 @@ impl FormHost {
         }
     }
 
+    /// The form's name.
+    pub fn name(&self) -> &str {
+        &self.form.name
+    }
+
+    /// Whether the form has a control called `name`.
+    pub fn has_control(&self, name: &str) -> bool {
+        self.form
+            .controls
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(name))
+    }
+
     /// The form as it stands now, every control's state included.
     pub fn snapshot(&self) -> FormSnapshot {
         FormSnapshot {
@@ -165,6 +180,7 @@ impl FormHost {
             state: self.state.clone(),
             touched: vec![true; self.form.controls.len()],
             focus: self.focus,
+            form_index: 0,
         }
     }
 
@@ -180,6 +196,7 @@ impl FormHost {
             state: self.state.clone(),
             touched,
             focus: self.focus.take(),
+            form_index: 0,
         })
     }
 
