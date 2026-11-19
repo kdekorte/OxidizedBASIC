@@ -26,6 +26,8 @@ pub mod gpui_controls;
 
 pub mod events;
 pub mod host;
+mod host_controls;
+pub use host_controls::{container_key, split_element};
 pub mod project;
 pub mod project_host;
 pub use form::*;
@@ -189,8 +191,9 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
             ("LostFocus", ""),
             ("Scroll", ""),
         ],
-        // Change is raised when its Picture changes: no Picture here
+        // Change: the Picture changed
         "picturebox" => &[
+            ("Change", ""),
             ("Click", ""),
             ("DblClick", ""),
             ("GotFocus", ""),

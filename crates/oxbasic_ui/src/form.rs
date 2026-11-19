@@ -123,6 +123,13 @@ pub struct ControlSpec {
     /// `ForeColor`, as 0xRRGGBB (`None`: the usual text colour).
     #[serde(default)]
     pub fore_color: Option<u32>,
+    /// The VB system colour (`&H800000nn`) `BackColor` / `ForeColor` were
+    /// set to, if they were: the program reads that back, while `color` /
+    /// `fore_color` hold what it looks like.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub back_system: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fore_system: Option<u32>,
     /// `Font`.
     #[serde(default)]
     pub font: FontSpec,
@@ -133,6 +140,51 @@ pub struct ControlSpec {
     /// `TabStop`: Tab stops on the control (a click still focuses it).
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub tab_stop: bool,
+    /// `ToolTipText`: shown when the pointer rests on the control.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tool_tip: String,
+    /// `MousePointer`: VB's pointer number (0 default, 1 arrow, 2 cross,
+    /// 3 I-beam, 11 hourglass...).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub mouse_pointer: i16,
+    /// `Locked` (TextBox, ComboBox): the text can be read and selected but
+    /// not typed into.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+    /// `MaxLength` (TextBox): the most characters typing can make; 0 is no
+    /// limit.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub max_length: u32,
+    /// `MultiLine` (TextBox): Enter starts a new line and the text wraps.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multi_line: bool,
+    /// `ScrollBars` (TextBox): 0 none, 1 horizontal, 2 vertical, 3 both.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub scroll_bars: u8,
+    /// `MultiSelect` (ListBox): 0 one row, 1 a click toggles rows, 2 Shift
+    /// and Ctrl extend the selection.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub multi_select: u8,
+    /// `Container`: the Frame or PictureBox (by name and index) the
+    /// control sits in, its `Left`/`Top` relative to it; `None` is the form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    /// `Picture` (PictureBox): the image file it shows, as given to
+    /// `LoadPicture` (relative to the project folder).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub picture: String,
+}
+
+fn is_zero(n: &i16) -> bool {
+    *n == 0
+}
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 fn is_true(b: &bool) -> bool {
@@ -220,6 +272,11 @@ impl ControlKind {
         !matches!(self, ControlKind::PictureBox | ControlKind::Timer)
     }
 
+    /// Whether other controls can sit inside it (`Container`).
+    pub fn is_container(&self) -> bool {
+        matches!(self, ControlKind::Frame | ControlKind::PictureBox)
+    }
+
     /// Whether the control can take the keyboard focus (`SetFocus`, Tab).
     pub fn can_focus(&self) -> bool {
         matches!(
@@ -254,9 +311,20 @@ impl ControlSpec {
             index: None,
             value: 0,
             fore_color: None,
+            back_system: None,
+            fore_system: None,
             font: FontSpec::default(),
             tab_index: None,
             tab_stop: true,
+            tool_tip: String::new(),
+            mouse_pointer: 0,
+            locked: false,
+            max_length: 0,
+            multi_line: false,
+            scroll_bars: 0,
+            multi_select: 0,
+            container: None,
+            picture: String::new(),
         }
     }
 }
@@ -386,9 +454,93 @@ impl FormSpec {
             .into_iter()
             .filter(|&i| {
                 let c = &self.controls[i];
-                c.kind.can_focus() && c.enabled && c.visible && c.tab_stop
+                c.kind.can_focus() && c.enabled && c.visible && c.tab_stop && self.shown(i)
             })
             .collect()
+    }
+
+    /// The control that contains control `i` (its `Container`), if it is in
+    /// one that exists.
+    pub fn container_of(&self, i: usize) -> Option<usize> {
+        let key = self.controls.get(i)?.container.as_deref()?;
+        self.controls.iter().position(|c| {
+            c.kind.is_container() && crate::container_key(c).eq_ignore_ascii_case(key)
+        })
+    }
+
+    /// Whether `inner` sits (at any depth) inside container `outer`.
+    pub fn contains(&self, outer: usize, inner: usize) -> bool {
+        let mut at = self.container_of(inner);
+        let mut steps = 0;
+        while let Some(c) = at {
+            if c == outer {
+                return true;
+            }
+            steps += 1;
+            if steps > self.controls.len() {
+                return false; // a loop in a hand-edited file
+            }
+            at = self.container_of(c);
+        }
+        false
+    }
+
+    /// Control `i`'s position on the form: its `Left`/`Top` are from its
+    /// container's inside, which is offset by the container's own position
+    /// (a Frame's inside starts below its caption, as in VB: 0,0 is the
+    /// frame's corner).
+    pub fn form_origin(&self, i: usize) -> (f32, f32) {
+        let r = self.controls[i].rect;
+        let mut x = r.left;
+        let mut y = r.top;
+        let mut at = self.container_of(i);
+        let mut steps = 0;
+        while let Some(c) = at {
+            x += self.controls[c].rect.left;
+            y += self.controls[c].rect.top;
+            steps += 1;
+            if steps > self.controls.len() {
+                break;
+            }
+            at = self.container_of(c);
+        }
+        (x, y)
+    }
+
+    /// Whether control `i` is visible on the form: it and every container
+    /// around it is `Visible` (a hidden frame hides what is in it).
+    pub fn shown(&self, i: usize) -> bool {
+        let mut at = Some(i);
+        let mut steps = 0;
+        while let Some(c) = at {
+            if !self.controls[c].visible {
+                return false;
+            }
+            steps += 1;
+            if steps > self.controls.len() {
+                break;
+            }
+            at = self.container_of(c);
+        }
+        true
+    }
+
+    /// Whether control `i` takes input: it and its containers are enabled
+    /// (a disabled frame disables what is in it, as in VB).
+    pub fn usable(&self, i: usize) -> bool {
+        let mut at = Some(i);
+        let mut steps = 0;
+        while let Some(c) = at {
+            if !self.controls[c].enabled {
+                return false;
+            }
+            steps += 1;
+            if steps > self.controls.len() {
+                break;
+            }
+            at = self.container_of(c);
+        }
+        true
     }
 
     /// Serialize to `.oxform` JSON (pretty).

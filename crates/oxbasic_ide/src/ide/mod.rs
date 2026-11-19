@@ -2471,11 +2471,17 @@ impl Ide {
             "value" => format!("{}", c.value),
             "index" => c.index.map(|i| i.to_string()).unwrap_or_default(),
             "enabled" => if c.enabled { "True" } else { "False" }.to_string(),
-            "backcolor" => c.color.map(|v| format!("#{:06X}", v)).unwrap_or_default(),
-            "forecolor" => c
-                .fore_color
-                .map(|v| format!("#{:06X}", v))
-                .unwrap_or_default(),
+            "backcolor" => match c.back_system {
+                Some(sys) => format!("&H{:08X}&", sys),
+                None => c.color.map(|v| format!("#{:06X}", v)).unwrap_or_default(),
+            },
+            "forecolor" => match c.fore_system {
+                Some(sys) => format!("&H{:08X}&", sys),
+                None => c
+                    .fore_color
+                    .map(|v| format!("#{:06X}", v))
+                    .unwrap_or_default(),
+            },
             "fontname" => c.font.name.clone(),
             "fontsize" => format!("{}", c.font.size),
             "fontbold" => if c.font.bold { "True" } else { "False" }.to_string(),
@@ -2504,6 +2510,18 @@ impl Ide {
             .map(|h| h.trim_end_matches('&'))?;
         let vb = i64::from_str_radix(hex, 16).ok()?;
         oxbasic_ui::host::from_vb_color(vb).ok().map(Some)
+    }
+
+    /// The system colour bits of a colour typed as `&H8000000F&`, if it is
+    /// one (so the Properties window and the program keep showing it).
+    fn parse_system_color(val: &str) -> Option<u32> {
+        let v = val.trim();
+        let hex = v
+            .strip_prefix("&H")
+            .or_else(|| v.strip_prefix("&h"))?
+            .trim_end_matches('&');
+        let vb = i64::from_str_radix(hex, 16).ok()?;
+        oxbasic_ui::host::system_bits(vb)
     }
 
     /// `True`/`False` (or 1/0) typed in the inspector.
@@ -2610,11 +2628,13 @@ impl Ide {
             "backcolor" => {
                 if let Some(col) = Self::parse_color(val) {
                     c.color = col;
+                    c.back_system = Self::parse_system_color(val);
                 }
             }
             "forecolor" => {
                 if let Some(col) = Self::parse_color(val) {
                     c.fore_color = col;
+                    c.fore_system = Self::parse_system_color(val);
                 }
             }
             "fontname" => c.font.name = val.trim().to_string(),

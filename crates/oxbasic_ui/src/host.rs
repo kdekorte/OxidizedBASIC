@@ -19,19 +19,80 @@ pub struct ControlState {
     pub list_index: Option<usize>,
     pub dropped: bool,
     pub value: i32,
+    /// The caret in `text`, in characters (`SelStart` + `SelLength` is
+    /// where it is when a selection was made rightwards).
+    pub caret: usize,
+    /// The other end of the selection in `text`, if any: the selected
+    /// text is between it and `caret`.
+    pub anchor: Option<usize>,
+    /// The rows a MultiSelect ListBox has selected (`Selected(i)`).
+    pub selected: Vec<usize>,
 }
 
 impl ControlState {
     pub fn new(c: &ControlSpec) -> ControlState {
+        let text = match c.kind {
+            ControlKind::TextBox | ControlKind::ComboBox => c.text().to_string(),
+            _ => String::new(),
+        };
         ControlState {
-            text: match c.kind {
-                ControlKind::TextBox | ControlKind::ComboBox => c.text().to_string(),
-                _ => String::new(),
-            },
+            caret: text.chars().count(),
+            text,
             list_index: None,
             dropped: false,
             value: c.value,
+            anchor: None,
+            selected: Vec::new(),
         }
+    }
+
+    /// The selection as `(start, length)` in characters: VB's `SelStart`
+    /// and `SelLength`.
+    pub fn selection(&self) -> (usize, usize) {
+        let len = self.text.chars().count();
+        let caret = self.caret.min(len);
+        match self.anchor.map(|a| a.min(len)) {
+            Some(a) if a != caret => (a.min(caret), a.max(caret) - a.min(caret)),
+            _ => (caret, 0),
+        }
+    }
+
+    /// Select `length` characters from `start` (clamped to the text): the
+    /// caret goes to the end of the selection, as VB's `SelStart` /
+    /// `SelLength` leave it.
+    pub fn select(&mut self, start: usize, length: usize) {
+        let len = self.text.chars().count();
+        let start = start.min(len);
+        let end = (start + length).min(len);
+        self.anchor = (end != start).then_some(start);
+        self.caret = end;
+    }
+
+    /// Replace the selection with `s` (`SelText = s`, or typing); the caret
+    /// ends after it.
+    pub fn replace_selection(&mut self, s: &str) {
+        let (start, length) = self.selection();
+        let chars: Vec<char> = self.text.chars().collect();
+        let mut out: String = chars[..start].iter().collect();
+        out.push_str(s);
+        out.extend(chars[start + length..].iter());
+        self.text = out;
+        self.caret = start + s.chars().count();
+        self.anchor = None;
+    }
+
+    /// The selected text (`SelText`).
+    pub fn selected_text(&self) -> String {
+        let (start, length) = self.selection();
+        self.text.chars().skip(start).take(length).collect()
+    }
+
+    /// Set the whole text (the program's `Text = ...`, or a pick): the
+    /// caret goes to the end, as typing would leave it.
+    pub fn set_text(&mut self, s: String) {
+        self.caret = s.chars().count();
+        self.anchor = None;
+        self.text = s;
     }
 
     /// The user picked item `i` of the control's list.
@@ -40,8 +101,11 @@ impl ControlState {
         self.dropped = false;
         if c.kind == ControlKind::ComboBox {
             if let Some(item) = c.items.get(i) {
-                self.text = item.clone();
+                self.set_text(item.clone());
             }
+        }
+        if c.multi_select == 0 {
+            self.selected = vec![i];
         }
     }
 }
@@ -77,6 +141,9 @@ impl FormSnapshot {
                 state[i].text = mine.text.clone();
                 state[i].list_index = mine.list_index;
                 state[i].value = mine.value;
+                state[i].caret = mine.caret;
+                state[i].anchor = mine.anchor;
+                state[i].selected = mine.selected.clone();
             }
         }
     }
@@ -94,19 +161,35 @@ pub enum UserEdit {
     Value { control: usize, value: i32 },
     /// The user resized the form's window: its inside is now this big.
     FormSize { width: f32, height: f32 },
+    /// The user moved the caret or selection in a text field (after its
+    /// `Text` edit, if the text changed too).
+    Caret {
+        control: usize,
+        caret: usize,
+        anchor: Option<usize>,
+    },
+    /// The rows of a MultiSelect ListBox the user has selected, and the row
+    /// with the focus (`ListIndex`).
+    Selected {
+        control: usize,
+        rows: Vec<usize>,
+        index: Option<usize>,
+    },
 }
 
-/// The OptionButtons that act as one group with `i`: VB groups them by
-/// container, and a form has no containers here, so every OptionButton on
-/// the form is one group.
+/// The OptionButtons that act as one group with `i`: as in VB, the ones in
+/// the same container (the same Frame or PictureBox, or the form itself).
 pub fn option_group(form: &FormSpec, i: usize) -> Vec<usize> {
     if form.controls.get(i).map(|c| c.kind) != Some(ControlKind::OptionButton) {
         return vec![];
     }
+    let home = form.container_of(i);
     form.controls
         .iter()
         .enumerate()
-        .filter(|(j, c)| *j != i && c.kind == ControlKind::OptionButton)
+        .filter(|(j, c)| {
+            *j != i && c.kind == ControlKind::OptionButton && form.container_of(*j) == home
+        })
         .map(|(j, _)| j)
         .collect()
 }
@@ -139,7 +222,7 @@ enum Target {
 
 /// What of a control the program can change that VB raises an event for.
 #[derive(PartialEq, Clone)]
-struct Watched {
+pub(crate) struct Watched {
     text: String,
     caption: String,
     list_index: Option<usize>,
@@ -150,23 +233,31 @@ struct Watched {
 /// The live form, owned by the program's side. The interpreter reads and
 /// writes its objects through [`ObjectHost`].
 pub struct FormHost {
-    form: FormSpec,
-    state: Vec<ControlState>,
+    pub(crate) form: FormSpec,
+    pub(crate) state: Vec<ControlState>,
     /// Something changed since the last [`FormHost::take_changes`].
-    changed: bool,
+    pub(crate) changed: bool,
     /// Controls whose state the program changed since then.
-    touched: Vec<bool>,
+    pub(crate) touched: Vec<bool>,
     /// `SetFocus` was called on this control since then.
-    focus: Option<usize>,
+    pub(crate) focus: Option<usize>,
     /// Events the program's own changes raised, for the interpreter to run
     /// (`Text1.Text = "x"` raises `Text1_Change`).
     raised: Vec<RaisedEvent>,
+    /// The controls the form had at design time, by name and index: their
+    /// array elements can't be unloaded.
+    pub(crate) designed: Vec<(String, Option<i32>)>,
 }
 
 impl FormHost {
     pub fn new(form: FormSpec) -> FormHost {
         let state = form.controls.iter().map(ControlState::new).collect();
         let touched = vec![false; form.controls.len()];
+        let designed = form
+            .controls
+            .iter()
+            .map(|c| (c.name.clone(), c.index))
+            .collect();
         FormHost {
             form,
             state,
@@ -174,11 +265,12 @@ impl FormHost {
             touched,
             focus: None,
             raised: Vec::new(),
+            designed,
         }
     }
 
     /// What of control `i` VB raises events for when the program changes it.
-    fn watched(&self, i: usize) -> Watched {
+    pub(crate) fn watched(&self, i: usize) -> Watched {
         let c = &self.form.controls[i];
         let s = &self.state[i];
         Watched {
@@ -209,7 +301,7 @@ impl FormHost {
     /// statement: a TextBox's or ComboBox's `Text` and a Label's `Caption`
     /// raise `Change`; a list's `ListIndex` and a CheckBox's or a chosen
     /// OptionButton's `Value` raise `Click`; a PictureBox's size `Resize`.
-    fn raise_changes(&mut self, i: usize, before: &Watched) {
+    pub(crate) fn raise_changes(&mut self, i: usize, before: &Watched) {
         let after = self.watched(i);
         if after == *before {
             return;
@@ -301,8 +393,29 @@ impl FormHost {
         match edit {
             UserEdit::Text { control, text } => {
                 if let Some(s) = self.state.get_mut(control) {
-                    s.text = text;
+                    s.set_text(text);
                     s.list_index = None;
+                }
+            }
+            UserEdit::Caret {
+                control,
+                caret,
+                anchor,
+            } => {
+                if let Some(s) = self.state.get_mut(control) {
+                    let len = s.text.chars().count();
+                    s.caret = caret.min(len);
+                    s.anchor = anchor.map(|a| a.min(len));
+                }
+            }
+            UserEdit::Selected {
+                control,
+                rows,
+                index,
+            } => {
+                if let Some(s) = self.state.get_mut(control) {
+                    s.selected = rows;
+                    s.list_index = index;
                 }
             }
             UserEdit::Pick { control, index } => {
@@ -326,7 +439,7 @@ impl FormHost {
 
     /// The control a program name refers to: `Label1`, or element `index`
     /// of a control array (`Command1(2)`).
-    fn control_index(&self, name: &str, index: Option<i32>) -> Option<usize> {
+    pub(crate) fn control_index(&self, name: &str, index: Option<i32>) -> Option<usize> {
         self.form
             .controls
             .iter()
@@ -341,7 +454,7 @@ impl FormHost {
             .any(|c| c.name.eq_ignore_ascii_case(name) && c.index.is_some())
     }
 
-    fn is_form(&self, object: &str) -> bool {
+    pub(crate) fn is_form(&self, object: &str) -> bool {
         object.eq_ignore_ascii_case("me") || object.eq_ignore_ascii_case(&self.form.name)
     }
 
@@ -391,18 +504,49 @@ impl FormHost {
             "visible" => Variant::Boolean(c.visible),
             "tabindex" => Variant::Integer(self.form.tab_index_of(i) as i16),
             "tabstop" => Variant::Boolean(c.tab_stop),
+            "tooltiptext" => Variant::String(c.tool_tip.clone()),
+            "mousepointer" => Variant::Integer(c.mouse_pointer),
+            "container" => match &c.container {
+                Some(name) => Variant::String(name.clone()),
+                None => Variant::String(self.form.name.clone()),
+            },
+            "picture" if c.kind == ControlKind::PictureBox => Variant::String(c.picture.clone()),
+            // the text controls' selection and limits
+            "selstart" if c.kind.has_text() => Variant::Long(s.selection().0 as i32),
+            "sellength" if c.kind.has_text() => Variant::Long(s.selection().1 as i32),
+            "seltext" if c.kind.has_text() => Variant::String(s.selected_text()),
+            "locked" if c.kind.has_text() => Variant::Boolean(c.locked),
+            "maxlength" if c.kind == ControlKind::TextBox => Variant::Long(c.max_length as i32),
+            "multiline" if c.kind == ControlKind::TextBox => Variant::Boolean(c.multi_line),
+            "scrollbars" if c.kind == ControlKind::TextBox => {
+                Variant::Integer(c.scroll_bars as i16)
+            }
+            // a ListBox's multiple selection
+            "multiselect" if c.kind == ControlKind::ListBox => {
+                Variant::Integer(c.multi_select as i16)
+            }
+            "selected" if is_list => {
+                let n = index_arg(args)?;
+                if n >= c.items.len() {
+                    return err(381, "Invalid property array index");
+                }
+                Variant::Boolean(s.selected.contains(&n))
+            }
+            "selcount" if c.kind == ControlKind::ListBox => Variant::Long(s.selected.len() as i32),
             "enabled" => Variant::Boolean(c.enabled),
             "interval" if c.kind == ControlKind::Timer => Variant::Long(c.interval_ms as i32),
             "style" if c.kind == ControlKind::ComboBox => Variant::Integer(c.style as i16),
             // a CheckBox's Value is 0/1/2; an OptionButton's is a Boolean
             "value" if c.kind == ControlKind::CheckBox => Variant::Integer(s.value as i16),
             "value" if c.kind == ControlKind::OptionButton => Variant::Boolean(s.value != 0),
-            "backcolor" if c.kind != ControlKind::Timer => {
-                Variant::Long(to_vb_color(c.color.unwrap_or(default_back(c.kind))))
-            }
-            "forecolor" if c.kind.has_font() => {
-                Variant::Long(to_vb_color(c.fore_color.unwrap_or(DEFAULT_FORE)))
-            }
+            "backcolor" if c.kind != ControlKind::Timer => match c.back_system {
+                Some(sys) => Variant::Long(sys as i32),
+                None => Variant::Long(to_vb_color(c.color.unwrap_or(default_back(c.kind)))),
+            },
+            "forecolor" if c.kind.has_font() => match c.fore_system {
+                Some(sys) => Variant::Long(sys as i32),
+                None => Variant::Long(to_vb_color(c.fore_color.unwrap_or(DEFAULT_FORE))),
+            },
             // `Font` / `FontName` etc., VB's shorthands for `Font.Name`
             "fontname" | "fontsize" | "fontbold" | "fontitalic" | "fontunderline"
             | "fontstrikethru" => return self.get_font(i, &p[4..]),
@@ -505,7 +649,98 @@ impl FormHost {
             "caption" if kind.has_caption() => {
                 self.form.controls[i].caption = value.as_string()?;
             }
-            "text" if kind.has_text() => self.state[i].text = value.as_string()?,
+            "text" if kind.has_text() => {
+                let mut text = value.as_string()?;
+                // MaxLength limits what the program sets, as VB does
+                let max = self.form.controls[i].max_length as usize;
+                if max > 0 && text.chars().count() > max {
+                    text = text.chars().take(max).collect();
+                }
+                self.state[i].set_text(text);
+            }
+            "tooltiptext" => self.form.controls[i].tool_tip = value.as_string()?,
+            "mousepointer" => {
+                let n = value.as_i64()?;
+                if !(0..=15).contains(&n) && n != 99 {
+                    return err(380, "Invalid property value");
+                }
+                self.form.controls[i].mouse_pointer = n as i16;
+            }
+            "selstart" if kind.has_text() => {
+                let n = value.as_i64()?;
+                if n < 0 {
+                    return err(380, "Invalid property value");
+                }
+                // VB: setting SelStart drops the selection
+                self.state[i].select(n as usize, 0);
+            }
+            "sellength" if kind.has_text() => {
+                let n = value.as_i64()?;
+                if n < 0 {
+                    return err(380, "Invalid property value");
+                }
+                let start = self.state[i].selection().0;
+                self.state[i].select(start, n as usize);
+            }
+            "seltext" if kind.has_text() => {
+                let s = value.as_string()?;
+                self.state[i].replace_selection(&s);
+                let max = self.form.controls[i].max_length as usize;
+                if max > 0 && self.state[i].text.chars().count() > max {
+                    let cut: String = self.state[i].text.chars().take(max).collect();
+                    let caret = self.state[i].caret.min(max);
+                    self.state[i].text = cut;
+                    self.state[i].caret = caret;
+                }
+            }
+            "locked" if kind.has_text() => self.form.controls[i].locked = value.as_bool()?,
+            "maxlength" if kind == ControlKind::TextBox => {
+                let n = value.as_i64()?;
+                if n < 0 {
+                    return err(380, "Invalid property value");
+                }
+                self.form.controls[i].max_length = n as u32;
+            }
+            // VB makes these read-only at run time: they shape the window
+            "multiline" | "scrollbars" if kind == ControlKind::TextBox => {
+                return err(382, "Property is read-only at run time")
+            }
+            "multiselect" if kind == ControlKind::ListBox => {
+                return err(382, "Property is read-only at run time")
+            }
+            "selected" if is_list => {
+                let n = index_arg(args)?;
+                if n >= self.form.controls[i].items.len() {
+                    return err(381, "Invalid property array index");
+                }
+                let on = value.as_bool()?;
+                let multi = self.form.controls[i].multi_select != 0;
+                let s = &mut self.state[i];
+                if !multi {
+                    // a one-row list: selecting a row is choosing it
+                    if on {
+                        s.selected = vec![n];
+                        s.list_index = Some(n);
+                    } else if s.list_index == Some(n) {
+                        s.selected.clear();
+                        s.list_index = None;
+                    }
+                } else if on && !s.selected.contains(&n) {
+                    s.selected.push(n);
+                    s.selected.sort_unstable();
+                } else if !on {
+                    s.selected.retain(|&r| r != n);
+                }
+            }
+            "picture" if kind == ControlKind::PictureBox => {
+                let p = value.as_string()?;
+                if p != self.form.controls[i].picture {
+                    self.form.controls[i].picture = p;
+                    // VB raises a PictureBox's Change when its Picture changes
+                    self.raise(i, "Change");
+                }
+            }
+            "container" => return self.set_container(i, value),
             "text" if kind == ControlKind::ListBox => return err(382, "Property is read-only"),
             "left" => self.form.controls[i].rect.left = coord(value)?,
             "top" => self.form.controls[i].rect.top = coord(value)?,
@@ -561,10 +796,16 @@ impl FormHost {
                 }
             }
             "backcolor" if kind != ControlKind::Timer => {
-                self.form.controls[i].color = Some(from_vb_color(value.as_i64()?)?);
+                let vb = value.as_i64()?;
+                let c = &mut self.form.controls[i];
+                c.color = Some(from_vb_color(vb)?);
+                c.back_system = system_bits(vb);
             }
             "forecolor" if kind.has_font() => {
-                self.form.controls[i].fore_color = Some(from_vb_color(value.as_i64()?)?);
+                let vb = value.as_i64()?;
+                let c = &mut self.form.controls[i];
+                c.fore_color = Some(from_vb_color(vb)?);
+                c.fore_system = system_bits(vb);
             }
             "fontname" | "fontsize" | "fontbold" | "fontitalic" | "fontunderline"
             | "fontstrikethru" => return self.set_font(i, &p[4..], value),
@@ -573,6 +814,9 @@ impl FormHost {
                 let n = value.as_i64()?;
                 if n == -1 {
                     self.state[i].list_index = None;
+                    if self.form.controls[i].multi_select == 0 {
+                        self.state[i].selected.clear();
+                    }
                 } else if n >= 0 && (n as usize) < self.form.controls[i].items.len() {
                     let spec = self.form.controls[i].clone();
                     self.state[i].pick(&spec, n as usize);
@@ -593,7 +837,7 @@ impl FormHost {
     }
 }
 
-fn err<T>(number: i32, description: &str) -> ExecResult<T> {
+pub(crate) fn err<T>(number: i32, description: &str) -> ExecResult<T> {
     Err(VbError {
         number,
         description: description.to_string(),
@@ -646,15 +890,67 @@ pub fn to_vb_color(rgb: u32) -> i32 {
     ((b << 16) | (g << 8) | r) as i32
 }
 
-/// VB's colour `Long` as a form colour (`0xRRGGBB`). Values outside
-/// `0..=&HFFFFFF` (system colours, negative) are an error here.
+/// VB's colour `Long` as a form colour (`0xRRGGBB`). A system colour
+/// (`&H800000nn`, `vbButtonFace` and the like) resolves to this IDE's look
+/// for it; other values outside `0..=&HFFFFFF` raise 380.
 pub fn from_vb_color(vb: i64) -> ExecResult<u32> {
+    // a negative Long is the same bits as &H8000_00nn
+    let bits = (vb as i32) as u32 as i64;
+    if vb < 0 || vb >= 0x8000_0000 {
+        return match system_color(bits as u32) {
+            Some(rgb) => Ok(rgb),
+            None => err(380, "Invalid property value"),
+        };
+    }
     if !(0..=0xFF_FFFF).contains(&vb) {
         return err(380, "Invalid property value");
     }
     let vb = vb as u32;
     let (r, g, b) = (vb & 0xFF, (vb >> 8) & 0xFF, (vb >> 16) & 0xFF);
     Ok((r << 16) | (g << 8) | b)
+}
+
+/// The system colour bits (`&H800000nn`) of a colour value, if it is one.
+pub fn system_bits(vb: i64) -> Option<u32> {
+    let bits = (vb as i32) as u32;
+    (vb < 0 || vb >= 0x8000_0000).then_some(bits)
+}
+
+/// The colour (`0xRRGGBB`) of VB system colour `vb` (`&H80000000` +
+/// the Windows `COLOR_*` index), in this IDE's light look. `None` for an
+/// index Windows doesn't have.
+pub fn system_color(vb: u32) -> Option<u32> {
+    if vb & 0xFFFF_FF00 != 0x8000_0000 {
+        return None;
+    }
+    Some(match vb & 0xFF {
+        0x00 => 0xC8C8C8,         // vbScrollBars
+        0x01 => 0x3A6EA5,         // vbDesktop
+        0x02 => 0x0A64D8,         // vbActiveTitleBar
+        0x03 => 0x7A96DF,         // vbInactiveTitleBar
+        0x04 => crate::FORM_BACK, // vbMenuBar
+        0x05 => 0xFFFFFF,         // vbWindowBackground
+        0x06 => 0x646464,         // vbWindowFrame
+        0x07 => 0x1D1D1F,         // vbMenuText
+        0x08 => 0x1D1D1F,         // vbWindowText
+        0x09 => 0xFFFFFF,         // vbTitleBarText
+        0x0A => 0xB4B4BA,         // vbActiveBorder
+        0x0B => 0xD8D8DC,         // vbInactiveBorder
+        0x0C => 0xABABAB,         // vbApplicationWorkspace
+        0x0D => 0x007AFF,         // vbHighlight
+        0x0E => 0xFFFFFF,         // vbHighlightText
+        0x0F => crate::FORM_BACK, // vbButtonFace (3D face)
+        0x10 => 0xA0A0A0,         // vbButtonShadow
+        0x11 => 0x8E8E93,         // vbGrayText
+        0x12 => 0x1D1D1F,         // vbButtonText
+        0x13 => 0x3C3C43,         // vbInactiveCaptionText
+        0x14 => 0xFFFFFF,         // vb3DHighlight
+        0x15 => 0x404040,         // vb3DDKShadow
+        0x16 => 0xE3E3E3,         // vb3DLight
+        0x17 => 0x1D1D1F,         // vbInfoText
+        0x18 => 0xFFFFE1,         // vbInfoBackground
+        _ => return None,
+    })
 }
 impl ObjectHost for FormHost {
     fn has_object(&self, name: &str) -> bool {
@@ -723,10 +1019,28 @@ impl ObjectHost for FormHost {
 
     fn call(&mut self, object: &ObjectRef, method: &str, args: &[Variant]) -> ExecResult<Variant> {
         let m = method.to_ascii_lowercase();
+        // `Load Cmd(3)` adds an element that doesn't exist yet, so it is
+        // handled before the element is looked up
+        if let (Some(n), "load") = (object.index, m.as_str()) {
+            return self.load_element(&object.name, n);
+        }
+        if let (Some(n), "unload") = (object.index, m.as_str()) {
+            return self.unload_element(&object.name, n);
+        }
         let target = self.target(object)?;
+        if let Target::Control(i) = target {
+            match m.as_str() {
+                "move" => return self.move_control(i, args),
+                "zorder" => return self.zorder(i, args),
+                _ => {}
+            }
+        }
         // a parameterised property read, `List1.List(0)`, arrives as a call
         if let Target::Control(i) = target {
-            if matches!(m.as_str(), "list" | "listcount" | "listindex" | "text") {
+            if matches!(
+                m.as_str(),
+                "list" | "listcount" | "listindex" | "text" | "selected"
+            ) {
                 return self.get_control(i, &m, args);
             }
         }
@@ -734,8 +1048,8 @@ impl ObjectHost for FormHost {
         if m == "setfocus" {
             return match target {
                 Target::Control(i) if self.form.controls[i].kind.can_focus() => {
-                    let c = &self.form.controls[i];
-                    if !c.enabled || !c.visible {
+                    // in a disabled or hidden frame counts too
+                    if !self.form.usable(i) || !self.form.shown(i) {
                         // VB: "Can't move focus to a disabled or invisible control"
                         return err(5, "Can't move focus to a disabled or invisible control");
                     }
@@ -880,13 +1194,13 @@ mod tests {
         f
     }
 
-    fn host() -> Rc<RefCell<FormHost>> {
+    pub(super) fn host() -> Rc<RefCell<FormHost>> {
         Rc::new(RefCell::new(FormHost::new(form())))
     }
 
     /// Run `src` with `host` as its object host; returns the printed
     /// output, or the error text.
-    fn run(src: &str, host: &Rc<RefCell<FormHost>>) -> Result<String, String> {
+    pub(super) fn run(src: &str, host: &Rc<RefCell<FormHost>>) -> Result<String, String> {
         let prog = oxbasic_parser::parse(src)?;
         let mut out = Buf(String::new());
         {
@@ -1201,6 +1515,36 @@ mod tests {
     }
 
     #[test]
+    fn system_colours_resolve_and_read_back_as_set() {
+        // vbButtonFace is the form's face; vbWindowBackground is white
+        assert_eq!(from_vb_color(0x8000_000F).unwrap(), crate::FORM_BACK);
+        assert_eq!(from_vb_color(-2147483643).unwrap(), 0xFFFFFF, "as a Long");
+        assert!(from_vb_color(0x8000_0040).is_err(), "no such index");
+        let h = host();
+        let out = run(
+            "Label1.BackColor = vbInfoBackground\nLabel1.ForeColor = &H80000012\n\
+             Print Label1.BackColor = vbInfoBackground; Label1.ForeColor = vbButtonText\n\
+             Label1.BackColor = vbRed\nPrint Label1.BackColor\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, "TrueTrue\n 255 \n", "system values read back as set");
+        let b = h.borrow();
+        let c = &b.spec().controls[0];
+        assert_eq!(
+            c.color,
+            Some(0xFF0000),
+            "then red, and no longer a system colour"
+        );
+        assert_eq!((c.back_system, c.fore_system), (None, Some(0x8000_0012)));
+        assert_eq!(
+            c.fore_color,
+            Some(0x1D1D1F),
+            "drawn in the IDE's text colour"
+        );
+    }
+
+    #[test]
     fn user_edits_are_visible_to_the_program() {
         let h = host();
         h.borrow_mut().apply_edit(UserEdit::Text {
@@ -1310,5 +1654,242 @@ mod tests {
             index: 0,
         });
         assert!(h.borrow_mut().take_raised().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod more_members {
+    use super::tests::{host, run};
+    use super::*;
+
+    #[test]
+    fn load_and_unload_array_elements_at_run_time() {
+        let h = host();
+        let out = run(
+            "Load Cmd(5)\nPrint Cmd(5).Visible; Cmd(5).Caption\n\
+             Cmd(5).Visible = True\nCmd(5).Caption = \"new\"\n\
+             Print Cmd(5).Caption; Cmd(0).Caption\nUnload Cmd(5)\n",
+            &h,
+        )
+        .unwrap();
+        // a copy of the lowest element, hidden until shown
+        assert_eq!(out, "FalseCmd 0\nnewCmd 0\n");
+        assert_eq!(h.borrow().spec().controls.len(), 10, "unloaded again");
+        let fails = [
+            ("Load Cmd(1)", "360"),    // already loaded
+            ("Unload Cmd(0)", "362"),  // designed on the form
+            ("Unload Cmd(7)", "340"),  // no such element
+            ("Load Label1(1)", "343"), // not an array
+            ("Print Cmd(5).Caption", "340"),
+        ];
+        for (src, num) in fails {
+            let e = run(src, &h).unwrap_err();
+            assert!(e.contains(num), "{} -> {}", src, e);
+        }
+    }
+
+    #[test]
+    fn a_loaded_element_raises_its_arrays_events_with_its_index() {
+        let h = host();
+        h.borrow_mut().form.controls[8].kind = ControlKind::TextBox;
+        h.borrow_mut().form.controls[9].kind = ControlKind::TextBox;
+        let out = run(
+            "Sub Cmd_Change(Index As Integer)\n  Print \"change \" & Index\nEnd Sub\n\
+             Load Cmd(4)\nCmd(4).Text = \"x\"\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, "change 4\n");
+    }
+
+    #[test]
+    fn move_sets_position_and_size_and_zorder_restacks() {
+        let h = host();
+        let out = run(
+            "Label1.Move 5, 6\nPrint Label1.Left; Label1.Top; Label1.Width\n\
+             Label1.Move 1, 2, 30, 40\nPrint Label1.Width; Label1.Height\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, " 5  6  100 \n 30  40 \n");
+        assert!(run("Label1.Move 1, 2, 0", &h).unwrap_err().contains("380"));
+        // ZOrder: Label1 (first) to the front = last drawn; the tab order
+        // stays as it was
+        let before = h
+            .borrow()
+            .spec()
+            .tab_order()
+            .iter()
+            .map(|&i| h.borrow().spec().controls[i].name.clone())
+            .collect::<Vec<_>>();
+        run("Label1.ZOrder\nCmd(1).ZOrder vbSendToBack\n", &h).unwrap();
+        let b = h.borrow();
+        let names: Vec<_> = b.spec().controls.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(names.first().unwrap(), "Cmd");
+        assert_eq!(names.last().unwrap(), "Label1");
+        let after: Vec<_> = b
+            .spec()
+            .tab_order()
+            .iter()
+            .map(|&i| b.spec().controls[i].name.clone())
+            .collect();
+        assert_eq!(after, before, "restacking keeps the tab order");
+        drop(b);
+        assert!(run("Label1.ZOrder 2", &h).unwrap_err().contains("5"));
+    }
+}
+
+#[cfg(test)]
+mod text_list_and_container_members {
+    use super::tests::{host, run};
+    use super::*;
+
+    #[test]
+    fn sel_start_sel_length_and_sel_text_edit_the_text() {
+        let h = host();
+        // Text1 starts as "start"
+        let out = run(
+            "Print Text1.SelStart; Text1.SelLength\n\
+             Text1.SelStart = 1\nText1.SelLength = 3\nPrint Text1.SelText\n\
+             Text1.SelText = \"XY\"\nPrint Text1.Text; Text1.SelStart; Text1.SelLength\n\
+             Text1.SelStart = 99\nPrint Text1.SelStart\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, " 5  0 \ntar\nsXYt 3  0 \n 4 \n");
+        assert!(run("Text1.SelStart = -1", &h).unwrap_err().contains("380"));
+        assert!(run("x = Label1.SelText", &h).unwrap_err().contains("438"));
+    }
+
+    #[test]
+    fn max_length_locked_multi_line_and_scroll_bars() {
+        let h = host();
+        let out = run(
+            "Text1.MaxLength = 3\nText1.Text = \"abcdef\"\nPrint Text1.Text; Text1.MaxLength\n\
+             Text1.Locked = True\nPrint Text1.Locked; Text1.MultiLine; Text1.ScrollBars\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, "abc 3 \nTrueFalse 0 \n");
+        // read-only at run time, as in VB
+        for src in [
+            "Text1.MultiLine = True",
+            "Text1.ScrollBars = 2",
+            "List1.MultiSelect = 1",
+        ] {
+            assert!(run(src, &h).unwrap_err().contains("382"), "{}", src);
+        }
+    }
+
+    #[test]
+    fn selected_on_one_row_and_multi_select_lists() {
+        let h = host();
+        // List1 (one row at a time): Selected chooses the row
+        let out = run(
+            "List1.Selected(1) = True\nPrint List1.ListIndex; List1.Selected(0); List1.Selected(1)\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, " 1 FalseTrue\n");
+        // with MultiSelect several rows can be selected at once
+        h.borrow_mut().form.controls[2].multi_select = 1;
+        let out = run(
+            "List1.Selected(0) = True\nPrint List1.Selected(0); List1.Selected(1); List1.SelCount\n\
+             List1.Selected(1) = False\nPrint List1.SelCount\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, "TrueTrue 2 \n 1 \n");
+        assert!(run("x = List1.Selected(9)", &h)
+            .unwrap_err()
+            .contains("381"));
+    }
+
+    #[test]
+    fn tool_tip_mouse_pointer_and_picture() {
+        let h = host();
+        h.borrow_mut().form.controls.push(ControlSpec::new(
+            "Picture1",
+            ControlKind::PictureBox,
+            crate::Rect::new(0.0, 0.0, 50.0, 50.0),
+        ));
+        let n = h.borrow().form.controls.len();
+        h.borrow_mut().state.push(ControlState::default());
+        h.borrow_mut().touched.resize(n, false);
+        let out = run(
+            "Sub Picture1_Change()\n  Print \"changed\"\nEnd Sub\n\
+             Label1.ToolTipText = \"Hi\"\nLabel1.MousePointer = vbHourglass\n\
+             Print Label1.ToolTipText; Label1.MousePointer\n\
+             Picture1.Picture = LoadPicture(\"Cargo.toml\")\nPrint Picture1.Picture\n\
+             Picture1.Picture = LoadPicture(\"Cargo.toml\")\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(
+            out, "Hi 11 \nchanged\nCargo.toml\n",
+            "one Change: the second set is the same"
+        );
+        assert!(run("Label1.MousePointer = 42", &h)
+            .unwrap_err()
+            .contains("380"));
+    }
+
+    #[test]
+    fn option_buttons_group_by_container() {
+        let h = host();
+        let mut frame = ControlSpec::new(
+            "Frame1",
+            ControlKind::Frame,
+            crate::Rect::new(200.0, 0.0, 150.0, 100.0),
+        );
+        frame.caption = "Group".into();
+        h.borrow_mut().form.controls.push(frame);
+        let n = h.borrow().form.controls.len();
+        h.borrow_mut().state.push(ControlState::default());
+        h.borrow_mut().touched.resize(n, false);
+        // Option1 and Option2 start on the form; Option2 moves into Frame1
+        let out = run(
+            "Set Option2.Container = Frame1\nPrint Option2.Container\n\
+             Option1.Value = True\nOption2.Value = True\nPrint Option1.Value; Option2.Value\n\
+             Set Option2.Container = Me\nOption2.Value = True\nPrint Option1.Value\n",
+            &h,
+        )
+        .unwrap();
+        // in different groups both stay chosen; back on the form they share one
+        assert_eq!(out, "Frame1\nTrueTrue\nFalse\n");
+        let bad = [
+            ("Set Option1.Container = Label1", "380"), // a Label holds nothing
+            ("Set Frame1.Container = Frame1", "380"),  // nor itself
+        ];
+        for (src, num) in bad {
+            assert!(run(src, &h).unwrap_err().contains(num), "{}", src);
+        }
+    }
+
+    #[test]
+    fn a_container_offsets_hides_and_disables_what_it_holds() {
+        let mut f = FormSpec::new("F", "F", 400.0, 300.0);
+        let r = crate::Rect::new(10.0, 20.0, 100.0, 80.0);
+        f.control(ControlSpec::new("Frame1", ControlKind::Frame, r));
+        let mut t = ControlSpec::new(
+            "Text1",
+            ControlKind::TextBox,
+            crate::Rect::new(5.0, 6.0, 50.0, 20.0),
+        );
+        t.container = Some("Frame1".into());
+        f.control(t);
+        assert_eq!(
+            f.form_origin(1),
+            (15.0, 26.0),
+            "Left/Top are from the frame"
+        );
+        assert!(f.contains(0, 1) && !f.contains(1, 0));
+        assert_eq!(f.tab_stops(), [1]);
+        f.controls[0].visible = false;
+        assert!(!f.shown(1), "a hidden frame hides what is in it");
+        assert!(f.tab_stops().is_empty());
+        f.controls[0].visible = true;
+        f.controls[0].enabled = false;
+        assert!(!f.usable(1), "and a disabled one disables it");
     }
 }

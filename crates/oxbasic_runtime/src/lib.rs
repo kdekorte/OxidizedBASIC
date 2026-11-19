@@ -815,6 +815,72 @@ fn builtin_constants() -> HashMap<String, Variant> {
     ins("vbmagenta", Variant::Long(0xFF00FF));
     ins("vbcyan", Variant::Long(0xFFFF00));
     ins("vbwhite", Variant::Long(0xFFFFFF));
+    // system colours: &H80000000 + the Windows COLOR_* index
+    for (i, name) in [
+        "vbscrollbars",
+        "vbdesktop",
+        "vbactivetitlebar",
+        "vbinactivetitlebar",
+        "vbmenubar",
+        "vbwindowbackground",
+        "vbwindowframe",
+        "vbmenutext",
+        "vbwindowtext",
+        "vbtitlebartext",
+        "vbactiveborder",
+        "vbinactiveborder",
+        "vbapplicationworkspace",
+        "vbhighlight",
+        "vbhighlighttext",
+        "vbbuttonface",
+        "vbbuttonshadow",
+        "vbgraytext",
+        "vbbuttontext",
+        "vbinactivecaptiontext",
+        "vb3dhighlight",
+        "vb3ddkshadow",
+        "vb3dlight",
+        "vbinfotext",
+        "vbinfobackground",
+    ]
+    .iter()
+    .enumerate()
+    {
+        ins(name, Variant::Long((0x8000_0000u32 + i as u32) as i32));
+    }
+    ins("vb3dface", Variant::Long(0x8000_000Fu32 as i32));
+    ins("vb3dshadow", Variant::Long(0x8000_0010u32 as i32));
+    // MousePointer
+    for (n, name) in [
+        (0, "vbdefault"),
+        (1, "vbarrow"),
+        (2, "vbcrosshair"),
+        (3, "vbibeam"),
+        (5, "vbsizepointer"),
+        (6, "vbsizenesw"),
+        (7, "vbsizens"),
+        (8, "vbsizenwse"),
+        (9, "vbsizewe"),
+        (10, "vbuparrow"),
+        (11, "vbhourglass"),
+        (12, "vbnodrop"),
+        (13, "vbarrowhourglass"),
+        (14, "vbarrowquestion"),
+        (15, "vbsizeall"),
+        (99, "vbcustom"),
+    ] {
+        ins(name, Variant::Integer(n));
+    }
+    // ZOrder, ScrollBars, MultiSelect
+    ins("vbbringtofront", Variant::Integer(0));
+    ins("vbsendtoback", Variant::Integer(1));
+    ins("vbsbnone", Variant::Integer(0));
+    ins("vbhorizontal", Variant::Integer(1));
+    ins("vbvertical", Variant::Integer(2));
+    ins("vbboth", Variant::Integer(3));
+    ins("vbmultiselectnone", Variant::Integer(0));
+    ins("vbmultiselectsimple", Variant::Integer(1));
+    ins("vbmultiselectextended", Variant::Integer(2));
     c
 }
 
@@ -942,7 +1008,12 @@ impl<'out> Interpreter<'out> {
                 Ok(Flow::Normal)
             }
             Stmt::Assign { target, value } => {
-                let v = self.eval(value, f)?;
+                // `Set Option1.Container = Frame1`: the value is an object of
+                // the host, passed as its name (`Frame1`, `Frame1(2)`)
+                let v = match self.object_value(target, value, f)? {
+                    Some(v) => v,
+                    None => self.eval(value, f)?,
+                };
                 self.assign(target, v, f)?;
                 Ok(Flow::Normal)
             }
@@ -1245,6 +1316,39 @@ impl<'out> Interpreter<'out> {
         }
     }
 
+    /// For an assignment to a host property that holds an object
+    /// (`Container`), a value naming a host object (`Frame1`, `Frame1(2)`)
+    /// is passed as that object's name: VB's `Set Text1.Container = Frame1`.
+    /// `None` for every other assignment, which evaluates its value.
+    fn object_value(
+        &mut self,
+        target: &Expr,
+        value: &Expr,
+        f: &mut Frame,
+    ) -> ExecResult<Option<Variant>> {
+        let to_host = matches!(target, Expr::Member { obj, name }
+            if name.eq_ignore_ascii_case("container") && self.object_ref(obj, f)?.is_some());
+        if !to_host {
+            return Ok(None);
+        }
+        Ok(match self.object_ref_expr(value, f)? {
+            Some(ObjectRef {
+                name,
+                index: Some(i),
+            }) => Some(Variant::String(format!("{}({})", name, i))),
+            Some(ObjectRef { name, index: None }) => Some(Variant::String(name)),
+            None => None,
+        })
+    }
+
+    /// `value` itself as a host object (`Frame1`, `Cmd(2)`), if it is one.
+    fn object_ref_expr(&mut self, value: &Expr, f: &mut Frame) -> ExecResult<Option<ObjectRef>> {
+        Ok(match value {
+            Expr::Var(_) | Expr::Call { .. } => self.object_ref(value, f)?.map(|(o, _)| o),
+            _ => None,
+        })
+    }
+
     /// Whether `name` is a host object the program can reach: the host
     /// knows it, and no variable of that name hides it.
     fn is_host_object(&self, name: &str, f: &Frame) -> bool {
@@ -1326,6 +1430,29 @@ impl<'out> Interpreter<'out> {
                 // it isn't a value
                 let lower = name.to_ascii_lowercase();
                 if (lower == "unload" || lower == "load") && args.len() == 1 {
+                    // `Load Cmd(3)` / `Unload Cmd(3)`: a new or removed
+                    // element of control array `Cmd`
+                    if let Expr::Call {
+                        name: array,
+                        args: idx,
+                    } = &args[0]
+                    {
+                        if idx.len() == 1
+                            && !self.proc_index.contains_key(&array.to_lowercase())
+                            && self.is_host_object(array, f)
+                        {
+                            let n = to_i32(&self.eval(&idx[0], f)?)?;
+                            let host = self.objects.clone().expect("is_host_object needs a host");
+                            let object = ObjectRef {
+                                name: array.clone(),
+                                index: Some(n),
+                            };
+                            let method = if lower == "unload" { "Unload" } else { "Load" };
+                            let result = host.borrow_mut().call(&object, method, &[]);
+                            result?;
+                            return self.run_raised_events();
+                        }
+                    }
                     if let Expr::Var(target) = &args[0] {
                         if self.is_host_object(target, f) {
                             let host = self.objects.clone().expect("is_host_object needs a host");

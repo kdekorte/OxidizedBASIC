@@ -84,6 +84,7 @@ pub(crate) fn is_builtin(name: &str) -> bool {
             | "doevents"
             | "iif"
             | "rgb"
+            | "loadpicture"
     )
 }
 
@@ -323,6 +324,23 @@ impl<'out> Interpreter<'out> {
                 };
                 let (r, g, b) = (part(0)?, part(1)?, part(2)?);
                 Ok(Variant::Long(r | (g << 8) | (b << 16)))
+            }
+
+            // `LoadPicture(path)`: a picture is its file here (what a
+            // PictureBox's `Picture` holds); no argument, or "", is no
+            // picture. A file that isn't there is VB's error 53.
+            "loadpicture" => {
+                let path = match args.first() {
+                    None | Some(Variant::Empty) => String::new(),
+                    Some(v) => to_string(v)?,
+                };
+                if !path.is_empty() && !std::path::Path::new(&path).is_file() {
+                    return Err(VbError {
+                        number: 53,
+                        description: format!("File not found: {}", path),
+                    });
+                }
+                Ok(Variant::String(path))
             }
 
             // -- conversions ------------------------------------------------

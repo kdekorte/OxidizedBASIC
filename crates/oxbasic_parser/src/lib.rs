@@ -759,14 +759,29 @@ fn primary(pair: Pair<Rule>) -> Result<Expr, String> {
             Ok(Expr::Lit(Lit::Str(s[1..s.len() - 1].replace("\"\"", "\""))))
         }
         Rule::Number => {
-            let s = pair.as_str().replace('_', "");
+            let mut s = pair.as_str().replace('_', "");
+            // a type suffix: `&HFFFF&` is a Long (positive), not the
+            // Integer -1; a Double/Single suffix makes a float
+            let suffix = s.chars().last().filter(|c| "&%!#@".contains(*c));
+            if suffix.is_some() {
+                s.pop();
+            }
             if let Some(hex) = s.strip_prefix("&H").or_else(|| s.strip_prefix("&h")) {
                 let v = i64::from_str_radix(hex, 16).map_err(|e| e.to_string())?;
+                // VB: &H8000 is the Integer -32768, &H8000& the Long 32768;
+                // 8 digits wrap into a negative Long (&H8000000F)
+                let v = match suffix {
+                    None if hex.len() <= 4 && v >= 0x8000 => v - 0x10000,
+                    _ => v,
+                };
                 Ok(Expr::Lit(Lit::Int(v as i32)))
             } else if let Some(oct) = s.strip_prefix("&O").or_else(|| s.strip_prefix("&o")) {
                 let v = i64::from_str_radix(oct, 8).map_err(|e| e.to_string())?;
                 Ok(Expr::Lit(Lit::Int(v as i32)))
-            } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
+            } else if s.contains('.')
+                || s.to_ascii_lowercase().contains('e')
+                || matches!(suffix, Some('!' | '#' | '@'))
+            {
                 Ok(Expr::Lit(Lit::Double(
                     s.parse::<f64>().map_err(|e| e.to_string())?,
                 )))

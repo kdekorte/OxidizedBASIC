@@ -204,7 +204,10 @@ KeywordLit = { kw_true | kw_false | kw_empty | kw_null | kw_nothing }
 
 StringLit = @{ "\"" ~ StringChar* ~ "\"" }
 StringChar = _{ "\"\"" | !("\"" | NEWLINE) ~ ANY }
-Number = @{ (^"&h" ~ HexDigits) | (^"&o" ~ OctDigits) | DecNum }
+Number = @{ ((^"&h" ~ HexDigits) | (^"&o" ~ OctDigits) | DecNum) ~ TypeSuffix? }
+// VB's type-declaration characters on a literal: &HFF& (Long), 5% (Integer),
+// 1.5! (Single), 2# (Double), 3@ (Currency)
+TypeSuffix = { "&" | "%" | "!" | "#" | "@" }
 HexDigits = { HEX_DIGIT+ }
 OctDigits = { OctDigit+ }
 OctDigit = _{ '0'..'7' }
