@@ -137,6 +137,14 @@ impl ProjectHost {
     pub fn is_loaded(&self, index: usize) -> bool {
         self.loaded.get(index).copied().unwrap_or(false)
     }
+
+    /// Count form `index` as loaded without running its `Form_Load` (a
+    /// single-form program whose caller runs the handler itself).
+    pub fn mark_loaded(&mut self, index: usize) {
+        if let Some(l) = self.loaded.get_mut(index) {
+            *l = true;
+        }
+    }
 }
 
 impl ProjectHost {
@@ -190,7 +198,7 @@ impl ProjectHost {
     /// the context, otherwise a form of the project.
     fn form_of(&self, name: &str) -> Option<usize> {
         if name.eq_ignore_ascii_case("me") {
-            Some(self.context)
+            (self.context < self.forms.len()).then_some(self.context)
         } else {
             self.form_index(name)
         }
@@ -205,7 +213,11 @@ impl ProjectHost {
         if let Some(i) = self.form_of(&object.name) {
             return Ok(i);
         }
-        if self.forms[self.context].has_control(&object.name) {
+        if self
+            .forms
+            .get(self.context)
+            .is_some_and(|f| f.has_control(&object.name))
+        {
             return Ok(self.context);
         }
         // a control of another form, named without its form: VB wouldn't
@@ -252,7 +264,11 @@ impl ProjectHost {
 
 impl ObjectHost for ProjectHost {
     fn has_object(&self, name: &str) -> bool {
-        self.form_of(name).is_some() || self.forms[self.context].has_control(name)
+        self.form_of(name).is_some()
+            || self
+                .forms
+                .get(self.context)
+                .is_some_and(|f| f.has_control(name))
     }
 
     fn get(&mut self, object: &ObjectRef, property: &str, args: &[Variant]) -> ExecResult<Variant> {
@@ -301,7 +317,10 @@ impl ObjectHost for ProjectHost {
     }
 
     fn context(&self) -> String {
-        self.forms[self.context].name().to_string()
+        self.forms
+            .get(self.context)
+            .map(|f| f.name().to_string())
+            .unwrap_or_default()
     }
 
     fn set_context(&mut self, ctx: &str) {

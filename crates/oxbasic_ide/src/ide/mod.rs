@@ -10,6 +10,8 @@ pub mod code_model;
 pub mod code_window;
 pub mod debug_session;
 pub mod highlight;
+pub mod launch;
+pub mod live_forms;
 pub mod program;
 pub mod project_commands;
 pub mod workspace;
@@ -233,14 +235,17 @@ pub struct Ide {
     paused: Option<PausedInfo>,
     /// The program finished its module-level code and is serving events.
     live: bool,
-    /// The live form's own OS window — in classic VB the form *is* the
-    /// application window, not a pane inside the IDE.
-    form_window: Option<WindowHandle<FormRunner>>,
-    /// The running program's form as the program has changed it
+    /// The running program's windows, by form index — in classic VB each
+    /// form *is* a window of the application, not a pane inside the IDE.
+    form_windows: HashMap<usize, WindowHandle<FormRunner>>,
+    /// Each running form as the program has changed it
     /// (`Label1.Caption = "x"`), kept so a window that opens later (or
     /// reopens) starts from it.
-    live_form: Option<(FormSpec, Vec<ControlState>)>,
+    live_forms: HashMap<usize, (FormSpec, Vec<ControlState>)>,
     status: String,
+    /// The combined program of the run in progress, to map its line
+    /// numbers back to documents.
+    run_lines: Option<program::Program>,
     evt_rx: Arc<Mutex<Receiver<DebugEvent>>>,
     evt_tx: Sender<DebugEvent>,
 }
@@ -342,9 +347,10 @@ Print \"Total = \" & CStr(Total)
             session: None,
             paused: None,
             live: false,
-            form_window: None,
-            live_form: None,
+            form_windows: HashMap::new(),
+            live_forms: HashMap::new(),
             status: "Ready".into(),
+            run_lines: None,
             evt_rx,
             evt_tx,
         };
@@ -433,13 +439,15 @@ Print \"Total = \" & CStr(Total)
                 }
             }
             DebugEvent::Form(snap) => self.on_form_changed(snap, cx),
+            DebugEvent::FormShown(snap) => self.open_form_window(snap, cx),
+            DebugEvent::FormHidden(i) => self.close_form_window_at(i, false, cx),
+            DebugEvent::FormClosed(i) => self.close_form_window_at(i, true, cx),
             DebugEvent::Live => {
                 self.live = true;
                 self.paused = None;
                 self.status =
-                    "Live — the form runs in its own window; Stop (or closing it) ends the program"
+                    "Live — the forms run in their own windows; Stop (or closing them) ends the program"
                         .into();
-                self.open_form_window(cx);
             }
             DebugEvent::Finished(msg) => {
                 self.output.push_str(&format!("[{}]\n", msg));
@@ -462,89 +470,6 @@ Print \"Total = \" & CStr(Total)
     fn source(&self) -> String {
         self.lines.join("\n")
     }
-
-    /// The program changed the form (`Label1.Caption = "x"`, `AddItem`...):
-    /// keep the latest, and show it in the live window if there is one.
-    fn on_form_changed(&mut self, snap: FormSnapshot, cx: &mut Context<Self>) {
-        // the program's copy is authoritative: it has the user's edits too
-        self.live_form = Some((snap.form.clone(), snap.state.clone()));
-        if let Some(handle) = self.form_window {
-            let _ = handle.update(cx, |runner, win, cx| {
-                runner.show(&snap, win, cx);
-                cx.notify();
-            });
-        }
-    }
-
-    /// Open the running program's form in its own OS window — in classic
-    /// VB the form *is* the application window the generated app shows,
-    /// not a pane inside the IDE.
-    fn open_form_window(&mut self, cx: &mut Context<Self>) {
-        if self.form_window.is_some() {
-            return;
-        }
-        let Some(session) = self.session.clone() else {
-            return;
-        };
-        // what the program has made of the form so far, else the designer's
-        let (form, state) = self.live_form.clone().unwrap_or_else(|| {
-            let form = self.form.clone();
-            let state = form.controls.iter().map(ControlState::new).collect();
-            (form, state)
-        });
-        let ide = cx.entity().downgrade();
-        let bounds = Bounds::centered(
-            None,
-            size(px(form.width + 16.0), px(form.height + 16.0)),
-            cx,
-        );
-        let title = SharedString::from(form.caption.clone());
-        match cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some(title),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            move |win, cx| {
-                let runner = cx.new(|cx| {
-                    let mut runner = FormRunner::new(form.clone(), session.clone(), cx);
-                    runner.state = state.clone();
-                    runner
-                });
-                // Closing the form window stops the program, like closing
-                // a VB app's main form ends the app.
-                let weak = ide.clone();
-                win.on_window_should_close(cx, move |_win, cx| {
-                    if let Some(ide) = weak.upgrade() {
-                        ide.update(cx, |ide, cx| {
-                            if ide.live {
-                                ide.stop_program(cx);
-                            }
-                        });
-                    }
-                    true
-                });
-                runner
-            },
-        ) {
-            Ok(handle) => self.form_window = Some(handle),
-            Err(e) => self
-                .output
-                .push_str(&format!("[form window failed: {}]\n", e)),
-        }
-    }
-
-    /// Take down the live form's OS window (program finished, failed, or
-    /// was stopped).
-    fn close_form_window(&mut self, cx: &mut Context<Self>) {
-        self.live_form = None;
-        if let Some(handle) = self.form_window.take() {
-            let _ = handle.update(cx, |_, win, _| win.remove_window());
-        }
-    }
 }
 
 /// Toolbar actions and control additions.
@@ -554,18 +479,7 @@ impl Ide {
             s.send(DebugCommand::Continue);
             return;
         }
-        self.output.clear();
-        self.output.push_str("--- run ---\n");
-        let session = DebugSession::start_with_form(
-            self.source(),
-            Some(self.form.clone()),
-            self.breakpoints.clone(),
-            self.evt_tx.clone(),
-        );
-        session.send(DebugCommand::Run);
-        self.session = Some(session);
-        self.paused = None;
-        self.status = "Running".into();
+        self.launch(false);
     }
 
     fn step_program(&mut self) {
@@ -573,17 +487,7 @@ impl Ide {
             s.send(DebugCommand::StepOver);
             return;
         }
-        self.output.clear();
-        self.output.push_str("--- step ---\n");
-        let session = DebugSession::start_with_form(
-            self.source(),
-            Some(self.form.clone()),
-            self.breakpoints.clone(),
-            self.evt_tx.clone(),
-        );
-        session.send(DebugCommand::Step);
-        self.session = Some(session);
-        self.status = "Stepping".into();
+        self.launch(true);
     }
 
     fn stop_program(&mut self, cx: &mut Context<Self>) {
@@ -774,6 +678,19 @@ mod designer_tests {
             let bps = Arc::new(Mutex::new(HashSet::new()));
             ide.session = Some(DebugSession::start("Print \"\"".into(), bps, tx));
             ide.on_debug_event(DebugEvent::Live, cx);
+            // the program shows its (only) form
+            let form = ide.form.clone();
+            let state = form.controls.iter().map(ControlState::new).collect();
+            ide.on_debug_event(
+                DebugEvent::FormShown(FormSnapshot {
+                    touched: vec![true; form.controls.len()],
+                    form,
+                    state,
+                    focus: None,
+                    form_index: 0,
+                }),
+                cx,
+            );
             cx.notify();
         });
         cx.run_until_parked();
@@ -781,7 +698,7 @@ mod designer_tests {
         ide.update(cx, |ide, _| {
             assert!(ide.live);
             assert!(
-                ide.form_window.is_some(),
+                ide.form_window().is_some(),
                 "going live must open the form in its own window"
             );
         });
@@ -792,7 +709,7 @@ mod designer_tests {
             cx.notify();
         });
         cx.run_until_parked();
-        ide.update(cx, |ide, _| assert!(ide.form_window.is_none()));
+        ide.update(cx, |ide, _| assert!(ide.form_window().is_none()));
     }
 
     /// The code window opened by the IDE, as a test context of its own.
@@ -2261,6 +2178,9 @@ const MIN_FORM: f32 = 60.0;
 struct FormRunner {
     form: FormSpec,
     session: DebugSession,
+    /// Which form of the project this window shows (0 in a one-form
+    /// program); events and edits are addressed to it.
+    form_index: usize,
     /// Run-time state (text, selection, open list, value) per control.
     state: Vec<ControlState>,
     /// Keyboard focus handles for the controls that take the keyboard.
@@ -2273,7 +2193,12 @@ struct FormRunner {
 }
 
 impl FormRunner {
-    fn new(form: FormSpec, session: DebugSession, cx: &mut Context<Self>) -> FormRunner {
+    fn new(
+        form: FormSpec,
+        form_index: usize,
+        session: DebugSession,
+        cx: &mut Context<Self>,
+    ) -> FormRunner {
         let state = form.controls.iter().map(ControlState::new).collect();
         let mut focus = HashMap::new();
         for (i, c) in form.controls.iter().enumerate() {
@@ -2284,6 +2209,7 @@ impl FormRunner {
         let mut runner = FormRunner {
             form,
             session,
+            form_index,
             state,
             focus,
             timers: HashMap::new(),
@@ -2341,6 +2267,7 @@ impl FormRunner {
     fn fire(&self, idx: usize, event: &str) {
         let c = &self.form.controls[idx];
         self.session.send(DebugCommand::Call(
+            self.form_index,
             format!("{}_{}", c.name, event),
             c.index.into_iter().collect(),
         ));
@@ -2349,7 +2276,7 @@ impl FormRunner {
     /// Tell the program what the user did, before the event it causes, so
     /// the handler reads the new `Text` / `ListIndex`.
     fn tell(&self, edit: UserEdit) {
-        self.session.send(DebugCommand::Edit(edit));
+        self.session.send(DebugCommand::Edit(self.form_index, edit));
     }
 
     /// Show the form as the program has changed it: its properties, the

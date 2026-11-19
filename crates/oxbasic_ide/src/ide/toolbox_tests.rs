@@ -388,7 +388,7 @@ fn run_window(
     form: FormSpec,
     session: DebugSession,
 ) -> (Entity<FormRunner>, &mut gpui::VisualTestContext) {
-    let (runner, cx) = cx.add_window_view(|_, cx| FormRunner::new(form, session, cx));
+    let (runner, cx) = cx.add_window_view(|_, cx| FormRunner::new(form, 0, session, cx));
     cx.simulate_resize(size(px(500.0), px(560.0)));
     cx.run_until_parked();
     (runner, cx)
@@ -552,7 +552,7 @@ fn writing_session(form: FormSpec) -> (DebugSession, std::sync::mpsc::Receiver<D
 }
 
 /// Feed the session's events to the IDE (as its poll task does) until a
-/// form change has arrived.
+/// form change or a form window has arrived.
 fn pump_until_form(
     ide: &Entity<Ide>,
     rx: &std::sync::mpsc::Receiver<DebugEvent>,
@@ -562,7 +562,7 @@ fn pump_until_form(
     let mut forms = 0;
     while forms == 0 && std::time::Instant::now() < deadline {
         while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(100)) {
-            if matches!(ev, DebugEvent::Form(_)) {
+            if matches!(ev, DebugEvent::Form(_) | DebugEvent::FormShown(_)) {
                 forms += 1;
             }
             ide.update(cx, |ide, cx| ide.on_debug_event(ev, cx));
@@ -582,12 +582,12 @@ fn program_changes_reach_the_live_window(cx: &mut gpui::TestAppContext) {
         cx.notify();
     });
 
-    // Form_Load retitled the form; going live opens the window with it
+    // the program loads and shows its form: the window opens from the
+    // events the session sends (Form_Load has already retitled the form)
     pump_until_form(&ide, &rx, cx);
-    ide.update(cx, |ide, cx| ide.on_debug_event(DebugEvent::Live, cx));
     cx.run_until_parked();
     let handle = ide
-        .read_with(cx, |ide, _| ide.form_window)
+        .read_with(cx, |ide, _| ide.form_window())
         .expect("the form window is open");
     let mut win = gpui::VisualTestContext::from_window(handle.into(), cx);
     win.simulate_resize(size(px(500.0), px(560.0)));
@@ -678,6 +678,7 @@ fn open_live_window(
     ide: &Entity<Ide>,
     form: FormSpec,
     session: &DebugSession,
+    rx: &std::sync::mpsc::Receiver<DebugEvent>,
     cx: &mut gpui::VisualTestContext,
 ) -> (WindowHandle<FormRunner>, gpui::VisualTestContext) {
     ide.update(cx, |ide, cx| {
@@ -685,10 +686,11 @@ fn open_live_window(
         ide.session = Some(session.clone());
         cx.notify();
     });
-    ide.update(cx, |ide, cx| ide.on_debug_event(DebugEvent::Live, cx));
+    // the session announces itself and shows its startup form
+    pump_until_form(ide, rx, cx);
     cx.run_until_parked();
     let handle = ide
-        .read_with(cx, |ide, _| ide.form_window)
+        .read_with(cx, |ide, _| ide.form_window())
         .expect("the form window is open");
     let mut win = gpui::VisualTestContext::from_window(handle.into(), cx);
     win.simulate_resize(size(px(500.0), px(400.0)));
@@ -700,7 +702,7 @@ fn open_live_window(
 fn checkbox_option_and_control_array_events(cx: &mut gpui::TestAppContext) {
     let (ide, cx) = ide_window(cx);
     let (form, session, rx) = interactive_session();
-    let (handle, mut win) = open_live_window(&ide, form, &session, cx);
+    let (handle, mut win) = open_live_window(&ide, form, &session, &rx, cx);
     let click = |win: &mut gpui::VisualTestContext, sel: &'static str| {
         let b = win.debug_bounds(sel).unwrap_or_else(|| panic!("{}", sel));
         win.simulate_click(b.center(), gpui::Modifiers::none());
@@ -774,7 +776,7 @@ fn settle(
 fn timers_fire_in_the_live_window_and_obey_enabled(cx: &mut gpui::TestAppContext) {
     let (ide, cx) = ide_window(cx);
     let (form, session, rx) = interactive_session();
-    let (handle, mut win) = open_live_window(&ide, form, &session, cx);
+    let (handle, mut win) = open_live_window(&ide, form, &session, &rx, cx);
     let label = |win: &gpui::VisualTestContext| -> String {
         handle
             .read_with(win, |r, _| r.form.controls[0].caption.clone())
