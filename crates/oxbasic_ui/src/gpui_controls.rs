@@ -725,8 +725,16 @@ pub fn paint_control<V: 'static>(
                 );
             }
             // what the program drew over it
-            if !look.design && !look.canvas.shapes.is_empty() {
-                body = body.child(draw_canvas(&look.canvas));
+            if !look.design && (!look.canvas.shapes.is_empty() || look.canvas.raster.id != 0) {
+                body = body.child(
+                    div()
+                        .debug_selector(|| format!("{}-canvas", c.name))
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .size_full()
+                        .child(draw_canvas(&look.canvas)),
+                );
             }
             hook(Part::Body, body, cx)
         }

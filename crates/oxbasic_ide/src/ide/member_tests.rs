@@ -320,6 +320,7 @@ fn drawing_stretching_and_auto_sizing_show_in_the_live_window(cx: &mut gpui::Tes
          \x20 Picture1.Circle (60, 60), 20\n\
          \x20 Picture1.PSet (10, 90), vbBlue\n\
          \x20 Picture1.PSet (11, 90), vbBlue\n\
+         \x20 Picture2.PSet (3, 3), vbRed\n\
          \x20 Image1.Picture = LoadPicture(\"{p}\")\n\
          \x20 Image1.Stretch = True\n\
          \x20 Picture2.AutoSize = True\n\
@@ -337,6 +338,12 @@ fn drawing_stretching_and_auto_sizing_show_in_the_live_window(cx: &mut gpui::Tes
         (raster.count(), raster.pixel(10, 90))
     });
     assert_eq!(count, 2, "two PSet pixels");
+    // Picture2 has only a PSet pixel and no shapes: the window must still
+    // paint it (this was the fractal's black picture)
+    assert!(
+        live.win.debug_bounds("Picture2-canvas").is_some(),
+        "a PictureBox drawn on with PSet alone is painted"
+    );
     assert_eq!(blue, Some(0x0000FF), "vbBlue");
     // a stretched Image fills its control; the picture is drawn at its size
     let image = live.win.debug_bounds("run-Image1").unwrap();
