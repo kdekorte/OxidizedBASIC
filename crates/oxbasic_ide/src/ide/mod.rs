@@ -10,6 +10,7 @@ pub mod code_model;
 pub mod code_window;
 pub mod debug_session;
 pub mod highlight;
+pub mod project_commands;
 pub mod workspace;
 
 use debug_session::{DebugCommand, DebugEvent, DebugSession};
@@ -27,6 +28,7 @@ use oxbasic_ui::{
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use workspace::DocKind;
 
 use gpui::{
     deferred, div, prelude::*, px, rgb, size, AnyElement, AnyWindowHandle, App, Application,
@@ -91,6 +93,14 @@ gpui::actions!(
         Quit,
         SaveCode,
         SaveForm,
+        NewProject,
+        OpenProject,
+        SaveProject,
+        SaveProjectAs,
+        CloseProject,
+        AddForm,
+        AddModule,
+        RemoveDocument,
         RunProgram,
         StepProgram,
         StopProgram,
@@ -108,8 +118,10 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             gpui::KeyBinding::new("cmd-q", Quit, None),
-            gpui::KeyBinding::new("cmd-s", SaveCode, None),
-            gpui::KeyBinding::new("cmd-shift-s", SaveForm, None),
+            gpui::KeyBinding::new("cmd-n", NewProject, None),
+            gpui::KeyBinding::new("cmd-o", OpenProject, None),
+            gpui::KeyBinding::new("cmd-s", SaveProject, None),
+            gpui::KeyBinding::new("cmd-shift-s", SaveProjectAs, None),
             gpui::KeyBinding::new("cmd-r", RunProgram, None),
             gpui::KeyBinding::new("cmd-shift-r", StopProgram, None),
             gpui::KeyBinding::new("f7", ViewCode, None),
@@ -123,8 +135,19 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
             gpui::Menu {
                 name: "File".into(),
                 items: vec![
+                    gpui::MenuItem::action("New Project", NewProject),
+                    gpui::MenuItem::action("Open Project…", OpenProject),
+                    gpui::MenuItem::separator(),
+                    gpui::MenuItem::action("Save Project", SaveProject),
+                    gpui::MenuItem::action("Save Project As…", SaveProjectAs),
                     gpui::MenuItem::action("Save Code", SaveCode),
                     gpui::MenuItem::action("Save Form", SaveForm),
+                    gpui::MenuItem::separator(),
+                    gpui::MenuItem::action("Add Form", AddForm),
+                    gpui::MenuItem::action("Add Module", AddModule),
+                    gpui::MenuItem::action("Remove Form or Module", RemoveDocument),
+                    gpui::MenuItem::separator(),
+                    gpui::MenuItem::action("Close Project", CloseProject),
                 ],
             },
             gpui::Menu {
@@ -167,9 +190,8 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
 }
 
 pub struct Ide {
-    // files
-    bas_path: Option<String>,
-    oxform_path: Option<String>,
+    // files: the open project and its documents (see `workspace`)
+    workspace: workspace::Workspace,
     // code editor
     lines: Vec<String>,
     cursor: (usize, usize), // (row, char-col)
@@ -244,22 +266,57 @@ Next
 Print \"Total = \" & CStr(Total)
 ";
 
-        let lines: Vec<String> = match bas_path.and_then(|p| std::fs::read_to_string(p).ok()) {
-            Some(src) => src.lines().map(|l| l.to_string()).collect(),
-            None => default_src.lines().map(|l| l.to_string()).collect(),
+        // A `.oxproj` opens that project; otherwise the two files (either
+        // may be absent) make a one-form project.
+        let opened = bas_path
+            .map(std::path::Path::new)
+            .filter(|p| workspace::Workspace::is_project_file(p))
+            .and_then(|p| workspace::Workspace::open(p).ok());
+        let workspace = match opened {
+            Some(w) => w,
+            None => {
+                let lines: Vec<String> =
+                    match bas_path.and_then(|p| std::fs::read_to_string(p).ok()) {
+                        Some(src) => workspace::to_lines(&src),
+                        None => default_src.lines().map(|l| l.to_string()).collect(),
+                    };
+                let form = match oxform_path
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .and_then(|json| FormSpec::from_oxform(&json).ok())
+                {
+                    Some(f) => f,
+                    None => default_form(),
+                };
+                let mut w = workspace::Workspace::new_project();
+                let name = form.name.clone();
+                w.name = bas_path
+                    .and_then(|p| std::path::Path::new(p).file_stem())
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Project1")
+                    .to_string();
+                w.startup = name.clone();
+                w.docs[0] = workspace::Doc::saved(
+                    workspace::DocKind::Form,
+                    &name,
+                    oxform_path.map(std::path::PathBuf::from),
+                    bas_path.map(std::path::PathBuf::from),
+                    form,
+                    lines,
+                );
+                // a file that wasn't there yet is a new, unsaved document
+                if oxform_path.is_none() || bas_path.is_none() {
+                    w.docs[0].mark_unsaved();
+                }
+                w
+            }
         };
-
-        let form = match oxform_path
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|json| FormSpec::from_oxform(&json).ok())
-        {
-            Some(f) => f,
-            None => default_form(),
-        };
+        let (form, lines) = (
+            workspace.active_doc().form.clone(),
+            workspace.active_doc().lines.clone(),
+        );
 
         let mut ide = Ide {
-            bas_path: bas_path.map(|s| s.to_string()),
-            oxform_path: oxform_path.map(|s| s.to_string()),
+            workspace,
             lines,
             cursor: (0, 0),
             editor_focus: cx.focus_handle(),
@@ -549,24 +606,37 @@ impl Ide {
         }
     }
 
+    /// File > Save Code: the active document's code.
     fn save_code(&mut self) {
-        let path = self
-            .bas_path
-            .clone()
-            .unwrap_or_else(|| "program.bas".to_string());
-        match std::fs::write(&path, self.source()) {
-            Ok(()) => self.status = format!("saved {}", path),
+        match self.save_active_code() {
+            Ok(()) => {}
             Err(e) => self.status = format!("save failed: {}", e),
         }
     }
 
+    /// File > Save Form: the active form's layout.
     fn save_form(&mut self) {
-        let path = self
-            .oxform_path
-            .clone()
-            .unwrap_or_else(|| "form1.oxform".to_string());
-        match std::fs::write(&path, self.form.to_oxform()) {
-            Ok(()) => self.status = format!("saved {}", path),
+        self.store_active();
+        let i = self.workspace.active;
+        let Some(file) = self.workspace.file.clone() else {
+            self.status = "save failed: the project has no file yet".into();
+            return;
+        };
+        let dir = file
+            .parent()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        self.workspace.ensure_files(i, &dir);
+        let doc = &mut self.workspace.docs[i];
+        if doc.kind != DocKind::Form {
+            return;
+        }
+        let path = doc.layout.clone().unwrap_or_default();
+        match std::fs::write(&path, doc.form.to_oxform()) {
+            Ok(()) => {
+                doc.mark_form_saved();
+                self.status = format!("saved {}", path.display());
+            }
             Err(e) => self.status = format!("save failed: {}", e),
         }
     }
@@ -1193,12 +1263,50 @@ impl Ide {
 /// Layout & rendering.
 impl Render for Ide {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // the window shows the project, with `*` while anything is unsaved
+        let dirty = if self.working_copy_changed() || self.workspace.is_dirty() {
+            " *"
+        } else {
+            ""
+        };
+        window.set_window_title(&format!("{}{} — OxidizedBASIC", self.workspace.name, dirty));
         if !self.scrollbars_initialized {
             self.scrollbars_initialized = true;
             cx.on_next_frame(window, |_this, _window, cx| cx.notify());
         }
         div()
             .id("ide-workspace")
+            .on_action(cx.listener(|this, _: &NewProject, win, cx| {
+                this.new_project(win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenProject, win, cx| {
+                this.open_project(win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SaveProject, win, cx| {
+                if this.workspace.file.is_some() {
+                    if let Err(e) = this.save_project() {
+                        this.status = format!("save failed: {}", e);
+                    }
+                    cx.notify();
+                } else {
+                    this.save_project_as(win, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SaveProjectAs, win, cx| {
+                this.save_project_as(win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseProject, win, cx| {
+                this.close_project(win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &AddForm, _win, cx| {
+                this.add_form(cx);
+            }))
+            .on_action(cx.listener(|this, _: &AddModule, _win, cx| {
+                this.add_module(cx);
+            }))
+            .on_action(cx.listener(|this, _: &RemoveDocument, win, cx| {
+                this.remove_active(win, cx);
+            }))
             .on_action(cx.listener(|this, _: &SaveCode, _win, cx| {
                 this.save_code();
                 cx.notify();
@@ -1325,26 +1433,53 @@ impl Ide {
             .border_color(rgb(BORDER))
             .child(title.to_string())
     }
-
+    /// The Project panel: the project's name and its forms and modules.
+    /// Clicking a document shows it (its layout, or its code for a module);
+    /// a form's second line shows its code file, double-clicked to edit.
     fn render_project_explorer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let project = self
-            .bas_path
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).file_stem())
-            .and_then(|s| s.to_str())
-            .unwrap_or("Project1");
-        let code_file = self
-            .bas_path
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or("Module1.bas");
-        let form_file = self
-            .oxform_path
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or("Form1.oxform");
+        let ws = &self.workspace;
+        let mut list = div()
+            .p_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(SharedString::from(format!("▾  {}", ws.name)));
+        for (i, doc) in ws.docs.iter().enumerate() {
+            let active = i == ws.active;
+            let icon = match doc.kind {
+                DocKind::Form => "◻",
+                DocKind::Module => "◧",
+            };
+            let startup = doc.kind == DocKind::Form && doc.name.eq_ignore_ascii_case(&ws.startup);
+            let label = format!(
+                "{}  {}{}{}",
+                icon,
+                doc.name,
+                if startup { "  (start)" } else { "" },
+                if doc.is_dirty() { " *" } else { "" }
+            );
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("doc-{}", i)))
+                    .debug_selector(move || format!("project-doc-{}", i))
+                    .px_1()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .when(active, |s| s.bg(rgb(SEL_BG)))
+                    .hover(|s| s.bg(rgb(SEL_BG)))
+                    .child(SharedString::from(format!("    {}", label)))
+                    .on_click(cx.listener(
+                        move |this: &mut Ide, ev: &gpui::ClickEvent, _win, cx| {
+                            this.switch_to(i);
+                            if ev.click_count() >= 2 {
+                                // double-click: the code window for the document
+                                this.show_code_window(cx);
+                            }
+                            cx.notify();
+                        },
+                    )),
+            );
+        }
         div()
             .h_40()
             .rounded_lg()
@@ -1354,47 +1489,7 @@ impl Ide {
             .flex()
             .flex_col()
             .child(self.dock_title("Project"))
-            .child(
-                div()
-                    .p_2()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(SharedString::from(format!("▾  {}", project)))
-                    .child(
-                        div()
-                            .id("project-form")
-                            .px_1()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(rgb(SEL_BG)))
-                            .child(SharedString::from(format!("    ◻  {}", form_file)))
-                            .on_click(cx.listener(|this: &mut Ide, _ev, _win, cx| {
-                                this.hide_code_window(cx);
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .id("project-code")
-                            .px_1()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(rgb(SEL_BG)))
-                            .child(SharedString::from(format!(
-                                "    ◧  {}  (double-click for code)",
-                                code_file
-                            )))
-                            .on_click(cx.listener(
-                                |this: &mut Ide, ev: &gpui::ClickEvent, _win, cx| {
-                                    if ev.click_count() >= 2 {
-                                        this.show_code_window(cx);
-                                        cx.notify();
-                                    }
-                                },
-                            )),
-                    ),
-            )
+            .child(list)
     }
 
     fn toolbox_button(

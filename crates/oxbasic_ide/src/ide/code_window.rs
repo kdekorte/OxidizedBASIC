@@ -234,12 +234,7 @@ impl Ide {
     }
 
     pub(super) fn code_window_title(&self) -> String {
-        let file = self
-            .bas_path
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or("Module1.bas");
+        let file = self.workspace.active_doc().file_label();
         format!("{} ({}) — Code", self.form.name, file)
     }
 }

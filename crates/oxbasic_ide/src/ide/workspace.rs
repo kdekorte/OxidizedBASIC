@@ -125,18 +125,25 @@ impl Doc {
         self.form_json() != self.saved_form || self.source() != self.saved_code
     }
 
-    /// Whether only the code changed (for "Save Code").
-    pub fn code_dirty(&self) -> bool {
-        self.source() != self.saved_code
-    }
-
-    pub fn form_dirty(&self) -> bool {
-        self.kind == DocKind::Form && self.form_json() != self.saved_form
-    }
-
     pub fn mark_saved(&mut self) {
         self.saved_form = self.form_json();
         self.saved_code = self.source();
+    }
+
+    /// Forget that the document was saved (its file doesn't exist yet).
+    pub fn mark_unsaved(&mut self) {
+        self.saved_form = "\u{0}unsaved".into();
+        self.saved_code = "\u{0}unsaved".into();
+    }
+
+    /// The code was written, the layout wasn't.
+    pub fn mark_code_saved(&mut self) {
+        self.saved_code = self.source();
+    }
+
+    /// The layout was written, the code wasn't.
+    pub fn mark_form_saved(&mut self) {
+        self.saved_form = self.form_json();
     }
 
     /// Label for the Project panel: `Form1 (Form1.oxform)`, with `*` when
@@ -198,7 +205,9 @@ impl Workspace {
 
     /// The index of the document named `name` (case-insensitive).
     pub fn find(&self, name: &str) -> Option<usize> {
-        self.docs.iter().position(|d| d.name.eq_ignore_ascii_case(name))
+        self.docs
+            .iter()
+            .position(|d| d.name.eq_ignore_ascii_case(name))
     }
 
     /// Make `index` the active document.
@@ -312,6 +321,11 @@ impl Workspace {
 
     /// Give document `i` its file names in `dir` if it has none yet.
     fn assign_files(&mut self, i: usize, dir: &Path) {
+        self.ensure_files(i, dir);
+    }
+
+    /// Give document `i` its file names in `dir` if it has none yet.
+    pub fn ensure_files(&mut self, i: usize, dir: &Path) {
         let d = &mut self.docs[i];
         if d.kind == DocKind::Form && d.layout.is_none() {
             d.layout = Some(dir.join(format!("{}.oxform", d.name)));
@@ -319,6 +333,16 @@ impl Workspace {
         if d.code.is_none() {
             d.code = Some(dir.join(format!("{}.bas", d.name)));
         }
+    }
+
+    /// Write only document `i`'s code, leaving its layout as it is.
+    pub fn save_doc_code(&mut self, i: usize) -> Result<(), String> {
+        let d = &mut self.docs[i];
+        let code = d.code.clone().ok_or("the module has no file")?;
+        std::fs::write(&code, d.source() + "\n")
+            .map_err(|e| format!("cannot save {}: {}", code.display(), e))?;
+        d.mark_code_saved();
+        Ok(())
     }
 
     /// Write document `i` to its files and mark it saved.
@@ -424,8 +448,6 @@ impl Workspace {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,7 +520,10 @@ mod tests {
         assert_eq!(w.docs[0].form.name, "Main", "the layout's name follows");
         assert!(w.rename(1, "main").is_err());
         assert!(w.rename(1, "1bad").is_err());
-        assert!(w.rename(2, "Form1").is_ok(), "a module may take a freed name");
+        assert!(
+            w.rename(2, "Form1").is_ok(),
+            "a module may take a freed name"
+        );
     }
 
     #[test]
@@ -530,10 +555,20 @@ mod tests {
         let file = dir.0.join("app.oxproj");
         let mut w = Workspace::new_project();
         w.save_all(&file).unwrap();
+        assert!(!w.is_dirty());
+
+        // a code edit dirties the document; saving only the code cleans it
         w.docs[0].lines[0] = "Print 1".into();
-        assert!(w.docs[0].code_dirty());
-        assert!(!w.docs[0].form_dirty());
+        assert!(w.docs[0].is_dirty());
         assert!(w.docs[0].file_label().ends_with('*'));
+        w.save_doc_code(0).unwrap();
+        assert!(!w.is_dirty(), "the layout was never touched");
+
+        // a layout edit dirties it too, and saving the code alone doesn't help
+        w.docs[0].form.caption = "Changed".into();
+        assert!(w.is_dirty());
+        w.save_doc_code(0).unwrap();
+        assert!(w.is_dirty(), "the layout is still unsaved");
         w.save_doc(0).unwrap();
         assert!(!w.is_dirty());
     }
@@ -549,4 +584,3 @@ mod tests {
         assert!(err.contains("Form1.bas"), "{}", err);
     }
 }
-
