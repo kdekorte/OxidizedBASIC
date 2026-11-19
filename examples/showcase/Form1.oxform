@@ -1,0 +1,800 @@
+{
+  "name": "Form1",
+  "caption": "OxidizedBASIC Control Showcase",
+  "width": 620.0,
+  "height": 470.0,
+  "controls": [
+    {
+      "name": "lblTitle",
+      "kind": "Label",
+      "rect": {
+        "left": 16.0,
+        "top": 12.0,
+        "width": 300.0,
+        "height": 26.0
+      },
+      "caption": "Control Showcase",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": 671121,
+      "font": {
+        "name": "",
+        "size": 14.0,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblName",
+      "kind": "Label",
+      "rect": {
+        "left": 16.0,
+        "top": 52.0,
+        "width": 80.0,
+        "height": 20.0
+      },
+      "caption": "Your name:",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "txtName",
+      "kind": "TextBox",
+      "rect": {
+        "left": 100.0,
+        "top": 48.0,
+        "width": 190.0,
+        "height": 24.0
+      },
+      "caption": "",
+      "text": "",
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdGreet",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 300.0,
+        "top": 46.0,
+        "width": 90.0,
+        "height": 28.0
+      },
+      "caption": "Greet",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblGreeting",
+      "kind": "Label",
+      "rect": {
+        "left": 16.0,
+        "top": 84.0,
+        "width": 374.0,
+        "height": 22.0
+      },
+      "caption": "Type a name and press Greet.",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": 16774870,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "fraStyle",
+      "kind": "Frame",
+      "rect": {
+        "left": 16.0,
+        "top": 118.0,
+        "width": 180.0,
+        "height": 118.0
+      },
+      "caption": "Greeting style",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "chkShout",
+      "kind": "CheckBox",
+      "rect": {
+        "left": 28.0,
+        "top": 142.0,
+        "width": 150.0,
+        "height": 22.0
+      },
+      "caption": "Shout it",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "optFormal",
+      "kind": "OptionButton",
+      "rect": {
+        "left": 28.0,
+        "top": 170.0,
+        "width": 150.0,
+        "height": 22.0
+      },
+      "caption": "Formal",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 1,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "optCasual",
+      "kind": "OptionButton",
+      "rect": {
+        "left": 28.0,
+        "top": 196.0,
+        "width": 150.0,
+        "height": 22.0
+      },
+      "caption": "Casual",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblColour",
+      "kind": "Label",
+      "rect": {
+        "left": 212.0,
+        "top": 124.0,
+        "width": 60.0,
+        "height": 20.0
+      },
+      "caption": "Colour:",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cboColour",
+      "kind": "ComboBox",
+      "rect": {
+        "left": 212.0,
+        "top": 146.0,
+        "width": 178.0,
+        "height": 24.0
+      },
+      "caption": "",
+      "text": "",
+      "items": [
+        "Red",
+        "Green",
+        "Blue",
+        "Gold"
+      ],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblFruit",
+      "kind": "Label",
+      "rect": {
+        "left": 16.0,
+        "top": 248.0,
+        "width": 100.0,
+        "height": 20.0
+      },
+      "caption": "Fruit basket:",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lstFruit",
+      "kind": "ListBox",
+      "rect": {
+        "left": 16.0,
+        "top": 270.0,
+        "width": 180.0,
+        "height": 110.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [
+        "Apple",
+        "Banana",
+        "Cherry"
+      ],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdAdd",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 212.0,
+        "top": 270.0,
+        "width": 100.0,
+        "height": 28.0
+      },
+      "caption": "Add fruit",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdRemove",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 320.0,
+        "top": 270.0,
+        "width": 70.0,
+        "height": 28.0
+      },
+      "caption": "Remove",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdClear",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 212.0,
+        "top": 306.0,
+        "width": 178.0,
+        "height": 28.0
+      },
+      "caption": "Clear list",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblPick",
+      "kind": "Label",
+      "rect": {
+        "left": 410.0,
+        "top": 52.0,
+        "width": 120.0,
+        "height": 20.0
+      },
+      "caption": "Control array:",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdSwatch",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 410.0,
+        "top": 76.0,
+        "width": 64.0,
+        "height": 28.0
+      },
+      "caption": "Swatch 1",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": 0,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdSwatch",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 478.0,
+        "top": 76.0,
+        "width": 64.0,
+        "height": 28.0
+      },
+      "caption": "Swatch 2",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": 1,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdSwatch",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 546.0,
+        "top": 76.0,
+        "width": 64.0,
+        "height": 28.0
+      },
+      "caption": "Swatch 3",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": 2,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "picSwatch",
+      "kind": "PictureBox",
+      "rect": {
+        "left": 410.0,
+        "top": 118.0,
+        "width": 196.0,
+        "height": 118.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": 16777215,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblClock",
+      "kind": "Label",
+      "rect": {
+        "left": 410.0,
+        "top": 248.0,
+        "width": 196.0,
+        "height": 22.0
+      },
+      "caption": "Clock:",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdClock",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 410.0,
+        "top": 274.0,
+        "width": 196.0,
+        "height": 28.0
+      },
+      "caption": "Start / stop clock",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "tmrClock",
+      "kind": "Timer",
+      "rect": {
+        "left": 0.0,
+        "top": 0.0,
+        "width": 0.0,
+        "height": 0.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [],
+      "enabled": false,
+      "visible": false,
+      "intervalMs": 1000,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdAbout",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 410.0,
+        "top": 310.0,
+        "width": 96.0,
+        "height": 28.0
+      },
+      "caption": "About…",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdQuit",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 510.0,
+        "top": 310.0,
+        "width": 96.0,
+        "height": 28.0
+      },
+      "caption": "Quit",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblStatus",
+      "kind": "Label",
+      "rect": {
+        "left": 16.0,
+        "top": 400.0,
+        "width": 590.0,
+        "height": 22.0
+      },
+      "caption": "Ready",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": 5592405,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    }
+  ]
+}

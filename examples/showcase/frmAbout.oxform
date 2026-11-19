@@ -1,0 +1,153 @@
+{
+  "name": "frmAbout",
+  "caption": "About the Showcase",
+  "width": 360.0,
+  "height": 220.0,
+  "controls": [
+    {
+      "name": "lblHead",
+      "kind": "Label",
+      "rect": {
+        "left": 20.0,
+        "top": 16.0,
+        "width": 320.0,
+        "height": 28.0
+      },
+      "caption": "OxidizedBASIC",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 16.0,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblVersion",
+      "kind": "Label",
+      "rect": {
+        "left": 20.0,
+        "top": 56.0,
+        "width": 320.0,
+        "height": 22.0
+      },
+      "caption": "(set by Form1)",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblNote",
+      "kind": "Label",
+      "rect": {
+        "left": 20.0,
+        "top": 84.0,
+        "width": 320.0,
+        "height": 22.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": 671121,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdHide",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 20.0,
+        "top": 150.0,
+        "width": 100.0,
+        "height": 30.0
+      },
+      "caption": "Hide",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdClose",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 240.0,
+        "top": 150.0,
+        "width": 100.0,
+        "height": 30.0
+      },
+      "caption": "Close",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    }
+  ]
+}

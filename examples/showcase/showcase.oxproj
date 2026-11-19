@@ -1,0 +1,22 @@
+{
+  "name": "showcase",
+  "startup": "Form1",
+  "forms": [
+    {
+      "name": "Form1",
+      "layout": "Form1.oxform",
+      "code": "Form1.bas"
+    },
+    {
+      "name": "frmAbout",
+      "layout": "frmAbout.oxform",
+      "code": "frmAbout.bas"
+    }
+  ],
+  "modules": [
+    {
+      "name": "Module1",
+      "code": "Module1.bas"
+    }
+  ]
+}

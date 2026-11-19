@@ -14,6 +14,14 @@ pub mod launch;
 pub mod live_forms;
 pub mod program;
 pub mod project_commands;
+#[cfg(test)]
+pub mod showcase;
+#[cfg(test)]
+mod showcase_flow_tests;
+#[cfg(test)]
+mod showcase_form_tests;
+#[cfg(test)]
+mod showcase_run;
 pub mod workspace;
 
 use debug_session::{DebugCommand, DebugEvent, DebugSession};
