@@ -209,6 +209,31 @@ impl Ide {
         self.new_project(win, cx);
     }
 
+    /// Quit (⌘Q): with unsaved work, ask first; quit once the answer allows.
+    pub(super) fn quit(&mut self, win: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_discard(win, cx, |ide, _win, cx| {
+            ide.stop_program(cx);
+            cx.quit();
+        });
+    }
+
+    /// Whether the IDE's own window may close now. With unsaved work it
+    /// asks, and closes the window itself once the answer allows; the
+    /// close that triggered the question is refused for now.
+    pub(super) fn may_close(&mut self, win: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.has_unsaved() {
+            return true;
+        }
+        self.confirm_discard(win, cx, |ide, win, cx| {
+            ide.stop_program(cx);
+            // saved or discarded: close for real. Its project is clean now,
+            // or its changes were given up, so mark it so the window agrees.
+            ide.allow_close = true;
+            win.remove_window();
+        });
+        false
+    }
+
     /// File > Open Project…: pick an `.oxproj` and open it.
     pub(super) fn open_project(&mut self, win: &mut Window, cx: &mut Context<Self>) {
         self.confirm_discard(win, cx, |_ide, win, cx| {
@@ -296,5 +321,25 @@ impl Ide {
             });
         })
         .detach();
+    }
+}
+
+/// Renaming a form.
+impl Ide {
+    /// Rename the identifier `old` to `new` in every *other* document's
+    /// code — `Form2.Show`, `Unload Form2` — and in the working copy. The
+    /// renamed form's own code refers to itself as `Me` or by bare control
+    /// names, so it needs no change. Returns how many identifiers changed.
+    pub(super) fn rename_form_references(&mut self, old: &str, new: &str) -> usize {
+        let active = self.workspace.active;
+        let mut changed = 0;
+        for (i, doc) in self.workspace.docs.iter_mut().enumerate() {
+            if i == active {
+                continue;
+            }
+            changed += code_model::rename_identifier(&mut doc.lines, old, new);
+        }
+        changed += code_model::rename_identifier(&mut self.lines, old, new);
+        changed
     }
 }

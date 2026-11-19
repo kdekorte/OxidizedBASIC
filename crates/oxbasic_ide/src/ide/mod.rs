@@ -118,7 +118,6 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
     let bas_path = bas_path.map(|s| s.to_string());
     let oxform_path = oxform_path.map(|s| s.to_string());
     Application::new().run(move |cx: &mut App| {
-        cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             gpui::KeyBinding::new("cmd-q", Quit, None),
             gpui::KeyBinding::new("cmd-n", NewProject, None),
@@ -184,6 +183,14 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
                 let oxform = oxform_path.clone();
                 let entity = cx.new(|cx| Ide::new(bas.as_deref(), oxform.as_deref(), cx));
                 win.focus(&entity.read(cx).designer_focus);
+                // the window's close box asks before losing unsaved work
+                let weak = entity.downgrade();
+                win.on_window_should_close(cx, move |win, cx| {
+                    let Some(ide) = weak.upgrade() else {
+                        return true;
+                    };
+                    ide.update(cx, |ide, cx| ide.allow_close || ide.may_close(win, cx))
+                });
                 entity
             },
         )
@@ -195,6 +202,9 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
 pub struct Ide {
     // files: the open project and its documents (see `workspace`)
     workspace: workspace::Workspace,
+    /// The user answered the save prompt: the next close of the IDE's
+    /// window goes through without asking again.
+    allow_close: bool,
     // code editor
     lines: Vec<String>,
     cursor: (usize, usize), // (row, char-col)
@@ -351,6 +361,7 @@ Print \"Total = \" & CStr(Total)
             live_forms: HashMap::new(),
             status: "Ready".into(),
             run_lines: None,
+            allow_close: false,
             evt_rx,
             evt_tx,
         };
@@ -1212,6 +1223,9 @@ impl Render for Ide {
         }
         div()
             .id("ide-workspace")
+            .on_action(cx.listener(|this, _: &Quit, win, cx| {
+                this.quit(win, cx);
+            }))
             .on_action(cx.listener(|this, _: &NewProject, win, cx| {
                 this.new_project(win, cx);
             }))
@@ -2716,9 +2730,27 @@ impl Ide {
         self.rename_error = None;
         self.prop_bufs.insert((idx, "name"), new.clone());
         if idx == FORM_IDX {
-            // Form events are `Form_<Event>` whatever the form's name.
+            // The form's name is the project document's name: the Project
+            // panel, the startup object and `Form2.Show` in code all use
+            // it. Form *events* stay `Form_<Event>` whatever it is called.
+            self.store_active();
+            let active = self.workspace.active;
+            if let Err(e) = self.workspace.rename(active, &new) {
+                self.status = format!("cannot rename {}: {}", old, e);
+                self.rename_error = Some((idx, e));
+                return false;
+            }
             self.form.name = new.clone();
-            self.status = format!("renamed form {} to {}", old, new);
+            // other forms' code refers to this form by name (`Form2.Show`)
+            let n = self.rename_form_references(&old, &new);
+            self.status = if n == 0 {
+                format!("renamed form {} to {}", old, new)
+            } else {
+                format!(
+                    "renamed form {} to {} ({} reference(s) updated)",
+                    old, new, n
+                )
+            };
             return true;
         }
         let kind = self.form.controls[idx].kind;

@@ -150,6 +150,13 @@ pub fn ensure_handler(
     (lines.len() - 2, 4, true)
 }
 
+/// Rename the identifier `old` to `new` wherever it appears as a bare
+/// identifier (a control or form name), leaving strings and comments alone.
+/// Returns how many changed.
+pub fn rename_identifier(lines: &mut [String], old: &str, new: &str) -> usize {
+    rename_control(lines, old, new, &[])
+}
+
 /// Rename control `old` to `new` in code: the bare identifier
 /// (`old.Caption`) and its event handlers (`old_Click` -> `new_Click`, for
 /// the event names in `events`). Strings and comments are left alone.

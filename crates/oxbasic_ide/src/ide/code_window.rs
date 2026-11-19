@@ -416,6 +416,19 @@ impl Ide {
             .text_color(rgb(FG))
             .text_sm()
             .font_family(".AppleSystemUIFont")
+            .on_action(cx.listener(|this, _: &Quit, win, cx| {
+                this.quit(win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SaveProject, win, cx| {
+                if this.workspace.file.is_some() {
+                    if let Err(e) = this.save_project() {
+                        this.status = format!("save failed: {}", e);
+                    }
+                    cx.notify();
+                } else {
+                    this.save_project_as(win, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &SaveCode, _win, cx| {
                 this.save_code();
                 cx.notify();

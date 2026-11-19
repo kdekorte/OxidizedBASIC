@@ -206,6 +206,50 @@ fn a_saved_project_reopens_with_all_its_forms_and_modules(cx: &mut gpui::TestApp
 }
 
 #[gpui::test]
+fn the_ide_window_may_close_when_saved_and_asks_when_not(cx: &mut gpui::TestAppContext) {
+    let dir = Dir::new("close");
+    let file = dir.0.join("app.oxproj");
+    let (ide, cx) = ide_window(cx);
+
+    // a saved project closes without a question
+    ide.update(cx, |ide, _| ide.save_project_to(file.clone()).unwrap());
+    let closes = ide.update_in(cx, |ide, win, cx| ide.may_close(win, cx));
+    assert!(closes, "nothing to lose");
+    assert!(!cx.has_pending_prompt());
+
+    // an edited one is refused, and the user is asked
+    ide.update(cx, |ide, _| ide.form.caption = "Edited".into());
+    let closes = ide.update_in(cx, |ide, win, cx| ide.may_close(win, cx));
+    cx.run_until_parked();
+    assert!(!closes, "the close waits for the answer");
+    assert!(cx.has_pending_prompt());
+    // Cancel keeps the window and the edit
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.form.caption, "Edited");
+        assert!(!ide.allow_close);
+    });
+}
+
+#[gpui::test]
+fn quit_asks_first_when_there_is_unsaved_work(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    // a new project is unsaved
+    ide.update_in(cx, |ide, win, cx| ide.quit(win, cx));
+    cx.run_until_parked();
+    assert!(
+        cx.has_pending_prompt(),
+        "Quit asked about the unsaved project"
+    );
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert!(ide.working_copy_changed() || ide.workspace.is_dirty())
+    });
+}
+
+#[gpui::test]
 fn opening_a_broken_project_reports_it_and_keeps_the_current_one(cx: &mut gpui::TestAppContext) {
     let dir = Dir::new("broken");
     let file = dir.0.join("bad.oxproj");
@@ -218,5 +262,47 @@ fn opening_a_broken_project_reports_it_and_keeps_the_current_one(cx: &mut gpui::
     ide.read_with(cx, |ide, _| {
         assert!(ide.status.starts_with("open failed"), "{}", ide.status);
         assert_eq!(ide.form.caption, "Mine", "the open project is untouched");
+    });
+}
+
+#[gpui::test]
+fn renaming_a_form_updates_the_project_and_other_forms_code(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    ide.update(cx, |ide, cx| {
+        // Form2's code opens Form1 by name
+        ide.add_form(cx);
+        ide.lines = vec![
+            "Sub Command1_Click()".into(),
+            "  Form1.Show".into(),
+            "End Sub".into(),
+        ];
+        ide.switch_to(0);
+        assert_eq!(ide.workspace.startup, "Form1");
+
+        // rename Form1 (the form itself is selected in the designer)
+        ide.prop_bufs.insert((FORM_IDX, "name"), "Main".into());
+        assert!(ide.commit_rename(FORM_IDX));
+    });
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.workspace.docs[0].name, "Main");
+        assert_eq!(ide.workspace.startup, "Main", "the startup object follows");
+        assert_eq!(ide.form.name, "Main");
+        assert_eq!(ide.workspace.docs[1].lines[1], "  Main.Show");
+    });
+}
+
+#[gpui::test]
+fn a_form_cannot_take_another_documents_name(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    ide.update(cx, |ide, cx| {
+        ide.add_module(cx);
+        ide.switch_to(0);
+        ide.prop_bufs.insert((FORM_IDX, "name"), "Module1".into());
+        assert!(
+            !ide.commit_rename(FORM_IDX),
+            "the name is taken by a module"
+        );
+        assert_eq!(ide.workspace.docs[0].name, "Form1");
+        assert!(ide.rename_error.is_some());
     });
 }
