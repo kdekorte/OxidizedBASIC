@@ -167,7 +167,10 @@ xcodebuild -downloadComponent MetalToolchain
   - list and combo boxes: `AddItem [, index]`, `RemoveItem`, `Clear`,
     `List(i)`, `ListCount`, `ListIndex`, and for a ListBox
     `Selected(i)`, `SelCount` and (set in the designer) `MultiSelect`;
-  - a PictureBox's `Picture = LoadPicture("file.png")`;
+  - a PictureBox's `Picture = LoadPicture("file.png")`, `AutoSize`, and
+    its drawing statements `Line`, `PSet`, `Circle` (with `Step`, boxes,
+    arcs, `CurrentX`/`CurrentY`) and `Cls`; the Image control's `Picture`
+    and `Stretch`; `MouseIcon` for a custom pointer;
   - timers: `Interval` and `Enabled` take effect on the running timer;
   - control arrays: give controls the same name and distinct `Index`
     values (Properties window); the program says `Cmd(2).Caption = "x"`,

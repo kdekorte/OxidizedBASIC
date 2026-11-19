@@ -12,6 +12,7 @@
 use super::debug_session::{EventArg, KeyInput};
 use super::*;
 use oxbasic_ui::events::{self as ev, Event};
+use oxbasic_ui::host::{line_around, word_around};
 
 /// A mouse button held on an object of the form: it has captured the
 /// mouse, as in VB, until the button comes up.
@@ -187,6 +188,10 @@ impl FormRunner {
     /// The pointer moved. While a button is held the object it went down
     /// on gets the move (mouse capture); otherwise the object under it.
     pub(super) fn mouse_move(&mut self, ev: &gpui::MouseMoveEvent) {
+        // a button held in a text field drags out its selection
+        if ev.pressed_button.is_none() {
+            self.text_drag = None;
+        }
         let (target, button) = match (&self.pressed, ev.pressed_button) {
             (Some(p), Some(_)) => (p.target, p.button),
             // the button came up outside the window: the capture is over
@@ -425,12 +430,16 @@ impl Render for FormRunner {
             // wherever the pointer is, so the form takes them all (a
             // release outside the window ends the capture in mouse_move)
             .on_mouse_move(cx.listener(
-                |this: &mut FormRunner, ev: &gpui::MouseMoveEvent, _w, _cx| {
+                |this: &mut FormRunner, ev: &gpui::MouseMoveEvent, win, cx| {
                     this.mouse_move(ev);
+                    if this.drag_selection(ev.position, win) {
+                        cx.notify();
+                    }
                 },
             ))
             .capture_any_mouse_up(cx.listener(
                 |this: &mut FormRunner, ev: &gpui::MouseUpEvent, _w, cx| {
+                    this.text_drag = None;
                     this.release(ev);
                     cx.notify();
                 },
@@ -545,32 +554,92 @@ impl FormRunner {
         if left {
             self.act_on_press(idx, part);
         }
-        // a click in a text field puts the caret at the end of what it
-        // shows (where a click lands in the text isn't measured here),
-        // Shift-click selects up to there
-        if left && self.form.controls[idx].kind.has_text() && part != Part::Arrow {
+        // a click in a text field puts the caret under the pointer (measured
+        // in the field's font); Shift-click selects up to there, a double
+        // click selects the word, a triple click the whole line or text; the
+        // press starts a drag that extends the selection
+        let c = &self.form.controls[idx];
+        if left && c.kind.has_text() && part != Part::Arrow && c.kind != ControlKind::ListBox {
+            let at = self.text_index(idx, ev.position, win);
             let s = &mut self.state[idx];
-            let end = s.text.chars().count();
-            if ev.modifiers.shift {
-                if s.anchor.is_none() {
-                    s.anchor = Some(s.caret);
+            let text = s.text.clone();
+            match ev.click_count {
+                0 | 1 => {
+                    if ev.modifiers.shift {
+                        if s.anchor.is_none() {
+                            s.anchor = Some(s.caret);
+                        }
+                    } else {
+                        s.anchor = Some(at);
+                    }
+                    s.caret = at;
+                    self.text_drag = Some(idx);
                 }
-            } else {
+                2 => {
+                    let (a, b) = word_around(&text, at);
+                    s.anchor = Some(a);
+                    s.caret = b;
+                    self.text_drag = Some(idx);
+                }
+                _ => {
+                    let (a, b) = line_around(&text, at);
+                    s.anchor = Some(a);
+                    s.caret = b;
+                }
+            }
+            if s.anchor == Some(s.caret) {
                 s.anchor = None;
             }
-            s.caret = end;
-            if ev.click_count >= 2 {
-                // a double click selects everything, as a word select would
-                // in a one-word field
-                s.anchor = Some(0);
-            }
-            let (caret, anchor) = (s.caret, s.anchor);
-            self.tell(UserEdit::Caret {
-                control: idx,
-                caret,
-                anchor,
-            });
+            self.tell_caret(idx);
         }
+    }
+
+    /// Which character of text field `idx` the window point `pos` is on.
+    fn text_index(&self, idx: usize, pos: gpui::Point<gpui::Pixels>, win: &Window) -> usize {
+        let (left, top) = self.form.form_origin(idx);
+        let at = gpui::point(pos.x - gpui::px(left), pos.y - gpui::px(top));
+        oxbasic_ui::gpui_text_hit::index_at(
+            win,
+            &self.form.controls[idx],
+            &self.state[idx].text,
+            at,
+        )
+    }
+
+    /// Tell the program where the caret and selection of field `idx` are
+    /// (`SelStart`, `SelLength`).
+    pub(super) fn tell_caret(&self, idx: usize) {
+        self.tell(UserEdit::Caret {
+            control: idx,
+            caret: self.state[idx].caret,
+            anchor: self.state[idx].anchor,
+        });
+    }
+
+    /// The pointer moved with the button held in a text field: the selection
+    /// grows to the character under it. Returns whether it changed.
+    pub(super) fn drag_selection(&mut self, pos: gpui::Point<gpui::Pixels>, win: &Window) -> bool {
+        let Some(idx) = self.text_drag else {
+            return false;
+        };
+        if idx >= self.form.controls.len() {
+            self.text_drag = None;
+            return false;
+        }
+        let at = self.text_index(idx, pos, win);
+        let s = &mut self.state[idx];
+        if s.caret == at {
+            return false;
+        }
+        if s.anchor.is_none() {
+            s.anchor = Some(s.caret);
+        }
+        s.caret = at;
+        if s.anchor == Some(at) {
+            s.anchor = None;
+        }
+        self.tell_caret(idx);
+        true
     }
 
     /// A button came up: the click it makes (on the object it went down

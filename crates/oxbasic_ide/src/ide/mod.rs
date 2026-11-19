@@ -2263,6 +2263,9 @@ struct FormRunner {
     /// The modifier keys held at the last press (a MultiSelect list's
     /// Ctrl- and Shift-clicks).
     press_mods: gpui::Modifiers,
+    /// The text field a button went down in: moving with it held extends
+    /// its selection.
+    text_drag: Option<usize>,
     /// The events the program has handlers for, as `(object, event)` in
     /// lower case: events nobody handles aren't sent. `None` until the
     /// program says (then every event VB raises is sent).
@@ -2311,6 +2314,7 @@ impl FormRunner {
             timer_serial: 0,
             base_dir: None,
             press_mods: gpui::Modifiers::none(),
+            text_drag: None,
             handlers: None,
             form_focus: cx.focus_handle(),
             pressed: None,
@@ -2692,6 +2696,7 @@ impl Ide {
             "container" => c.container.clone().unwrap_or_default(),
             "tooltiptext" => c.tool_tip.clone(),
             "mousepointer" => format!("{}", c.mouse_pointer),
+            "mouseicon" => c.mouse_icon.clone(),
             "name" => c.name.clone(),
             "caption" => c.caption.clone(),
             "text" => c.text.clone().unwrap_or_default(),
@@ -2922,6 +2927,7 @@ impl Ide {
                 }
             }
             "tooltiptext" => c.tool_tip = val.to_string(),
+            "mouseicon" => c.mouse_icon = val.trim().to_string(),
             "mousepointer" => {
                 if let Ok(n) = val.trim().parse::<i16>() {
                     if (0..=15).contains(&n) || n == 99 {
@@ -3340,6 +3346,7 @@ impl Ide {
             rows.push(("container", "Container"));
             rows.push(("tooltiptext", "ToolTipText"));
             rows.push(("mousepointer", "MousePointer"));
+            rows.push(("mouseicon", "MouseIcon"));
         }
         rows.push(("enabled", "Enabled"));
         rows.push(("index", "Index"));

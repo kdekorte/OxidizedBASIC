@@ -23,12 +23,17 @@ mod form;
 pub mod gpui_backend;
 #[cfg(feature = "gpui")]
 pub mod gpui_controls;
+#[cfg(feature = "gpui")]
+pub mod gpui_text_hit;
 
 pub mod canvas;
 pub mod events;
 pub mod host;
 mod host_controls;
 mod host_draw;
+#[cfg(target_os = "macos")]
+extern crate objc;
+pub mod mac_cursor;
 pub use host_controls::{container_key, split_element};
 pub mod project;
 pub mod project_host;
@@ -159,7 +164,7 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
             ("MouseMove", MOUSE),
             ("MouseUp", MOUSE),
         ],
-        "frame" => &[
+        "frame" | "image" => &[
             ("Click", ""),
             ("DblClick", ""),
             ("MouseDown", MOUSE),
@@ -261,7 +266,7 @@ pub fn event_params(control: &str, event: &str) -> Option<&'static str> {
 pub fn default_event(control: &str) -> Option<&'static str> {
     Some(match control.to_ascii_lowercase().as_str() {
         "commandbutton" | "label" | "frame" | "listbox" | "picturebox" | "checkbox"
-        | "optionbutton" => "Click",
+        | "optionbutton" | "image" => "Click",
         "textbox" | "combobox" => "Change",
         "timer" => "Timer",
         "form" => "Load",
@@ -371,6 +376,7 @@ mod tests {
             "ListBox",
             "ComboBox",
             "PictureBox",
+            "Image",
             "Timer",
             "CheckBox",
             "OptionButton",

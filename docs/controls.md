@@ -32,6 +32,7 @@ for run-time access, `crates/oxbasic_ui/src/lib.rs` for events,
 | PictureBox | ▧ PictureBox | `Picture1` | 100x100 | — | — | — | no | yes |
 | CheckBox | ☑ CheckBox | `Check1` | 110x22 | yes | — | 0/1/2 | yes | yes |
 | OptionButton | ◉ OptionButton | `Option1` | 110x22 | yes | — | True/False | yes | yes |
+| Image | ▣ Image | `Image1` | 100x100 | — | — | — | no | no |
 | Timer | ◷ Timer | `Timer1` | none | — | — | — | no | no |
 
 "Font/colours" means `ForeColor` and `Font.*`. `BackColor` applies to
@@ -53,7 +54,8 @@ everything except Timer. "Focus" means `SetFocus` works.
 | `TabStop` | Boolean | R/W | R/W | Tab skips the control when False (a click still focuses it). Only controls that take the focus. |
 | `Container` | object | R/W (`Set`) | R/W | The Frame or PictureBox it sits in (reads as its name; the form's name when on the form). `Set Text1.Container = Frame1` moves it in, `= Me` back out; `Left`/`Top` then count from the container. A hidden or disabled container hides or disables what it holds. Anything but a Frame/PictureBox, or a container inside the control itself, raises 380. In the designer, dropping a control on a Frame puts it in. |
 | `ToolTipText` | String | R/W | R/W | Shown after the pointer rests on the control for half a second. |
-| `MousePointer` | Integer | R/W | R/W | `vbArrow` 1, `vbCrosshair` 2, `vbIbeam` 3, `vbSizeNESW` 6 … `vbNoDrop` 12, `vbCustom` 99 (a pointing hand). macOS has no hourglass: 11 and 13 show the arrow. Others raise 380. |
+| `MousePointer` | Integer | R/W | R/W | `vbArrow` 1, `vbCrosshair` 2, `vbIbeam` 3, `vbSizeNESW` 6 … `vbHourglass` 11 (the macOS waiting cursor), `vbNoDrop` 12, `vbArrowHourglass` 13 (also the waiting cursor), `vbCustom` 99 (the control's `MouseIcon`). Others raise 380. |
+| `MouseIcon` | picture | R/W | R/W (a file name) | The image shown as the pointer when `MousePointer` is 99, from `LoadPicture`. Scaled down to fit 32 by 32 pixels, its top-left corner the hot spot. A file that isn't an image, or no icon, shows the pointing hand. |
 | `Move left [, top [, width [, height]]]` | method | yes | — | Sets those given; a size change raises `Resize` as `Width` would. |
 | `ZOrder [position]` | method | yes | — | 0 (`vbBringToFront`, the default) draws it over the others, 1 (`vbSendToBack`) under them. The tab order is kept. |
 
@@ -122,8 +124,13 @@ Typing in the window updates `Text` before `Change` fires.
   3 both) are set at design time, as in VB; assigning them raises 382. A
   MultiLine box takes Enter as a new line, moves with Up/Down, and wraps
   lines unless it has a horizontal scroll bar.
-- A click puts the caret at the end of the text (where in the text a click
-  lands isn't measured yet); a double click selects all of it.
+- **Mouse.** A click puts the caret between the characters nearest the
+  pointer, measured in the box's own font. Dragging selects the text it
+  crosses, and keeps selecting while the pointer is outside the box; a
+  Shift-click extends the selection; a double click selects the word
+  under it (a run of letters, digits and `_`, a run of spaces, or one
+  other character); a triple click selects the line, or all of a
+  one-line box. The program sees the result in `SelStart`/`SelLength`.
 
 ### Frame
 | Member | Kind | Type | Run time | Design time |
@@ -171,6 +178,10 @@ copies the item into `Text`.
 | Member | Kind | Type | Run time | Design time |
 |---|---|---|---|---|
 | `Picture` | property | picture | R/W | R/W (a file name) |
+| `AutoSize` | property | Boolean | R/W | R/W |
+| `CurrentX`, `CurrentY` | properties | Single | R/W | — |
+| `Cls` | method | | yes | |
+| `Line`, `PSet`, `Circle` | statements | | yes | |
 | `SetFocus` | method | | yes | |
 
 `Picture = LoadPicture("logo.png")` shows the image at its own size from
@@ -181,6 +192,44 @@ that name. Changing it raises `Change`.
 
 It takes the focus (`SetFocus`, Tab, a click), so it gets keys, and it can
 hold other controls (`Container`), as in VB.
+
+`AutoSize` makes the box the picture's size plus its 2-pixel border on each
+side, as the picture or the setting changes (a missing file leaves it).
+
+**Drawing.** `Line`, `PSet` and `Circle` draw on a PictureBox; on the form
+itself, a Frame or an Image they raise 438.
+
+    Picture1.Line (10, 10)-(100, 60), vbRed        ' a line
+    Picture1.Line (10, 10)-(100, 60), , B          ' a box (BF fills it)
+    Picture1.Line -(150, 20)                       ' on from where it ended
+    Picture1.Line -Step(0, 30)                     ' Step counts from there
+    Picture1.PSet (50, 50), RGB(0, 128, 0)         ' one dot
+    Picture1.Circle (80, 80), 30, vbBlue           ' a circle
+    Picture1.Circle (80, 80), 30, , 0, 3.14159, 0.5  ' a half ellipse
+    Picture1.Cls                                   ' clear it
+
+Coordinates are pixels from the box's top-left. A colour left out is the
+control's `ForeColor`; colours are VB Longs, system colours included. A
+negative `start` or `end` in `Circle` also draws the radius to it (a pie
+slice); `aspect` is height over width. `CurrentX`/`CurrentY` are where
+the last shape ended (a circle: its centre) and `Cls` resets them. Shapes
+are drawn over the picture in the order they were drawn, and a program
+keeps at most 20,000 of them (the oldest go).
+
+`Line`, `PSet` and `Circle` are not reserved words: they are drawing
+statements only when a point `(x, y)` follows, so a variable called
+`Line` still works.
+
+### Image
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Picture` | property | picture | R/W | R/W (a file name) |
+| `Stretch` | property | Boolean | R/W | R/W |
+
+VB's lightweight picture: no border, no focus, no drawing, and it can't
+hold other controls. With `Stretch` the picture is scaled to the control's
+size; without it, it is drawn at its own size from the top-left corner.
+(`Stretch` belongs to the Image in VB, not the PictureBox.)
 
 ### CheckBox
 | Member | Kind | Type | Run time | Design time |
@@ -239,6 +288,7 @@ reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
 | Label | `Change`, `Click`, `DblClick`, `MouseDown`, `MouseMove`, `MouseUp` |
 | TextBox | `Change`, `Click`, `DblClick`, `GotFocus`, `KeyDown`, `KeyPress`, `KeyUp`, `LostFocus`, `Mouse*` |
 | Frame | `Click`, `DblClick`, `Mouse*` |
+| Image | `Click`, `DblClick`, `Mouse*` |
 | ListBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Scroll` |
 | ComboBox | `Change`, `Click`, `DblClick`, `DropDown`, `GotFocus`, `Key*`, `LostFocus`, `Scroll` |
 | PictureBox | `Change`, `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Paint`, `Resize` |
@@ -326,11 +376,11 @@ an element that doesn't exist 340; `Load` of something that isn't an array
 
 ## Not supported yet
 
-`AutoSize`, `Stretch` and the drawing methods (`Line`, `Circle`, `PSet`,
-`Cls`) of a PictureBox; a picture is shown, not drawn on. A click doesn't
-place the caret where it lands in a TextBox's text (it goes to the end), and
-the mouse doesn't drag out a text selection. Checkbox-style lists
-(`ListBox.Style` 1), `Sorted`, `ItemData`, `TopIndex`, `ListBox.Columns`.
-`MousePointer` 99 shows a pointing hand rather than a `MouseIcon`; `Image`
-controls and `DragDrop`/`OLEDrag`.
+Drawing on the form itself, a Frame or an Image; `DrawWidth`, `DrawStyle`,
+`FillColor`, `FillStyle`, `ScaleMode` and `Point()`; `Print` onto a
+PictureBox. Checkbox-style lists (`ListBox.Style` 1), `Sorted`,
+`ItemData`, `TopIndex`, `ListBox.Columns`. `DragDrop`/`OLEDrag`. Animated
+or `.cur` cursors (a `MouseIcon` is a still image). On a platform other
+than macOS the waiting cursor and `MouseIcon` show the arrow and the
+pointing hand.
 

@@ -12,6 +12,10 @@ imagesize = "0.13"
 oxbasic_runtime = { workspace = true }
 gpui = { version = "0.2.2", optional = true }
 
+# the macOS wait cursor (see src/mac_cursor.rs); the version GPUI uses
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2.7"
+
 [dev-dependencies]
 oxbasic_parser = { workspace = true }
 

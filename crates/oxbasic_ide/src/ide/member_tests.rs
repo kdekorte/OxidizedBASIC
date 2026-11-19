@@ -346,3 +346,118 @@ fn drawing_stretching_and_auto_sizing_show_in_the_live_window(cx: &mut gpui::Tes
     assert_eq!(size, (516.0, 516.0));
     live.stop();
 }
+
+#[gpui::test]
+fn a_click_puts_the_caret_where_it_lands_and_a_drag_selects(cx: &mut gpui::TestAppContext) {
+    let mut f = FormSpec::new("Form1", "Text", 400.0, 300.0);
+    f.text_box(
+        "Text1",
+        "hello brave new world",
+        Rect::new(16.0, 40.0, 300.0, 24.0),
+    );
+    f.label("Label1", "", Rect::new(16.0, 8.0, 360.0, 20.0));
+    let src = "Sub Text1_Click()\n  Label1.Caption = Text1.SelStart & \",\" & Text1.SelLength\nEnd Sub\n\
+               Sub Text1_MouseUp(Button As Integer, Shift As Integer, X As Single, Y As Single)\n\
+               \x20 Label1.Caption = Text1.SelStart & \",\" & Text1.SelLength & \"=\" & Text1.SelText\nEnd Sub\n";
+    let mut live = Live::start(f, src, cx);
+    let text = live.win.debug_bounds("run-Text1").unwrap();
+    let at = |dx: f32| gpui::point(text.origin.x + px(dx), text.center().y);
+    let sel = |live: &Live| live.read(|r| r.state[0].selection());
+
+    // a click at the far left puts the caret before everything, far right
+    // after it, and between them somewhere in the middle
+    for (dx, want) in [(1.0, Some(0)), (299.0, Some(21)), (60.0, None)] {
+        live.win.simulate_click(at(dx), gpui::Modifiers::none());
+        live.settle();
+        let (start, len) = sel(&live);
+        assert_eq!(len, 0, "a click selects nothing");
+        match want {
+            Some(n) => assert_eq!(start, n, "click at {}", dx),
+            None => assert!((1..21).contains(&start), "mid-text, got {}", start),
+        }
+    }
+    // clicks further right land further along the text
+    let mut last = 0;
+    for dx in [20.0, 50.0, 80.0, 110.0, 140.0] {
+        live.win.simulate_click(at(dx), gpui::Modifiers::none());
+        live.settle();
+        let (start, _) = sel(&live);
+        assert!(start > last, "{} should be right of {}", start, last);
+        last = start;
+    }
+
+    // dragging from one point to another selects the text between
+    live.win.simulate_event(gpui::MouseDownEvent {
+        button: gpui::MouseButton::Left,
+        position: at(1.0),
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    live.win.simulate_event(gpui::MouseMoveEvent {
+        position: at(299.0),
+        pressed_button: Some(gpui::MouseButton::Left),
+        modifiers: gpui::Modifiers::none(),
+    });
+    live.win.simulate_event(gpui::MouseUpEvent {
+        button: gpui::MouseButton::Left,
+        position: at(299.0),
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+    });
+    live.settle();
+    assert_eq!(sel(&live), (0, 21), "all of it");
+    // and the program sees the selection as the drag left it
+    assert_eq!(live.caption(1), "0,21=hello brave new world");
+
+    // a double click selects the word under it
+    for n in 1..=2 {
+        live.win.simulate_event(gpui::MouseDownEvent {
+            button: gpui::MouseButton::Left,
+            position: at(1.0),
+            modifiers: gpui::Modifiers::none(),
+            click_count: n,
+            first_mouse: false,
+        });
+        live.win.simulate_event(gpui::MouseUpEvent {
+            button: gpui::MouseButton::Left,
+            position: at(1.0),
+            modifiers: gpui::Modifiers::none(),
+            click_count: n,
+        });
+    }
+    live.settle();
+    assert_eq!(sel(&live), (0, 5), "hello");
+    assert_eq!(live.caption(1), "0,5=hello");
+    live.stop();
+}
+
+#[gpui::test]
+fn a_custom_pointer_and_the_wait_cursor_are_set_on_a_live_control(cx: &mut gpui::TestAppContext) {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase");
+    let mut f = FormSpec::new("Form1", "Pointers", 400.0, 300.0);
+    f.label("Label1", "custom", Rect::new(8.0, 8.0, 100.0, 20.0));
+    f.label("Label2", "busy", Rect::new(8.0, 40.0, 100.0, 20.0));
+    let src = format!(
+        "Sub Form_Load()\n  Label1.MouseIcon = LoadPicture(\"{}\")\n  Label1.MousePointer = vbCustom\n\
+         \x20 Label2.MousePointer = vbHourglass\nEnd Sub\n",
+        dir.join("logo.png").display()
+    );
+    let mut live = Live::start(f, &src, cx);
+    live.read(|r| {
+        assert_eq!(r.form.controls[0].mouse_pointer, 99);
+        assert!(r.form.controls[0].mouse_icon.ends_with("logo.png"));
+        assert_eq!(r.form.controls[1].mouse_pointer, 11);
+    });
+    // hovering each draws the window, which installs the cursors; the wait
+    // cursor is the macOS one where this Mac has it
+    for sel in ["run-Label1", "run-Label2"] {
+        let b = live.win.debug_bounds(sel).unwrap();
+        live.win
+            .simulate_mouse_move(b.center(), None, gpui::Modifiers::none());
+        live.settle();
+    }
+    #[cfg(target_os = "macos")]
+    assert!(oxbasic_ui::mac_cursor::install_wait_cursor());
+    live.stop();
+}

@@ -152,6 +152,10 @@ pub struct ControlSpec {
     /// 3 I-beam, 11 hourglass...).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub mouse_pointer: i16,
+    /// `MouseIcon`: the image file shown as the pointer over the control
+    /// when `MousePointer` is 99 (`vbCustom`), as given to `LoadPicture`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mouse_icon: String,
     /// `Locked` (TextBox, ComboBox): the text can be read and selected but
     /// not typed into.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -340,6 +344,7 @@ impl ControlSpec {
             tool_tip: String::new(),
             mouse_pointer: 0,
             locked: false,
+            mouse_icon: String::new(),
             max_length: 0,
             multi_line: false,
             scroll_bars: 0,

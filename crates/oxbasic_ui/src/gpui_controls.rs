@@ -111,6 +111,9 @@ impl ControlLook {
 }
 
 /// VB's `MousePointer` as a GPUI cursor (`None`: the control's usual one).
+/// `vbHourglass` and `vbArrowHourglass` are macOS's waiting cursor, which
+/// GPUI has no style for; [`crate::mac_cursor`] puts it behind
+/// `CursorStyle::DragCopy`, and the arrow is shown where that isn't there.
 pub fn cursor_for(pointer: i16) -> Option<CursorStyle> {
     Some(match pointer {
         1 => CursorStyle::Arrow,
@@ -123,9 +126,13 @@ pub fn cursor_for(pointer: i16) -> Option<CursorStyle> {
         8 => CursorStyle::ResizeUpLeftDownRight,
         9 => CursorStyle::ResizeLeftRight,
         10 => CursorStyle::ResizeUp,
-        // no hourglass on a Mac: the "not allowed" sign is closest for
-        // No Drop, and the arrow (VB 13 is arrow + hourglass) for the rest
-        11 | 13 => CursorStyle::Arrow,
+        11 | 13 => {
+            if crate::mac_cursor::install_wait_cursor() {
+                CursorStyle::DragCopy
+            } else {
+                CursorStyle::Arrow
+            }
+        }
         12 => CursorStyle::OperationNotAllowed,
         14 => CursorStyle::ContextualMenu,
         99 => CursorStyle::PointingHand,
@@ -480,7 +487,24 @@ pub fn paint_control<V: 'static>(
         }));
     // `MousePointer` and `ToolTipText` at run time
     if !look.design {
-        if let Some(cursor) = cursor_for(c.mouse_pointer) {
+        if c.mouse_pointer == 99 && !c.mouse_icon.is_empty() {
+            // a custom pointer (`MouseIcon`): shown through the style GPUI
+            // hands to macOS as DragLink, with the icon set as the pointer
+            // enters (and cleared as it leaves)
+            let icon = match &look.base_dir {
+                Some(dir) => dir.join(&c.mouse_icon),
+                None => std::path::PathBuf::from(&c.mouse_icon),
+            };
+            if crate::mac_cursor::icon_cursor_usable(&icon) {
+                base = base.cursor(CursorStyle::DragLink);
+            } else {
+                base = base.cursor(CursorStyle::PointingHand);
+            }
+            // the icon is the pointer only while this control is under it
+            base = base.on_hover(move |hovered, _w, _cx| {
+                crate::mac_cursor::set_icon_cursor(hovered.then_some(icon.as_path()));
+            });
+        } else if let Some(cursor) = cursor_for(c.mouse_pointer) {
             base = base.cursor(cursor);
         }
         if !c.tool_tip.is_empty() {
@@ -856,4 +880,26 @@ fn paint_combo<V: 'static>(
         ));
     }
     hook(Part::Body, body, cx)
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    #[test]
+    fn mouse_pointers_map_to_gpui_cursors() {
+        assert_eq!(cursor_for(0), None, "the default is the control's own");
+        assert_eq!(cursor_for(1), Some(CursorStyle::Arrow));
+        assert_eq!(cursor_for(3), Some(CursorStyle::IBeam));
+        assert_eq!(cursor_for(99), Some(CursorStyle::PointingHand));
+        assert_eq!(cursor_for(42), None);
+        // the hourglass: the wait cursor where macOS has it, else the arrow
+        let wait = if crate::mac_cursor::install_wait_cursor() {
+            CursorStyle::DragCopy
+        } else {
+            CursorStyle::Arrow
+        };
+        assert_eq!(cursor_for(11), Some(wait));
+        assert_eq!(cursor_for(13), Some(wait));
+    }
 }

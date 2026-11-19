@@ -229,7 +229,7 @@ fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppCont
      -> Vec<&'static str> {
         let mut v: Vec<&'static str> = first.iter().copied().chain(geometry).collect();
         v.extend(own.iter().copied());
-        v.extend(["container", "tooltiptext", "mousepointer"]);
+        v.extend(["container", "tooltiptext", "mousepointer", "mouseicon"]);
         v.extend(["enabled", "index", "tabindex"]);
         if focus {
             v.push("tabstop");

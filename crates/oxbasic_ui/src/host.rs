@@ -31,6 +31,55 @@ pub struct ControlState {
     pub canvas: crate::canvas::Canvas,
 }
 
+/// The word around character `at` of `text` (characters, `start..end`):
+/// a run of letters, digits and `_`, or else the run of spaces or the one
+/// other character there. At the end of the text, the word before it.
+pub fn word_around(text: &str, at: usize) -> (usize, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return (0, 0);
+    }
+    let i = at.min(chars.len() - 1);
+    let class = |c: char| {
+        if c.is_alphanumeric() || c == '_' {
+            0
+        } else if c.is_whitespace() {
+            1
+        } else {
+            2
+        }
+    };
+    let k = class(chars[i]);
+    let (mut a, mut b) = (i, i + 1);
+    // a punctuation mark is a word of its own
+    if k == 2 {
+        return (a, b);
+    }
+    while a > 0 && class(chars[a - 1]) == k {
+        a -= 1;
+    }
+    while b < chars.len() && class(chars[b]) == k {
+        b += 1;
+    }
+    (a, b)
+}
+
+/// The line around character `at` of `text` (`start..end`, the line break
+/// left out): what a triple click selects.
+pub fn line_around(text: &str, at: usize) -> (usize, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    let at = at.min(chars.len());
+    let a = chars[..at]
+        .iter()
+        .rposition(|&c| c == '\n')
+        .map_or(0, |p| p + 1);
+    let b = chars[at..]
+        .iter()
+        .position(|&c| c == '\n')
+        .map_or(chars.len(), |p| at + p);
+    (a, b)
+}
+
 impl ControlState {
     pub fn new(c: &ControlSpec) -> ControlState {
         let text = match c.kind {
@@ -664,6 +713,7 @@ impl FormHost {
             "tabstop" => Variant::Boolean(c.tab_stop),
             "tooltiptext" => Variant::String(c.tool_tip.clone()),
             "mousepointer" => Variant::Integer(c.mouse_pointer),
+            "mouseicon" => Variant::String(c.mouse_icon.clone()),
             "container" => match &c.container {
                 Some(name) => Variant::String(name.clone()),
                 None => Variant::String(self.form.name.clone()),
@@ -821,6 +871,7 @@ impl FormHost {
                 self.state[i].set_text(text);
             }
             "tooltiptext" => self.form.controls[i].tool_tip = value.as_string()?,
+            "mouseicon" => self.form.controls[i].mouse_icon = value.as_string()?,
             "mousepointer" => {
                 let n = value.as_i64()?;
                 if !(0..=15).contains(&n) && n != 99 {
@@ -2291,5 +2342,90 @@ mod drawing_and_images {
         assert!(run("x = LoadPicture(\"missing.png\")\n", &h)
             .unwrap_err()
             .contains("53"));
+    }
+}
+
+#[cfg(test)]
+mod word_and_line_selection {
+    use super::{line_around, word_around};
+
+    #[test]
+    fn a_word_is_a_run_of_word_characters_spaces_or_one_other_character() {
+        let t = "Hello, big_world  x";
+        assert_eq!(word_around(t, 2), (0, 5), "Hello");
+        assert_eq!(word_around(t, 5), (5, 6), "a comma is a word of its own");
+        assert_eq!(word_around(t, 8), (7, 16), "big_world, underscore and all");
+        assert_eq!(word_around(t, 16), (16, 18), "the spaces between");
+        assert_eq!(word_around(t, 99), (18, 19), "past the end: the last word");
+        assert_eq!(word_around("", 0), (0, 0));
+        // characters, not bytes
+        assert_eq!(word_around("héllo wörld", 8), (6, 11));
+    }
+
+    #[test]
+    fn a_line_is_what_lies_between_its_breaks() {
+        let t = "one\ntwo\n\nfour";
+        assert_eq!(line_around(t, 1), (0, 3));
+        assert_eq!(line_around(t, 5), (4, 7));
+        assert_eq!(line_around(t, 8), (8, 8), "an empty line");
+        assert_eq!(line_around(t, 99), (9, 13), "past the end: the last line");
+        assert_eq!(line_around("single", 3), (0, 6));
+    }
+
+    #[test]
+    fn edit_keys_follow_the_caret_and_selection() {
+        use crate::host::ControlState;
+        use crate::{ControlKind, ControlSpec, Rect};
+        let c = ControlSpec::new(
+            "Text1",
+            ControlKind::TextBox,
+            Rect::new(0.0, 0.0, 100.0, 20.0),
+        );
+        let mut s = ControlState::default();
+        s.set_text("hello world".into());
+        s.select(6, 5); // "world"
+        assert_eq!(s.selected_text(), "world");
+        // typing replaces the selection
+        s.edit_key(&c, "x", Some("x"), false);
+        assert_eq!(s.text, "hello x");
+        assert_eq!(s.selection(), (7, 0));
+        // Shift+Left selects back over the "x"
+        s.edit_key(&c, "left", None, true);
+        assert_eq!(s.selected_text(), "x");
+        // a plain Left drops it, at its start
+        s.edit_key(&c, "left", None, false);
+        assert_eq!(s.selection(), (6, 0));
+        // Backspace removes the character before the caret
+        let (changed, _) = s.edit_key(&c, "backspace", None, false);
+        assert!(changed);
+        assert_eq!(s.text, "hellox");
+    }
+}
+
+#[cfg(test)]
+mod mouse_icon_member {
+    use super::tests::{host, run};
+
+    #[test]
+    fn mouse_icon_reads_and_writes_as_a_picture_file_name() {
+        let h = host();
+        let out = run(
+            "Print \"[\" & Label1.MouseIcon & \"]\"\n\
+             Label1.MouseIcon = LoadPicture(\"Cargo.toml\")\nLabel1.MousePointer = vbCustom\n\
+             Print Label1.MouseIcon; Label1.MousePointer\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, "[]\nCargo.toml 99 \n");
+        let b = h.borrow();
+        let c = &b.spec().controls[0];
+        assert_eq!((c.mouse_pointer, c.mouse_icon.as_str()), (99, "Cargo.toml"));
+        // saved with the form, and older files have none
+        let mut f = crate::FormSpec::new("F", "F", 10.0, 10.0);
+        assert!(!f.to_oxform().contains("mouseIcon"));
+        f.label("L", "", crate::Rect::new(0.0, 0.0, 1.0, 1.0));
+        f.controls[0].mouse_icon = "a.png".into();
+        let back = crate::FormSpec::from_oxform(&f.to_oxform()).unwrap();
+        assert_eq!(back.controls[0].mouse_icon, "a.png");
     }
 }
