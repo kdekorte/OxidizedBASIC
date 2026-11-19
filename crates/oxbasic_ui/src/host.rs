@@ -9,7 +9,7 @@
 //! No GUI is needed here, so this module is usable and tested headless.
 
 use crate::{ControlKind, ControlSpec, FormSpec};
-use oxbasic_runtime::{ExecResult, ObjectHost, ObjectRef, Variant, VbError};
+use oxbasic_runtime::{ExecResult, ObjectHost, ObjectRef, RaisedEvent, Variant, VbError};
 
 /// A control's run-time state: the text of a TextBox or ComboBox, the
 /// selected row of a list, and a CheckBox's or OptionButton's `Value`.
@@ -92,6 +92,8 @@ pub enum UserEdit {
     /// The user clicked a CheckBox or OptionButton, which now has `value`
     /// (an OptionButton also clears the others of its group).
     Value { control: usize, value: i32 },
+    /// The user resized the form's window: its inside is now this big.
+    FormSize { width: f32, height: f32 },
 }
 
 /// The OptionButtons that act as one group with `i`: VB groups them by
@@ -129,9 +131,20 @@ pub fn set_value(form: &FormSpec, state: &mut [ControlState], i: usize, value: i
 }
 
 /// Where a `Name.Member` points.
+#[derive(Clone, Copy)]
 enum Target {
     Form,
     Control(usize),
+}
+
+/// What of a control the program can change that VB raises an event for.
+#[derive(PartialEq, Clone)]
+struct Watched {
+    text: String,
+    caption: String,
+    list_index: Option<usize>,
+    value: i32,
+    size: (f32, f32),
 }
 
 /// The live form, owned by the program's side. The interpreter reads and
@@ -145,6 +158,9 @@ pub struct FormHost {
     touched: Vec<bool>,
     /// `SetFocus` was called on this control since then.
     focus: Option<usize>,
+    /// Events the program's own changes raised, for the interpreter to run
+    /// (`Text1.Text = "x"` raises `Text1_Change`).
+    raised: Vec<RaisedEvent>,
 }
 
 impl FormHost {
@@ -157,12 +173,79 @@ impl FormHost {
             changed: false,
             touched,
             focus: None,
+            raised: Vec::new(),
+        }
+    }
+
+    /// What of control `i` VB raises events for when the program changes it.
+    fn watched(&self, i: usize) -> Watched {
+        let c = &self.form.controls[i];
+        let s = &self.state[i];
+        Watched {
+            text: s.text.clone(),
+            caption: c.caption.clone(),
+            list_index: s.list_index,
+            value: s.value,
+            size: (c.rect.width, c.rect.height),
+        }
+    }
+
+    /// Queue `control`'s `event` for the interpreter (with its `Index` in a
+    /// control array).
+    fn raise(&mut self, i: usize, event: &str) {
+        let c = &self.form.controls[i];
+        self.raised.push(RaisedEvent {
+            form: self.form.name.clone(),
+            handler: format!("{}_{}", c.name, event),
+            args: c
+                .index
+                .map(|n| vec![Variant::Integer(n as i16)])
+                .unwrap_or_default(),
+        });
+    }
+
+    /// The events VB raises for what the program just changed in control
+    /// `i` (`before` is how it was), as VB raises them inside the
+    /// statement: a TextBox's or ComboBox's `Text` and a Label's `Caption`
+    /// raise `Change`; a list's `ListIndex` and a CheckBox's or a chosen
+    /// OptionButton's `Value` raise `Click`; a PictureBox's size `Resize`.
+    fn raise_changes(&mut self, i: usize, before: &Watched) {
+        let after = self.watched(i);
+        if after == *before {
+            return;
+        }
+        let kind = self.form.controls[i].kind;
+        match kind {
+            ControlKind::TextBox if after.text != before.text => self.raise(i, "Change"),
+            ControlKind::Label if after.caption != before.caption => self.raise(i, "Change"),
+            ControlKind::ComboBox => {
+                if after.text != before.text {
+                    self.raise(i, "Change");
+                }
+                if after.list_index != before.list_index && after.list_index.is_some() {
+                    self.raise(i, "Click");
+                }
+            }
+            ControlKind::ListBox if after.list_index != before.list_index => self.raise(i, "Click"),
+            ControlKind::CheckBox if after.value != before.value => self.raise(i, "Click"),
+            // setting an option button True clicks it; the others it clears
+            // raise nothing
+            ControlKind::OptionButton if after.value != 0 && before.value == 0 => {
+                self.raise(i, "Click")
+            }
+            ControlKind::PictureBox if after.size != before.size => self.raise(i, "Resize"),
+            _ => {}
         }
     }
 
     /// The form's name.
     pub fn name(&self) -> &str {
         &self.form.name
+    }
+
+    /// The form as the program has it now.
+    pub fn spec(&self) -> &FormSpec {
+        &self.form
     }
 
     /// Whether the form has a control called `name`.
@@ -230,6 +313,12 @@ impl FormHost {
             UserEdit::Value { control, value } => {
                 if control < self.state.len() {
                     set_value(&self.form, &mut self.state, control, value);
+                }
+            }
+            UserEdit::FormSize { width, height } => {
+                if width > 0.0 && height > 0.0 {
+                    self.form.width = width;
+                    self.form.height = height;
                 }
             }
         }
@@ -589,14 +678,32 @@ impl ObjectHost for FormHost {
     ) -> ExecResult<()> {
         let p = property.to_ascii_lowercase();
         let target = self.target(object)?;
+        let before = match target {
+            Target::Control(i) => Some(self.watched(i)),
+            Target::Form => None,
+        };
+        let form_size = (self.form.width, self.form.height);
         let result = match target {
             Target::Form => self.set_form(&p, &value),
             Target::Control(i) => self.set_control(i, &p, args, &value),
         };
         if result.is_ok() {
             self.changed = true;
-            if let Target::Control(i) = target {
-                self.touched[i] = true;
+            match target {
+                Target::Control(i) => {
+                    self.touched[i] = true;
+                    if let Some(before) = before {
+                        self.raise_changes(i, &before);
+                    }
+                }
+                Target::Form if (self.form.width, self.form.height) != form_size => {
+                    self.raised.push(RaisedEvent {
+                        form: self.form.name.clone(),
+                        handler: "Form_Resize".into(),
+                        args: vec![],
+                    });
+                }
+                Target::Form => {}
             }
         }
         result
@@ -687,6 +794,14 @@ impl ObjectHost for FormHost {
             self.touched[i] = true;
         }
         result
+    }
+
+    fn take_raised(&mut self) -> Vec<RaisedEvent> {
+        std::mem::take(&mut self.raised)
+    }
+
+    fn unloading_form(&self, object: &ObjectRef) -> Option<String> {
+        (object.index.is_none() && self.is_form(&object.name)).then(|| self.form.name.clone())
     }
 }
 
@@ -1092,5 +1207,72 @@ mod tests {
         assert_eq!(out, "hi there\nBlue\n -1 \n");
         // the window already shows them: nothing is published back
         assert!(h.borrow_mut().take_changes().is_none());
+    }
+
+    /// Each event handler of the sample form prints its name, so the
+    /// output lists the events a statement raised, in order.
+    const TRACE: &str = "Sub Text1_Change()\n  Print \"Text1_Change \" & Text1.Text\nEnd Sub\n\
+        Sub Label1_Change()\n  Print \"Label1_Change\"\nEnd Sub\n\
+        Sub List1_Click()\n  Print \"List1_Click \" & List1.ListIndex\nEnd Sub\n\
+        Sub Combo1_Change()\n  Print \"Combo1_Change \" & Combo1.Text\nEnd Sub\n\
+        Sub Combo1_Click()\n  Print \"Combo1_Click\"\nEnd Sub\n\
+        Sub Check1_Click()\n  Print \"Check1_Click \" & Check1.Value\nEnd Sub\n\
+        Sub Option1_Click()\n  Print \"Option1_Click\"\nEnd Sub\n\
+        Sub Option2_Click()\n  Print \"Option2_Click\"\nEnd Sub\n\
+        Sub Form_Resize()\n  Print \"Form_Resize\"\nEnd Sub\n";
+
+    #[test]
+    fn program_changes_raise_vbs_events_inside_the_statement() {
+        let h = host();
+        let src = format!(
+            "{}Text1.Text = \"typed\"\nPrint \"next\"\nLabel1.Caption = \"x\"\n\
+             List1.ListIndex = 1\nCombo1.ListIndex = 2\nCheck1.Value = 1\n\
+             Option2.Value = True\nMe.Width = 500\n",
+            TRACE
+        );
+        assert_eq!(
+            run(&src, &h).unwrap(),
+            "Text1_Change typed\nnext\nLabel1_Change\nList1_Click 1\n\
+             Combo1_Change Blue\nCombo1_Click\nCheck1_Click 1\nOption2_Click\nForm_Resize\n"
+        );
+    }
+
+    #[test]
+    fn setting_the_same_value_or_clearing_an_option_raises_nothing() {
+        let h = host();
+        let src = format!(
+            "{}Text1.Text = \"start\"\nList1.ListIndex = -1\nCheck1.Value = 0\n\
+             Option1.Value = True\nOption2.Value = True\nOption2.Value = False\n",
+            TRACE
+        );
+        // Text1 already says "start", List1 has no row, Check1 is 0;
+        // choosing Option2 clears Option1 without clicking it
+        assert_eq!(run(&src, &h).unwrap(), "Option1_Click\nOption2_Click\n");
+    }
+
+    #[test]
+    fn a_control_array_elements_event_gets_its_index() {
+        let h = host();
+        h.borrow_mut().form.controls[8].kind = ControlKind::TextBox;
+        h.borrow_mut().form.controls[9].kind = ControlKind::TextBox;
+        let src = "Sub Cmd_Change(Index As Integer)\n  Print \"changed \" & Index\nEnd Sub\n\
+                   Cmd(1).Text = \"x\"\n";
+        assert_eq!(run(src, &h).unwrap(), "changed 1\n");
+    }
+
+    #[test]
+    fn user_edits_raise_nothing_by_themselves() {
+        // the window fires the user's events; applying its edits must not
+        // raise them a second time
+        let h = host();
+        h.borrow_mut().apply_edit(UserEdit::Text {
+            control: 1,
+            text: "typed".into(),
+        });
+        h.borrow_mut().apply_edit(UserEdit::Pick {
+            control: 2,
+            index: 0,
+        });
+        assert!(h.borrow_mut().take_raised().is_empty());
     }
 }

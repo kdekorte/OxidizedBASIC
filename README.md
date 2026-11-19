@@ -171,9 +171,16 @@ xcodebuild -downloadComponent MetalToolchain
   Not yet: system colours, `Picture`, `ZOrder`, `Move`, `Container`
   (option buttons are one group per form), `Load`/`Unload` of array
   elements at run time.
-- Run opens the form in its own OS window (closing it or Stop ends the
-  program). `Click`, `Change` (typing, picking), `DropDown` and `Timer`
-  events reach the program; mouse, key and focus events do not yet.
+- Run opens the form in its own OS window. Every event the code window
+  lists reaches the program, in VB's order: mouse (`MouseDown`,
+  `MouseMove`, `MouseUp` with button, shift and position; `Click` on
+  release; `DblClick`), keys (`KeyDown`, `KeyPress`, `KeyUp`, with
+  `KeyAscii`/`KeyCode` changeable and `KeyPreview`), focus (`GotFocus`,
+  `LostFocus`, Tab), `Change`, `Scroll`, `DropDown`, `Timer`, and the
+  form's `Load`, `Activate`, `Deactivate`, `Resize`, `Paint`,
+  `QueryUnload` and `Unload`. Closing the window can be cancelled with
+  `Cancel = True`. A property the program sets raises its event as in VB
+  (`Text1.Text = "x"` runs `Text1_Change`). See `docs/controls.md`.
 - Property-inspector editing and toolbox adding were reworked (per-field
   focus, redraw on add) but have only been checked by build/tests, not
   yet by hand.

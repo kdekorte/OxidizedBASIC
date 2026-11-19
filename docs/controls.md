@@ -29,7 +29,7 @@ for run-time access, `crates/oxbasic_ui/src/lib.rs` for events,
 | Frame | ☐ Frame | `Frame1` | 160x100 | yes | — | — | yes | no |
 | ListBox | ≡ ListBox | `List1` | 120x84 | — | read-only | — | yes | yes |
 | ComboBox | ⌄ ComboBox | `Combo1` | 120x24 | — | yes | — | yes | yes |
-| PictureBox | ▧ PictureBox | `Picture1` | 100x100 | — | — | — | no | no |
+| PictureBox | ▧ PictureBox | `Picture1` | 100x100 | — | — | — | no | yes |
 | CheckBox | ☑ CheckBox | `Check1` | 110x22 | yes | — | 0/1/2 | yes | yes |
 | OptionButton | ◉ OptionButton | `Option1` | 110x22 | yes | — | True/False | yes | yes |
 | Timer | ◷ Timer | `Timer1` | none | — | — | — | no | no |
@@ -120,7 +120,8 @@ Typing in the window updates `Text` before `Change` fires.
 copies the item into `Text`.
 
 ### PictureBox
-No properties of its own beyond the common ones and `BackColor`.
+No properties of its own beyond the common ones and `BackColor`. It takes
+the focus (`SetFocus`, Tab, a click), so it gets keys, as in VB.
 
 ### CheckBox
 | Member | Kind | Type | Run time | Design time |
@@ -161,28 +162,76 @@ Reached as `Me` or by its own name (`Form1.Caption`).
 | `Width` | Single | R/W | R/W |
 | `Height` | Single | R/W | R/W |
 
+`KeyPreview` (`"keyPreview": true` in the `.oxform` file) makes the form's
+key handlers run before the focused control's. It isn't in the Properties
+window or readable from code yet.
+
 ## Events
 
-Handlers are `Sub <Name>_<Event>(...)`. **Fires** says whether the IDE's
-live window raises it today; the others are listed in the code window's
-event box (so a handler can be written) but nothing calls them yet. In a
-control array each handler also gets `Index As Integer` first.
+Handlers are `Sub <Name>_<Event>(...)`. Every event the code window's
+event box lists is raised in the IDE's live window. In a control array each
+handler also gets `Index As Integer` first. Arguments are passed by
+reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
 
-| Control | Fires today | Listed, not yet raised |
-|---|---|---|
-| CommandButton | `Click` | `GotFocus`, `KeyDown`, `KeyPress`, `KeyUp`, `LostFocus`, `MouseDown`, `MouseMove`, `MouseUp` |
-| Label | `Click` | `Change`, `DblClick`, `MouseDown`, `MouseMove`, `MouseUp` |
-| TextBox | `Change` (each keystroke), `Click` | `DblClick`, `GotFocus`, `KeyDown`, `KeyPress`, `KeyUp`, `LostFocus`, `Mouse*` |
-| Frame | `Click` | `DblClick`, `Mouse*` |
-| ListBox | `Click` (picking a row) | `Change`, `DblClick`, `GotFocus`, `ItemCheck`, `Key*`, `LostFocus`, `Mouse*`, `Scroll` |
-| ComboBox | `Change`, `Click`, `DropDown` | `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Scroll` |
-| PictureBox | `Click` | `Change`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Paint`, `Resize` |
-| CheckBox, OptionButton | `Click` | `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
-| Timer | `Timer` | |
-| Form | `Load` | `Activate`, `Click`, `DblClick`, `Deactivate`, `Key*`, `Mouse*`, `Paint`, `QueryUnload`, `Resize`, `Unload` |
+| Control | Events |
+|---|---|
+| CommandButton | `Click`, `GotFocus`, `KeyDown`, `KeyPress`, `KeyUp`, `LostFocus`, `MouseDown`, `MouseMove`, `MouseUp` |
+| Label | `Change`, `Click`, `DblClick`, `MouseDown`, `MouseMove`, `MouseUp` |
+| TextBox | `Change`, `Click`, `DblClick`, `GotFocus`, `KeyDown`, `KeyPress`, `KeyUp`, `LostFocus`, `Mouse*` |
+| Frame | `Click`, `DblClick`, `Mouse*` |
+| ListBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Scroll` |
+| ComboBox | `Change`, `Click`, `DblClick`, `DropDown`, `GotFocus`, `Key*`, `LostFocus`, `Scroll` |
+| PictureBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Paint`, `Resize` |
+| CheckBox, OptionButton | `Click`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
+| Timer | `Timer` |
+| Form | `Activate`, `Click`, `DblClick`, `Deactivate`, `Key*`, `Load`, `Mouse*`, `Paint`, `QueryUnload`, `Resize`, `Unload` |
+
+`Mouse*` is `MouseDown`, `MouseMove`, `MouseUp`; `Key*` is `KeyDown`,
+`KeyPress`, `KeyUp`.
+
+### When they are raised
+
+- **Mouse.** `Button` is 1 (left), 2 (right) or 4 (middle); `Shift` is
+  1 Shift + 2 Ctrl (⌘ on a Mac) + 4 Alt; `X` and `Y` are in pixels from the
+  control's own top-left (from the form's for the form). The control a
+  button went down on gets every `MouseMove` and the `MouseUp` until it
+  comes up, even outside it. A press where there is no control, or on a
+  disabled one, is the form's.
+- **Click order.** `GotFocus` (if the control takes the focus), `MouseDown`,
+  then on release `Click` and `MouseUp`. `Click` only comes from the left
+  button, released over the control it was pressed on. A double click is
+  `MouseDown`, `Click`, `MouseUp`, `DblClick`, `MouseUp`. A list row is
+  picked, and its `Click` raised, on the press.
+- **Keys.** `KeyDown` (`KeyCode` is VB's key code, `vbKeyA` = 65 whatever
+  the case), `KeyPress` for keys that type a character (`KeyAscii`: `a` is
+  97, Enter 13), the control's `Change`, then `KeyUp` on release. Setting
+  `KeyAscii` to 0 swallows the character; another value types that one
+  instead. Setting `KeyCode` to 0 cancels a key that types nothing (an
+  arrow, Delete) and skips the handlers after it. With the form's
+  `KeyPreview` set, the form's handler runs before the control's for each.
+- **Focus.** `LostFocus` of the control losing it, then `GotFocus` of the
+  new one: on a click, on `SetFocus`, and on Tab / Shift-Tab, which move in
+  the order the controls were added (VB's `TabIndex`). Labels, frames and
+  timers take no focus.
+- **Window.** `Activate` / `Deactivate` when the form's window becomes or
+  stops being the active one; `Resize` and `Paint` when it opens and when
+  it is resized (the program reads the new `Width` and `Height`). Closing
+  the window raises `QueryUnload(Cancel, UnloadMode)` with `UnloadMode` 0,
+  then `Unload(Cancel)`; either can set `Cancel` to keep the window. The
+  `Unload` statement raises the same pair with `UnloadMode` 1.
+- **From the program's own changes.** Setting a property raises its event
+  inside the statement, before the next line runs, as in VB: `Text` of a
+  TextBox or ComboBox and a Label's `Caption` raise `Change`; `ListIndex`
+  raises `Click`; a CheckBox's `Value` raises `Click`, as does setting an
+  OptionButton to `True`; a PictureBox's or the form's size raises
+  `Resize`. Setting a property to the value it has raises nothing.
 
 `Click` on a ListBox or ComboBox fires after the row is picked, so
 `ListIndex` and `Text` already show it.
+
+Not raised: a ListBox's `ItemCheck` and `Change`, and a PictureBox's
+`Change`. VB raises these only for checkbox-style lists and for `Picture`,
+which aren't supported, so the event box doesn't list them.
 
 ## Run-time errors
 
@@ -202,6 +251,7 @@ control array each handler also gets `Index As Integer` first.
 
 System colours, `Picture`, `Move`, `ZOrder`, `Container` (option buttons
 are one group per form), `Load`/`Unload` of array elements at run time,
-`TabIndex`/`TabStop`, `ToolTipText`, `MousePointer`, `Locked`, `MaxLength`,
+`TabIndex`/`TabStop` (Tab follows the order controls were added),
+`KeyPreview` in the Properties window, `ToolTipText`, `MousePointer`, `Locked`, `MaxLength`,
 `MultiLine`, `ScrollBars`, `Selected()`/`MultiSelect`, `SelStart`/`SelText`.
 

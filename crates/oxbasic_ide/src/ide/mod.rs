@@ -14,6 +14,7 @@ pub mod editor_input;
 pub mod highlight;
 pub mod launch;
 pub mod live_forms;
+pub mod live_input;
 pub mod program;
 pub mod project_commands;
 #[cfg(test)]
@@ -289,6 +290,10 @@ pub struct Ide {
     /// The running program's windows, by form index — in classic VB each
     /// form *is* a window of the application, not a pane inside the IDE.
     form_windows: HashMap<usize, WindowHandle<FormRunner>>,
+    /// Per form of the running program, the events it has handlers for
+    /// (`(object, event)` in lower case); the windows skip the rest of the
+    /// frequent ones (`MouseMove`).
+    live_handlers: Vec<HashSet<(String, String)>>,
     /// Each running form as the program has changed it
     /// (`Label1.Caption = "x"`), kept so a window that opens later (or
     /// reopens) starts from it.
@@ -402,6 +407,7 @@ Print \"Total = \" & CStr(Total)
             paused: None,
             live: false,
             form_windows: HashMap::new(),
+            live_handlers: Vec::new(),
             live_forms: HashMap::new(),
             status: "Ready".into(),
             run_lines: None,
@@ -511,6 +517,19 @@ Print \"Total = \" & CStr(Total)
             DebugEvent::FormShown(snap) => self.open_form_window(snap, cx),
             DebugEvent::FormHidden(i) => self.close_form_window_at(i, false, cx),
             DebugEvent::FormClosed(i) => self.close_form_window_at(i, true, cx),
+            DebugEvent::CloseRefused(i) => self.status = format!("Form {} refused to close", i + 1),
+            DebugEvent::KeyResult {
+                serial,
+                keep,
+                typed,
+            } => self.on_key_result(serial, keep, typed, cx),
+            DebugEvent::Handlers(sets) => {
+                self.live_handlers = sets;
+                for (&i, handle) in &self.form_windows {
+                    let set = self.live_handlers.get(i).cloned().unwrap_or_default();
+                    let _ = handle.update(cx, |runner, _, _| runner.handlers = Some(set));
+                }
+            }
             DebugEvent::Live => {
                 self.live = true;
                 self.paused = None;
@@ -698,6 +717,8 @@ impl Ide {
 
 #[cfg(test)]
 mod editor_tests;
+#[cfg(test)]
+mod event_tests;
 #[cfg(test)]
 mod multiform_tests;
 #[cfg(test)]
@@ -2172,6 +2193,28 @@ struct FormRunner {
     /// new serial; the task of the old one sees that and ends.
     timers: HashMap<usize, (u64, u64)>,
     timer_serial: u64,
+    /// The events the program has handlers for, as `(object, event)` in
+    /// lower case: events nobody handles aren't sent. `None` until the
+    /// program says (then every event VB raises is sent).
+    handlers: Option<HashSet<(String, String)>>,
+    /// The focus of the form itself, for keys when no control has it.
+    form_focus: FocusHandle,
+    /// Mouse capture, as VB does it: the object a button was pressed on
+    /// (`None` = the form) gets every move and the release until the
+    /// button comes up, wherever the pointer goes.
+    pressed: Option<live_input::Press>,
+    /// The control that has the keyboard focus, as the program was told
+    /// (`GotFocus` / `LostFocus` fire when it changes).
+    focused: Option<usize>,
+    /// Keys sent to the program whose answer hasn't come back: the window
+    /// applies each when the program says whether, and what, it types.
+    pending_keys: HashMap<u64, (usize, gpui::Keystroke)>,
+    key_serial: u64,
+    /// The window's last inner size, to raise `Form_Resize` when it changes.
+    last_size: Option<(f32, f32)>,
+    /// The window is the active one (for `Form_Activate`/`Deactivate`).
+    active: bool,
+    _subscriptions: Vec<gpui::Subscription>,
 }
 
 impl FormRunner {
@@ -2196,6 +2239,15 @@ impl FormRunner {
             focus,
             timers: HashMap::new(),
             timer_serial: 0,
+            handlers: None,
+            form_focus: cx.focus_handle(),
+            pressed: None,
+            focused: None,
+            pending_keys: HashMap::new(),
+            key_serial: 0,
+            last_size: None,
+            active: false,
+            _subscriptions: Vec::new(),
         };
         runner.sync_timers(cx);
         runner
@@ -2282,8 +2334,25 @@ impl FormRunner {
         }
     }
 
-    /// Handle a pointer-down on `part` of control `idx`.
-    fn press(&mut self, idx: usize, part: Part) {
+    /// Whether pressing `part` of control `idx` clicks it on release (VB
+    /// clicks a button, a check box, a label... when the button comes up
+    /// over it); a list row and a combo's arrow act on the press instead.
+    fn clicks_on_release(&self, idx: usize, part: Part) -> bool {
+        let kind = self.form.controls[idx].kind;
+        match part {
+            Part::ListItem(_) | Part::DropItem(_) | Part::Arrow => false,
+            Part::Field if kind == ControlKind::ComboBox => false,
+            // a list's own background (below its rows) raises no Click
+            _ if kind == ControlKind::ListBox => false,
+            // the text box clicks; it also keeps the caret where it was
+            _ => true,
+        }
+    }
+
+    /// What a press on `part` of control `idx` does by itself, before the
+    /// release: a list row is picked (its `Click` follows straight away, as
+    /// in VB), a combo's ▾ drops its list.
+    fn act_on_press(&mut self, idx: usize, part: Part) {
         let spec = self.form.controls[idx].clone();
         match part {
             Part::Arrow | Part::Field if spec.kind == ControlKind::ComboBox => {
@@ -2313,32 +2382,34 @@ impl FormRunner {
                 }
                 self.fire(idx, "Click");
             }
-            _ if spec.kind.has_value() && spec.enabled => {
-                // A click toggles a CheckBox (0 <-> 1; a grayed one is
-                // checked) and selects an OptionButton, clearing the others.
-                self.close_lists(None);
-                let value = match spec.kind {
-                    ControlKind::CheckBox => {
-                        if self.state[idx].value == 1 {
-                            0
-                        } else {
-                            1
-                        }
-                    }
-                    _ => 1,
-                };
-                set_value(&self.form, &mut self.state, idx, value);
-                self.tell(UserEdit::Value {
-                    control: idx,
-                    value,
-                });
-                self.fire(idx, "Click");
-            }
-            _ => {
-                self.close_lists(None);
-                self.fire(idx, "Click");
-            }
+            _ => self.close_lists(None),
         }
+    }
+
+    /// The release clicked control `idx`: a CheckBox toggles, an
+    /// OptionButton is chosen, and its `Click` runs.
+    fn click(&mut self, idx: usize) {
+        let spec = self.form.controls[idx].clone();
+        if spec.kind.has_value() {
+            // A click toggles a CheckBox (0 <-> 1; a grayed one is
+            // checked) and selects an OptionButton, clearing the others.
+            let value = match spec.kind {
+                ControlKind::CheckBox => {
+                    if self.state[idx].value == 1 {
+                        0
+                    } else {
+                        1
+                    }
+                }
+                _ => 1,
+            };
+            set_value(&self.form, &mut self.state, idx, value);
+            self.tell(UserEdit::Value {
+                control: idx,
+                value,
+            });
+        }
+        self.fire(idx, "Click");
     }
 
     /// Handle a keystroke in control `idx`. Returns whether it changed.
@@ -2359,88 +2430,6 @@ impl FormRunner {
         });
         self.fire(idx, "Change");
         true
-    }
-}
-
-impl Render for FormRunner {
-    fn render(&mut self, win: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut area = div()
-            .id("form-runner")
-            .size_full()
-            .relative()
-            .overflow_hidden()
-            .bg(rgb(FORM_BACK))
-            .text_color(rgb(FG))
-            // a click on the form itself closes any open combo list
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(|this: &mut FormRunner, _ev: &MouseDownEvent, _win, cx| {
-                    this.close_lists(None);
-                    cx.notify();
-                }),
-            );
-        let form = self.form.clone();
-        for idx in oxbasic_ui::gpui_controls::z_order(&form) {
-            let c = &form.controls[idx];
-            if !c.visible || c.kind == ControlKind::Timer {
-                continue;
-            }
-            let focus = self.focus.get(&idx).cloned();
-            let look = ControlLook {
-                design: false,
-                text: self.state[idx].text.clone(),
-                list_index: self.state[idx].list_index,
-                dropped: self.state[idx].dropped,
-                focused: focus.as_ref().is_some_and(|f| f.contains_focused(win, cx)),
-                value: self.state[idx].value,
-            };
-            let mut hook = |part: Part,
-                            el: gpui::Stateful<gpui::Div>,
-                            cx: &mut Context<FormRunner>|
-             -> gpui::Stateful<gpui::Div> {
-                let name = match c.index {
-                    Some(n) => format!("{}({})", c.name, n),
-                    None => c.name.clone(),
-                };
-                let mut el = el.debug_selector(move || match part {
-                    Part::Body => format!("run-{}", name),
-                    Part::Field => format!("run-{}-field", name),
-                    Part::Arrow => format!("run-{}-arrow", name),
-                    Part::ListItem(i) => format!("run-{}-item-{}", name, i),
-                    Part::DropItem(i) => format!("run-{}-drop-{}", name, i),
-                });
-                if let (Part::Body, Some(f)) = (part, &focus) {
-                    el = el.track_focus(f);
-                }
-                let focus = focus.clone();
-                let el = el.on_mouse_down(
-                    gpui::MouseButton::Left,
-                    cx.listener(
-                        move |this: &mut FormRunner, _ev: &MouseDownEvent, win, cx| {
-                            cx.stop_propagation();
-                            if let Some(f) = &focus {
-                                win.focus(f);
-                            }
-                            this.press(idx, part);
-                            cx.notify();
-                        },
-                    ),
-                );
-                if part == Part::Body {
-                    el.on_key_down(cx.listener(
-                        move |this: &mut FormRunner, ev: &KeyDownEvent, _win, cx| {
-                            if this.key(idx, &ev.keystroke) {
-                                cx.notify();
-                            }
-                        },
-                    ))
-                } else {
-                    el
-                }
-            };
-            area = area.child(paint_control(c, &look, &mut hook, cx));
-        }
-        area
     }
 }
 

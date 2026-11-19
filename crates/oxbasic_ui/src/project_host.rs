@@ -9,8 +9,8 @@
 //! and [`handler_for`] / [`split_handler`] map between the two spellings.
 
 use crate::host::{FormHost, FormSnapshot, UserEdit};
-use crate::FormSpec;
-use oxbasic_runtime::{ExecResult, ObjectHost, ObjectRef, Variant, VbError};
+use crate::{ControlSpec, FormSpec};
+use oxbasic_runtime::{ExecResult, ObjectHost, ObjectRef, RaisedEvent, Variant, VbError};
 
 /// The separator between a form's name and its handler in the combined
 /// program: `Form2__Command1_Click`.
@@ -153,6 +153,16 @@ impl ProjectHost {
         if index < self.forms.len() {
             self.context = index;
         }
+    }
+
+    /// The program's copy of control `control` of form `form`.
+    pub fn control_spec(&self, form: usize, control: usize) -> Option<&ControlSpec> {
+        self.forms.get(form)?.spec().controls.get(control)
+    }
+
+    /// Whether form `form` sees keys before its controls (`KeyPreview`).
+    pub fn key_preview(&self, form: usize) -> bool {
+        self.forms.get(form).is_some_and(|f| f.spec().key_preview)
     }
 
     /// The commands given since the last call.
@@ -327,6 +337,21 @@ impl ObjectHost for ProjectHost {
         if let Some(i) = self.form_index(ctx) {
             self.context = i;
         }
+    }
+
+    fn take_raised(&mut self) -> Vec<RaisedEvent> {
+        self.forms
+            .iter_mut()
+            .flat_map(|f| f.take_raised())
+            .collect()
+    }
+
+    fn unloading_form(&self, object: &ObjectRef) -> Option<String> {
+        if object.index.is_some() {
+            return None;
+        }
+        let i = self.form_of(&object.name)?;
+        self.is_loaded(i).then(|| self.forms[i].name().to_string())
     }
 }
 

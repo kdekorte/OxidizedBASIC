@@ -24,6 +24,7 @@ pub mod gpui_backend;
 #[cfg(feature = "gpui")]
 pub mod gpui_controls;
 
+pub mod events;
 pub mod host;
 pub mod project;
 pub mod project_host;
@@ -161,12 +162,12 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
             ("MouseMove", MOUSE),
             ("MouseUp", MOUSE),
         ],
+        // VB6's ListBox has no Change; ItemCheck needs Style 1
+        // (checkboxes), which these lists don't have
         "listbox" => &[
-            ("Change", ""),
             ("Click", ""),
             ("DblClick", ""),
             ("GotFocus", ""),
-            ("ItemCheck", "Item As Integer"),
             ("KeyDown", KEY_UPDOWN),
             ("KeyPress", KEY_PRESS),
             ("KeyUp", KEY_UPDOWN),
@@ -188,8 +189,8 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
             ("LostFocus", ""),
             ("Scroll", ""),
         ],
+        // Change is raised when its Picture changes: no Picture here
         "picturebox" => &[
-            ("Change", ""),
             ("Click", ""),
             ("DblClick", ""),
             ("GotFocus", ""),

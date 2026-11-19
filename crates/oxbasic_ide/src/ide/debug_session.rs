@@ -31,6 +31,36 @@ pub enum DebugCommand {
     /// element's `Index`). The interpreter's values can't cross threads,
     /// so they are made on the program's side.
     Call(usize, String, Vec<i32>),
+    /// Raise an event of form `form` that the user caused, with VB's
+    /// arguments for it: a mouse event's button, shift and position, a
+    /// key's code. `control` is the control's index in the form (its
+    /// handler gets the control array `Index` first), `None` for the form.
+    Raise {
+        form: usize,
+        control: Option<usize>,
+        event: String,
+        args: Vec<EventArg>,
+    },
+    /// A key the user pressed in a control (or on the form): raise its
+    /// `KeyDown`, `KeyPress` (when it types a character) — the form's
+    /// first when its `KeyPreview` is on — and answer with
+    /// [`DebugEvent::KeyResult`]: whether the key still goes to the control
+    /// (`KeyCode` / `KeyAscii` left non-zero) and what it types.
+    Key {
+        form: usize,
+        control: Option<usize>,
+        key: KeyInput,
+        /// Echoed in the answer, so the window matches it to the key.
+        serial: u64,
+    },
+    /// The user released a key: `KeyUp` (the form's first with
+    /// `KeyPreview`).
+    KeyUp {
+        form: usize,
+        control: Option<usize>,
+        code: i16,
+        shift: i16,
+    },
     /// The user typed into or picked from a control of form `form`: the
     /// program's `Text1.Text` / `List1.ListIndex` must show it. Sent before
     /// the event it causes, so the handler already sees the new value.
@@ -38,6 +68,38 @@ pub enum DebugCommand {
     /// The user closed form `form`'s window: the form is unloaded, as if
     /// the program had said `Unload`. The program ends with its last form.
     Closed(usize),
+    /// The user asked to close form `form`'s window (its close box): the
+    /// form's `QueryUnload` and `Unload` run with `UnloadMode` 0 and may
+    /// cancel. The program answers with [`DebugEvent::FormClosed`] when the
+    /// form went, or [`DebugEvent::CloseRefused`] when it stays.
+    Close(usize),
+}
+
+/// An event argument, made into a BASIC value on the program's side.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EventArg {
+    Integer(i16),
+    Single(f32),
+}
+
+impl EventArg {
+    fn to_variant(self) -> oxbasic_runtime::Variant {
+        match self {
+            EventArg::Integer(n) => oxbasic_runtime::Variant::Integer(n),
+            EventArg::Single(x) => oxbasic_runtime::Variant::Single(x),
+        }
+    }
+}
+
+/// A keystroke as the program's key events see it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyInput {
+    /// `KeyCode` (VB's code for the key), if VB has one.
+    pub code: Option<i16>,
+    /// `Shift` mask of the modifier keys.
+    pub shift: i16,
+    /// `KeyAscii` of the character it types, if it types one.
+    pub ascii: Option<i16>,
 }
 
 /// Events the running program sends to the IDE.
@@ -54,6 +116,22 @@ pub enum DebugEvent {
     FormHidden(usize),
     /// The program unloaded form `n`: close its window.
     FormClosed(usize),
+    /// The program refused to close form `n` (`Cancel` in its
+    /// `QueryUnload` or `Unload`): its window stays.
+    CloseRefused(usize),
+    /// The outcome of a [`DebugCommand::Key`] with that `serial`: whether
+    /// the control still gets the key (the handlers left `KeyCode` set),
+    /// and the character it types (`KeyAscii` after `KeyPress`; `None`
+    /// when it was set to 0 or the key types nothing).
+    KeyResult {
+        serial: u64,
+        keep: bool,
+        typed: Option<char>,
+    },
+    /// The events the program has handlers for, per form, as
+    /// `(control name or "Form", event)` in lower case. The window sends
+    /// frequent events (`MouseMove`) only when they have one.
+    Handlers(Vec<HashSet<(String, String)>>),
     /// Module-level code finished and the program stays alive to serve
     /// form events (clicks, timers).
     Live,
@@ -95,15 +173,56 @@ impl Names {
     }
 
     /// Whether the program has any event handler at all (so it should stay
-    /// alive to serve them).
-    fn has_events(&self) -> bool {
+    /// alive to serve them): a procedure named `<object>_<event>` for a
+    /// control of a form (or `Form`) and an event VB raises for it.
+    fn has_events(&self, forms: &[FormSpec]) -> bool {
+        if forms.iter().any(|f| !self.handlers_of(f).is_empty()) {
+            return true;
+        }
+        // a program run without its form still names its handlers
+        // `<object>_<event>`: any VB event name keeps it alive
+        let events: HashSet<String> = [
+            "Form",
+            "CommandButton",
+            "Label",
+            "TextBox",
+            "Frame",
+            "ListBox",
+            "ComboBox",
+            "PictureBox",
+            "CheckBox",
+            "OptionButton",
+            "Timer",
+        ]
+        .iter()
+        .flat_map(|k| oxbasic_ui::events_for_control(k))
+        .map(|e| e.to_lowercase())
+        .collect();
         self.declared.iter().any(|n| {
-            let l = n.to_lowercase();
-            l.ends_with("_click")
-                || l.ends_with("_load")
-                || l.ends_with("_timer")
-                || l.ends_with("_change")
+            n.to_lowercase()
+                .rsplit_once('_')
+                .is_some_and(|(_, e)| events.contains(e))
         })
+    }
+
+    /// The events of `form` the program handles: `(object, event)` in lower
+    /// case, the object a control's name or `form`.
+    fn handlers_of(&self, form: &FormSpec) -> HashSet<(String, String)> {
+        let mut objects: Vec<(String, &str)> = vec![("form".into(), "Form")];
+        for c in &form.controls {
+            objects.push((c.name.to_lowercase(), c.kind.basic_name()));
+        }
+        let mut out = HashSet::new();
+        for (object, kind) in objects {
+            let label = if object == "form" { "Form" } else { kind };
+            for event in oxbasic_ui::events_for_control(label) {
+                let handler = format!("{}_{}", object, event);
+                if self.find(&form.name, &handler).is_some() {
+                    out.insert((object.clone(), event.to_lowercase()));
+                }
+            }
+        }
+        out
     }
 }
 
@@ -306,8 +425,24 @@ fn run_program(
                     Ok(DebugCommand::Stop) | Err(_) => return DebugAction::Abort,
                     // typing while paused still reaches the form
                     Ok(DebugCommand::Edit(form, e)) => apply_edit(&host, form, e),
-                    // events arriving while paused are dropped
-                    Ok(DebugCommand::Call(..)) | Ok(DebugCommand::Closed(_)) => continue,
+                    // a key waits for the program's answer: while paused
+                    // its handlers can't run, so the control just gets it
+                    Ok(DebugCommand::Key { serial, key, .. }) => {
+                        let _ = tx.send(DebugEvent::KeyResult {
+                            serial,
+                            keep: true,
+                            typed: key.ascii.and_then(oxbasic_ui::events::typed_char),
+                        });
+                    }
+                    // the window stays: a paused program can't be asked
+                    Ok(DebugCommand::Close(form)) => {
+                        let _ = tx.send(DebugEvent::CloseRefused(form));
+                    }
+                    // other events arriving while paused are dropped
+                    Ok(DebugCommand::Call(..))
+                    | Ok(DebugCommand::Raise { .. })
+                    | Ok(DebugCommand::KeyUp { .. })
+                    | Ok(DebugCommand::Closed(_)) => continue,
                 }
             }
         }));
@@ -335,11 +470,20 @@ fn run_program(
         let _ = evt_tx.send(DebugEvent::Finished("Program finished".to_string()));
         return;
     };
-    if spec.bare && !names.has_events() {
+    let forms_now: Vec<FormSpec> = {
+        let hb = h.borrow();
+        (0..hb.form_count())
+            .filter_map(|i| hb.snapshot(i).map(|s| s.form))
+            .collect()
+    };
+    if spec.bare && !names.has_events(&forms_now) {
         let _ = evt_tx.send(DebugEvent::Finished("Program finished".to_string()));
         return;
     }
     let _ = evt_tx.send(DebugEvent::Live);
+    let _ = evt_tx.send(DebugEvent::Handlers(
+        forms_now.iter().map(|f| names.handlers_of(f)).collect(),
+    ));
     let startup = spec.startup.min(h.borrow().form_count() - 1);
     h.borrow_mut().show(startup);
     let mut alive = flush_forms(&host, &mut rt, &names, &evt_tx);
@@ -348,6 +492,162 @@ fn run_program(
     let _ = evt_tx.send(DebugEvent::Finished(
         if ended { "Program ended" } else { "Stopped" }.to_string(),
     ));
+}
+
+/// What the serve loop needs at hand to run a window's events.
+struct Server<'a, 'out> {
+    rt: &'a mut Interpreter<'out>,
+    h: &'a Host,
+    host: &'a Option<Host>,
+    names: &'a Names,
+    tx: &'a Sender<DebugEvent>,
+    alive: bool,
+}
+
+impl Server<'_, '_> {
+    /// Run `object`'s `event` handler of form `form` with `args` (a control
+    /// array element's `Index` first), if the program has one; returns the
+    /// arguments as the handler left them. Errors in it are reported, and
+    /// what it did to the forms is published.
+    fn raise(
+        &mut self,
+        form: usize,
+        control: Option<usize>,
+        event: &str,
+        args: Vec<oxbasic_runtime::Variant>,
+    ) -> Vec<oxbasic_runtime::Variant> {
+        let (object, index) = {
+            let h = self.h.borrow();
+            match control.and_then(|i| h.control_spec(form, i)) {
+                Some(c) => (c.name.clone(), c.index),
+                None if control.is_some() => return args,
+                None => ("Form".to_string(), None),
+            }
+        };
+        let handler = format!("{}_{}", object, event);
+        let mut full: Vec<oxbasic_runtime::Variant> = index
+            .map(|n| vec![oxbasic_runtime::Variant::Integer(n as i16)])
+            .unwrap_or_default();
+        let offset = full.len();
+        full.extend(args.iter().cloned());
+        match self.call_named(form, &handler, full) {
+            Some(out) => out[offset..].to_vec(),
+            None => args,
+        }
+    }
+
+    /// Run form `form`'s handler `handler` (`Command1_Click`) with `args`
+    /// if the program has it; returns the arguments as it left them, or
+    /// `None` when it has no such handler or the handler failed. A form
+    /// that was unloaded gets no events.
+    fn call_named(
+        &mut self,
+        form: usize,
+        handler: &str,
+        args: Vec<oxbasic_runtime::Variant>,
+    ) -> Option<Vec<oxbasic_runtime::Variant>> {
+        let form_name = self.h.borrow().form_name(form)?.to_string();
+        if !self.h.borrow().is_loaded(form) {
+            return None;
+        }
+        let name = self.names.find(&form_name, handler)?;
+        self.h.borrow_mut().set_context_index(form);
+        let result = self
+            .rt
+            .call_event(&name, &args)
+            .and_then(|out| self.rt.run_raised_events().map(|_| out));
+        let out = match result {
+            Ok(out) => Some(out),
+            Err(e) if e.number == oxbasic_runtime::DEBUG_ABORT => {
+                self.alive = false;
+                None
+            }
+            Err(e) => {
+                let _ = self
+                    .tx
+                    .send(DebugEvent::Output(format!("error in {}: {}\n", handler, e)));
+                None
+            }
+        };
+        // what the handler did to the forms, up to an error
+        self.alive = flush_forms(self.host, self.rt, self.names, self.tx) && self.alive;
+        out
+    }
+
+    /// A key pressed: the form's `KeyDown` (with `KeyPreview`) then the
+    /// control's, then `KeyPress` the same way when it types a character.
+    /// As in VB, a handler setting `KeyCode` to 0 skips the handlers after
+    /// it and cancels a key that types nothing (an arrow, Delete), but not
+    /// `KeyPress`: only `KeyAscii` = 0 swallows a character, and another
+    /// `KeyAscii` types that character instead.
+    fn key(&mut self, form: usize, control: Option<usize>, key: KeyInput) -> (bool, Option<char>) {
+        use oxbasic_runtime::Variant;
+        let preview = control.is_some() && self.h.borrow().key_preview(form);
+        let order: Vec<Option<usize>> = if preview {
+            vec![None, control]
+        } else {
+            vec![control]
+        };
+        let num = |v: &Variant| v.as_i64().unwrap_or(0) as i16;
+        let mut code_kept = true;
+        if let Some(code) = key.code {
+            let mut code = code;
+            for &target in &order {
+                let out = self.raise(
+                    form,
+                    target,
+                    "KeyDown",
+                    oxbasic_ui::events::key_args(code, key.shift),
+                );
+                code = num(&out[0]);
+                if code == 0 {
+                    code_kept = false;
+                    break;
+                }
+            }
+        }
+        let Some(ascii) = key.ascii else {
+            return (code_kept, None);
+        };
+        let mut ascii = ascii;
+        for &target in &order {
+            let out = self.raise(form, target, "KeyPress", vec![Variant::Integer(ascii)]);
+            ascii = num(&out[0]);
+            if ascii == 0 {
+                break;
+            }
+        }
+        (ascii != 0, oxbasic_ui::events::typed_char(ascii))
+    }
+
+    /// The user asked to close form `form`: unless its handlers cancel, it
+    /// is unloaded. The program ends with its last form.
+    fn close(&mut self, form: usize) {
+        let name = match self.h.borrow().form_name(form) {
+            Some(n) if self.h.borrow().is_loaded(form) => n.to_string(),
+            _ => return,
+        };
+        self.h.borrow_mut().set_context_index(form);
+        let go = match self.rt.confirm_unload(&name, 0) {
+            Ok(go) => go,
+            Err(e) if e.number == oxbasic_runtime::DEBUG_ABORT => {
+                self.alive = false;
+                return;
+            }
+            Err(e) => {
+                let _ = self
+                    .tx
+                    .send(DebugEvent::Output(format!("error in Form_Unload: {}\n", e)));
+                true
+            }
+        };
+        if go {
+            self.h.borrow_mut().unload(form);
+        } else {
+            let _ = self.tx.send(DebugEvent::CloseRefused(form));
+        }
+        self.alive = flush_forms(self.host, self.rt, self.names, self.tx) && self.alive;
+    }
 }
 
 /// Answer the windows' events until the program ends, is stopped, or its
@@ -361,53 +661,85 @@ fn serve(
     cmd_rx: &std::sync::mpsc::Receiver<DebugCommand>,
     alive: &mut bool,
 ) {
-    while *alive {
+    let mut s = Server {
+        rt,
+        h,
+        host,
+        names,
+        tx,
+        alive: *alive,
+    };
+    while s.alive {
         // the program is over once its last form is unloaded
         if !h.borrow().any_loaded() {
             break;
         }
         match cmd_rx.recv() {
             Ok(DebugCommand::Call(form, handler, args)) => {
-                let Some(form_name) = h.borrow().form_name(form).map(|s| s.to_string()) else {
-                    continue;
-                };
-                // a form that was unloaded gets no events
-                if !h.borrow().is_loaded(form) {
-                    continue;
-                }
-                // handlers are optional: no handler leaves the control's
-                // own action alone, but errors inside one are reported
-                let Some(name) = names.find(&form_name, &handler) else {
-                    continue;
-                };
-                h.borrow_mut().set_context_index(form);
-                // an event's `Index As Integer`
-                let args: Vec<oxbasic_runtime::Variant> = args
+                // a handler named in full (`Command1_Click`, a timer's
+                // `Timer1_Timer`) with its whole-number arguments
+                let args = args
                     .iter()
                     .map(|&n| oxbasic_runtime::Variant::Integer(n as i16))
                     .collect();
-                match rt.evaluate_sub(&name, &args) {
-                    Ok(_) => {}
-                    Err(e) if e.number == oxbasic_runtime::DEBUG_ABORT => *alive = false,
-                    Err(e) => {
-                        let _ =
-                            tx.send(DebugEvent::Output(format!("error in {}: {}\n", handler, e)));
+                s.call_named(form, &handler, args);
+            }
+            Ok(DebugCommand::Raise {
+                form,
+                control,
+                event,
+                args,
+            }) => {
+                let args = args.into_iter().map(EventArg::to_variant).collect();
+                s.raise(form, control, &event, args);
+            }
+            Ok(DebugCommand::Key {
+                form,
+                control,
+                key,
+                serial,
+            }) => {
+                let (keep, typed) = s.key(form, control, key);
+                let _ = tx.send(DebugEvent::KeyResult {
+                    serial,
+                    keep,
+                    typed,
+                });
+            }
+            Ok(DebugCommand::KeyUp {
+                form,
+                control,
+                code,
+                shift,
+            }) => {
+                let preview = control.is_some() && h.borrow().key_preview(form);
+                let mut code = code;
+                for target in [None, control].into_iter().skip(!preview as usize) {
+                    let out = s.raise(
+                        form,
+                        target,
+                        "KeyUp",
+                        oxbasic_ui::events::key_args(code, shift),
+                    );
+                    code = out[0].as_i64().unwrap_or(0) as i16;
+                    if code == 0 {
+                        break;
                     }
                 }
-                // what the handler did to the forms, up to an error
-                *alive = flush_forms(host, rt, names, tx) && *alive;
             }
             Ok(DebugCommand::Edit(form, e)) => apply_edit(host, form, e),
-            // the user closed a window: that form is unloaded (its `Unload`
-            // handler isn't run — the window is already gone)
+            Ok(DebugCommand::Close(form)) => s.close(form),
+            // the window is already gone: the form is unloaded without
+            // asking (its handlers can't keep a window that isn't there)
             Ok(DebugCommand::Closed(form)) => {
                 h.borrow_mut().unload(form);
                 let _ = h.borrow_mut().take_commands();
             }
-            Ok(DebugCommand::Stop) | Err(_) => *alive = false,
+            Ok(DebugCommand::Stop) | Err(_) => s.alive = false,
             Ok(_) => {}
         }
     }
+    *alive = s.alive;
 }
 
 #[cfg(test)]
@@ -435,7 +767,7 @@ mod tests {
         // Live announcement, then Form_Load output
         loop {
             match recv() {
-                DebugEvent::Live | DebugEvent::FormShown(_) => {}
+                DebugEvent::Live | DebugEvent::FormShown(_) | DebugEvent::Handlers(_) => {}
                 DebugEvent::Output(s) => {
                     out.push_str(&s);
                     if out.contains("loaded") {
@@ -499,7 +831,7 @@ mod tests {
             {
                 DebugEvent::Output(s) => output.push_str(&s),
                 DebugEvent::Finished(_) => break,
-                DebugEvent::FormShown(_) => {}
+                DebugEvent::FormShown(_) | DebugEvent::Handlers(_) => {}
                 other => panic!("unexpected {}", other.kind_name()),
             }
         }
@@ -537,7 +869,10 @@ mod tests {
                 Ok(DebugEvent::Form(_))
                 | Ok(DebugEvent::FormShown(_))
                 | Ok(DebugEvent::FormHidden(_))
-                | Ok(DebugEvent::FormClosed(_)) => {}
+                | Ok(DebugEvent::FormClosed(_))
+                | Ok(DebugEvent::CloseRefused(_))
+                | Ok(DebugEvent::KeyResult { .. })
+                | Ok(DebugEvent::Handlers(_)) => {}
                 Err(_) => {}
             }
         }
@@ -688,6 +1023,9 @@ mod tests {
                 DebugEvent::FormShown(_) => "FormShown",
                 DebugEvent::FormHidden(_) => "FormHidden",
                 DebugEvent::FormClosed(_) => "FormClosed",
+                DebugEvent::CloseRefused(_) => "CloseRefused",
+                DebugEvent::KeyResult { .. } => "KeyResult",
+                DebugEvent::Handlers(_) => "Handlers",
                 DebugEvent::Live => "Live",
                 DebugEvent::Finished(_) => "Finished",
                 DebugEvent::Failed(_) => "Failed",

@@ -38,6 +38,7 @@ impl Ide {
             return;
         };
         let (form, state) = (snap.form, snap.state);
+        let handlers = self.live_handlers.get(index).cloned();
         let ide = cx.entity().downgrade();
         // later windows are offset so they don't hide the first
         let mut bounds = Bounds::centered(
@@ -61,17 +62,22 @@ impl Ide {
                 let runner = cx.new(|cx| {
                     let mut runner = FormRunner::new(form.clone(), index, session.clone(), cx);
                     runner.state = state.clone();
+                    runner.handlers = handlers.clone();
+                    // Form_Activate / Form_Deactivate
+                    let sub =
+                        cx.observe_window_activation(win, |runner: &mut FormRunner, win, _cx| {
+                            runner.activation_changed(win.is_window_active());
+                        });
+                    runner._subscriptions.push(sub);
                     runner
                 });
-                // Closing a form's window unloads that form; when the last
-                // one goes the program ends, like closing a VB app's last
-                // form.
+                // Closing a form's window asks the program first: its
+                // QueryUnload and Unload may cancel (Cancel = True). The
+                // window goes when the program unloads the form.
                 let weak = ide.clone();
-                win.on_window_should_close(cx, move |_win, cx| {
-                    if let Some(ide) = weak.upgrade() {
-                        ide.update(cx, |ide, cx| ide.form_window_closed(index, cx));
-                    }
-                    true
+                win.on_window_should_close(cx, move |_win, cx| match weak.upgrade() {
+                    Some(ide) => ide.update(cx, |ide, cx| ide.form_window_close_asked(index, cx)),
+                    None => true,
                 });
                 runner
             },
@@ -85,8 +91,27 @@ impl Ide {
         }
     }
 
-    /// The user closed form `index`'s window. With forms still open the
-    /// program goes on; with none left it ends.
+    /// The user clicked form `index`'s close box. A live program is asked
+    /// first (its `QueryUnload` / `Unload` may set `Cancel`): the window
+    /// stays until the program unloads the form, which closes it through
+    /// [`DebugEvent::FormClosed`], and the program ends with its last
+    /// form. Without a live program the window just closes. Returns
+    /// whether the window may close now.
+    fn form_window_close_asked(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+        match &self.session {
+            Some(s) if self.live => {
+                s.send(DebugCommand::Close(index));
+                false
+            }
+            _ => {
+                self.form_window_closed(index, cx);
+                true
+            }
+        }
+    }
+
+    /// Form `index`'s window is gone. With forms still open the program
+    /// goes on; with none left it ends.
     fn form_window_closed(&mut self, index: usize, cx: &mut Context<Self>) {
         self.form_windows.remove(&index);
         self.live_forms.remove(&index);
@@ -120,6 +145,23 @@ impl Ide {
         self.live_forms.clear();
         for (_, handle) in std::mem::take(&mut self.form_windows) {
             let _ = handle.update(cx, |_, win, _| win.remove_window());
+        }
+    }
+
+    /// The program answered a key sent from one of the form windows.
+    pub(super) fn on_key_result(
+        &mut self,
+        serial: u64,
+        keep: bool,
+        typed: Option<char>,
+        cx: &mut Context<Self>,
+    ) {
+        for handle in self.form_windows.values() {
+            let _ = handle.update(cx, |runner, _, cx| {
+                if runner.key_answered(serial, keep, typed) {
+                    cx.notify();
+                }
+            });
         }
     }
 

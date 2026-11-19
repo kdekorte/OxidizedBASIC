@@ -553,7 +553,7 @@ fn writing_session(form: FormSpec) -> (DebugSession, std::sync::mpsc::Receiver<D
 
 /// Feed the session's events to the IDE (as its poll task does) until a
 /// form change or a form window has arrived.
-fn pump_until_form(
+pub(super) fn pump_until_form(
     ide: &Entity<Ide>,
     rx: &std::sync::mpsc::Receiver<DebugEvent>,
     cx: &mut gpui::VisualTestContext,
@@ -674,7 +674,7 @@ fn interactive_session() -> (
 }
 
 /// Open the IDE's live window for `form` and `session`.
-fn open_live_window(
+pub(super) fn open_live_window(
     ide: &Entity<Ide>,
     form: FormSpec,
     session: &DebugSession,
@@ -758,7 +758,7 @@ fn checkbox_option_and_control_array_events(cx: &mut gpui::TestAppContext) {
 }
 
 /// Let the program run what the window asked of it, and show the result.
-fn settle(
+pub(super) fn settle(
     ide: &Entity<Ide>,
     rx: &std::sync::mpsc::Receiver<DebugEvent>,
     win: &mut gpui::VisualTestContext,

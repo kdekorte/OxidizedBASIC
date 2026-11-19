@@ -241,6 +241,30 @@ pub trait ObjectHost {
     }
     /// The interpreter entered code that belongs to form `ctx`.
     fn set_context(&mut self, _ctx: &str) {}
+    /// The events the program's own statements raised since the last call
+    /// (`Text1.Text = "x"` raises `Text1_Change`, as in VB), oldest first.
+    /// The interpreter runs their handlers straight after the statement.
+    fn take_raised(&mut self) -> Vec<RaisedEvent> {
+        Vec::new()
+    }
+    /// `Unload object` is about to run: the name of the form it unloads, if
+    /// that form is loaded, so its `Form_QueryUnload` and `Form_Unload`
+    /// handlers can run first (and cancel it). Hosts without forms: `None`.
+    fn unloading_form(&self, _object: &ObjectRef) -> Option<String> {
+        None
+    }
+}
+
+/// An event a host object raised by itself (a property change made by the
+/// program), for the interpreter to run.
+#[derive(Debug, Clone)]
+pub struct RaisedEvent {
+    /// The form the control is on (handlers of a project's forms are
+    /// called `Form2__Text1_Change` in the combined program).
+    pub form: String,
+    /// The handler as the form's code names it, e.g. `Text1_Change`.
+    pub handler: String,
+    pub args: Vec<Variant>,
 }
 
 /// The OxidizedBASIC interpreter.
@@ -480,6 +504,106 @@ impl<'out> Interpreter<'out> {
     /// Parameters are bound by value (ByVal semantics). Returns the
     /// function value, or `Empty` for a `Sub`.
     pub fn evaluate_sub(&mut self, name: &str, args: &[Variant]) -> ExecResult<Variant> {
+        self.invoke(name, args).map(|(ret, _)| ret)
+    }
+
+    /// The parameter count of procedure `name`, if the program has it.
+    pub fn param_count(&self, name: &str) -> Option<usize> {
+        let idx = *self.proc_index.get(&name.to_lowercase())?;
+        Some(self.decls[idx].params.len())
+    }
+
+    /// Raise an event: call handler `name` with the event's arguments, as
+    /// VB passes them — by reference, so a handler that sets `KeyAscii = 0`
+    /// or `Cancel = True` changes the caller's value. Returns the arguments
+    /// as the handler left them. A handler declaring fewer parameters than
+    /// the event has gets the leading ones (a placeholder written before
+    /// `Index` was added still runs).
+    pub fn call_event(&mut self, name: &str, args: &[Variant]) -> ExecResult<Vec<Variant>> {
+        let n = self.param_count(name).unwrap_or(args.len()).min(args.len());
+        let (_, finals) = self.invoke(name, &args[..n])?;
+        let mut out = args.to_vec();
+        for (slot, v) in out.iter_mut().zip(finals) {
+            *slot = v;
+        }
+        Ok(out)
+    }
+
+    /// Run the handlers of the events the host's objects raised by
+    /// themselves (a property the program set), straight after the
+    /// statement that set it, as VB raises `Text1_Change` inside the
+    /// assignment. Handlers the program doesn't have are skipped.
+    pub fn run_raised_events(&mut self) -> ExecResult<()> {
+        let Some(host) = self.objects.clone() else {
+            return Ok(());
+        };
+        // an event's handler may raise more; VB has no limit but a stack
+        // overflow, so guard against a handler that sets its own property
+        if self.depth > 400 {
+            return err(28, "out of stack space");
+        }
+        loop {
+            let raised = host.borrow_mut().take_raised();
+            if raised.is_empty() {
+                return Ok(());
+            }
+            for ev in raised {
+                let Some(name) = self.handler_name(&ev.form, &ev.handler) else {
+                    continue;
+                };
+                self.call_event(&name, &ev.args)?;
+            }
+        }
+    }
+
+    /// The program's procedure for `form`'s `handler`: `Form2__Text1_Change`
+    /// in a project's combined program, else `Text1_Change`.
+    pub fn handler_name(&self, form: &str, handler: &str) -> Option<String> {
+        let combined = format!("{}__{}", form, handler).to_lowercase();
+        let bare = handler.to_lowercase();
+        [combined, bare]
+            .into_iter()
+            .find(|n| self.proc_index.contains_key(n))
+            .map(|n| self.decls[self.proc_index[&n]].name.clone())
+    }
+
+    /// Ask form `form` whether it may close, as VB does before unloading
+    /// it: `Form_QueryUnload(Cancel, UnloadMode)` then `Form_Unload(Cancel)`;
+    /// either handler setting `Cancel` to a non-zero value keeps the form.
+    /// `mode` is VB's `UnloadMode` (0 = the user closed the window, 1 =
+    /// `Unload` from code). Returns whether the form may go.
+    pub fn confirm_unload(&mut self, form: &str, mode: i16) -> ExecResult<bool> {
+        let cancelled = |v: &Variant| v.as_f64().map(|n| n != 0.0).unwrap_or(false);
+        if let Some(h) = self.handler_name(form, "Form_QueryUnload") {
+            let out = self.call_event(&h, &[Variant::Integer(0), Variant::Integer(mode)])?;
+            if cancelled(&out[0]) {
+                return Ok(false);
+            }
+        }
+        if let Some(h) = self.handler_name(form, "Form_Unload") {
+            let out = self.call_event(&h, &[Variant::Integer(0)])?;
+            if cancelled(&out[0]) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// `Unload object` from code: its form's unload handlers decide.
+    fn query_unload(&mut self, object: &ObjectRef) -> ExecResult<bool> {
+        let form = match &self.objects {
+            Some(host) => host.borrow().unloading_form(object),
+            None => None,
+        };
+        match form {
+            Some(form) => self.confirm_unload(&form, 1),
+            None => Ok(true),
+        }
+    }
+
+    /// Call procedure `name` with evaluated `args`; returns its value and
+    /// each parameter's final value (for ByRef write-back).
+    fn invoke(&mut self, name: &str, args: &[Variant]) -> ExecResult<(Variant, Vec<Variant>)> {
         let ln = name.to_lowercase();
         let idx = match self.proc_index.get(&ln) {
             Some(&i) => i,
@@ -544,7 +668,19 @@ impl<'out> Interpreter<'out> {
         self.leave_context(prev);
         self.depth -= 1;
         flow?;
-        Ok(callee.ret)
+        let finals = decl
+            .params
+            .iter()
+            .take(args.len())
+            .map(|p| {
+                callee
+                    .locals
+                    .get(&p.name.to_lowercase())
+                    .map(|v| v.borrow().clone())
+                    .unwrap_or(Variant::Empty)
+            })
+            .collect();
+        Ok((callee.ret, finals))
     }
 
     /// A procedure named `Form2__Command1_Click` belongs to form `Form2`:
@@ -1085,7 +1221,8 @@ impl<'out> Interpreter<'out> {
                     let host = self.objects.clone().expect("object_ref needs a host");
                     let property = format!("{}{}", prefix, name);
                     let result = host.borrow_mut().set(&object, &property, &[], v);
-                    result
+                    result?;
+                    self.run_raised_events()
                 }
                 None => err(13, "type mismatch: cannot assign to this expression"),
             },
@@ -1099,7 +1236,8 @@ impl<'out> Interpreter<'out> {
                     let host = self.objects.clone().expect("object_ref needs a host");
                     let property = format!("{}{}", prefix, name);
                     let result = host.borrow_mut().set(&object, &property, &idx, v);
-                    result
+                    result?;
+                    self.run_raised_events()
                 }
                 None => err(13, "type mismatch: cannot assign to this expression"),
             },
@@ -1195,10 +1333,13 @@ impl<'out> Interpreter<'out> {
                                 name: target.clone(),
                                 index: None,
                             };
+                            if lower == "unload" && !self.query_unload(&object)? {
+                                return Ok(()); // a handler set Cancel
+                            }
                             let method = if lower == "unload" { "Unload" } else { "Load" };
                             let result = host.borrow_mut().call(&object, method, &[]);
                             result?;
-                            return Ok(());
+                            return self.run_raised_events();
                         }
                     }
                 }
@@ -1231,7 +1372,9 @@ impl<'out> Interpreter<'out> {
             // (`List(0)`) — the host decides which
             let method = format!("{}{}", prefix, name);
             let result = host.borrow_mut().call(&object, &method, &values);
-            return result;
+            let value = result?;
+            self.run_raised_events()?;
+            return Ok(value);
         }
         if let Expr::Var(base) = obj {
             if base.eq_ignore_ascii_case("err") {

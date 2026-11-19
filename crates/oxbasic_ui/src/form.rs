@@ -209,7 +209,7 @@ impl ControlKind {
         !matches!(self, ControlKind::PictureBox | ControlKind::Timer)
     }
 
-    /// Whether the control can take the keyboard focus (`SetFocus`).
+    /// Whether the control can take the keyboard focus (`SetFocus`, Tab).
     pub fn can_focus(&self) -> bool {
         matches!(
             self,
@@ -219,6 +219,7 @@ impl ControlKind {
                 | ControlKind::ComboBox
                 | ControlKind::CheckBox
                 | ControlKind::OptionButton
+                | ControlKind::PictureBox
         )
     }
 }
@@ -270,6 +271,10 @@ pub struct FormSpec {
     pub height: f32,
     #[serde(default)]
     pub controls: Vec<ControlSpec>,
+    /// `KeyPreview`: the form's `KeyDown`, `KeyPress` and `KeyUp` run
+    /// before the focused control's (and may cancel the key for it).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub key_preview: bool,
 }
 
 impl FormSpec {
@@ -280,6 +285,7 @@ impl FormSpec {
             width,
             height,
             controls: Vec::new(),
+            key_preview: false,
         }
     }
 
@@ -550,5 +556,22 @@ mod tests {
         assert!(matches!(v, oxbasic_runtime::Variant::Long(7)));
 
         assert!(rt.evaluate_sub("Nope", &[]).is_err());
+    }
+
+    #[cfg(test)]
+    mod key_preview_tests {
+        use super::*;
+
+        #[test]
+        fn key_preview_round_trips_and_older_files_default_to_off() {
+            let mut f = FormSpec::new("Form1", "F", 100.0, 100.0);
+            assert!(!f.to_oxform().contains("keyPreview"), "off isn't written");
+            f.key_preview = true;
+            let json = f.to_oxform();
+            assert!(json.contains("\"keyPreview\": true"));
+            assert!(FormSpec::from_oxform(&json).unwrap().key_preview);
+            let old = r#"{"name":"Form1","caption":"F","width":10,"height":10}"#;
+            assert!(!FormSpec::from_oxform(old).unwrap().key_preview);
+        }
     }
 }
