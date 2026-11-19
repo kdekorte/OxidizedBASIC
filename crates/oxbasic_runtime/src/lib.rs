@@ -335,6 +335,9 @@ pub struct Interpreter<'out> {
     objects: Option<Rc<RefCell<dyn ObjectHost>>>,
     /// `End` ran: the program is over, wherever it was.
     ended: bool,
+    /// `DoEvents`: lets the host show what the program drew so far and
+    /// hear a Stop; returns `false` to abort the program.
+    doevents_hook: Option<Box<dyn FnMut() -> bool>>,
 }
 
 /// Debugger pause notification: where execution stopped and what the
@@ -413,6 +416,7 @@ impl<'out> Interpreter<'out> {
             debug_hook: None,
             objects: None,
             ended: false,
+            doevents_hook: None,
             base_dir: None,
         };
         it.add_program(prog);
@@ -497,6 +501,23 @@ impl<'out> Interpreter<'out> {
     pub fn set_debug_hook(&mut self, hook: Box<dyn FnMut(&PausedInfo) -> DebugAction>) {
         self.debug_hook = Some(hook);
         self.step_depth = Some(0);
+    }
+
+    /// Install what `DoEvents` does: the host shows what the program has
+    /// drawn so far and answers whether to go on (`false` aborts, as a
+    /// Stop does). Without one, `DoEvents` does nothing.
+    pub fn set_doevents_hook(&mut self, hook: Box<dyn FnMut() -> bool>) {
+        self.doevents_hook = Some(hook);
+    }
+
+    /// `DoEvents`: run the host's hook, if any.
+    pub(crate) fn do_events(&mut self) -> ExecResult<()> {
+        if let Some(hook) = self.doevents_hook.as_mut() {
+            if !hook() {
+                return err(DEBUG_ABORT, "execution aborted by the debugger");
+            }
+        }
+        Ok(())
     }
 
     /// Debugger: called before each statement; blocks inside the hook.

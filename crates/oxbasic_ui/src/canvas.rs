@@ -20,10 +20,6 @@ pub enum Shape {
         color: u32,
         filled: bool,
     },
-    Dot {
-        at: (f32, f32),
-        color: u32,
-    },
     /// An ellipse (a circle for `aspect` 1) or an arc of one.
     Ellipse {
         center: (f32, f32),
@@ -38,9 +34,91 @@ pub enum Shape {
     },
 }
 
+/// The pixels `PSet` set, kept as a real bitmap: a picture drawn a pixel at
+/// a time (a fractal) has hundreds of thousands of them, far too many to
+/// keep as shapes. It is painted under the shapes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Raster {
+    /// Names this bitmap for the window's image; stays the same for as
+    /// long as the canvas lives (0 until the first pixel).
+    pub id: u64,
+    /// Counts the changes, so the window knows when to rebuild its image.
+    pub rev: u64,
+    pub width: usize,
+    pub height: usize,
+    /// Row by row; 0 where nothing was drawn, else `0xFF000000 | 0xRRGGBB`.
+    pub pixels: std::sync::Arc<Vec<u32>>,
+}
+
+impl Raster {
+    /// Make the bitmap at least `w` by `h` pixels, keeping what was drawn.
+    fn ensure(&mut self, w: usize, h: usize) {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        if self.id == 0 {
+            self.id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        let (w, h) = (w.max(self.width), h.max(self.height));
+        if (w, h) == (self.width, self.height) {
+            return;
+        }
+        let mut pixels = vec![0u32; w * h];
+        let old = self.width;
+        for row in 0..self.height {
+            pixels[row * w..row * w + old]
+                .copy_from_slice(&self.pixels[row * old..(row + 1) * old]);
+        }
+        self.pixels = std::sync::Arc::new(pixels);
+        self.width = w;
+        self.height = h;
+        self.rev += 1;
+    }
+
+    /// Set the pixel under `at`; a point outside the bitmap is clipped, as
+    /// in VB.
+    fn set(&mut self, at: (f32, f32), color: u32) {
+        let (x, y) = (at.0.floor(), at.1.floor());
+        if x < 0.0 || y < 0.0 || x >= self.width as f32 || y >= self.height as f32 {
+            return;
+        }
+        let i = y as usize * self.width + x as usize;
+        let px = 0xFF00_0000 | (color & 0xFF_FFFF);
+        if self.pixels[i] != px {
+            std::sync::Arc::make_mut(&mut self.pixels)[i] = px;
+            self.rev += 1;
+        }
+    }
+
+    /// The `0xRRGGBB` of the pixel at `(x, y)`, or `None` where nothing was
+    /// drawn.
+    pub fn pixel(&self, x: usize, y: usize) -> Option<u32> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let p = self.pixels[y * self.width + x];
+        (p != 0).then_some(p & 0xFF_FFFF)
+    }
+
+    /// How many pixels were drawn.
+    pub fn count(&self) -> usize {
+        self.pixels.iter().filter(|p| **p != 0).count()
+    }
+
+    fn clear(&mut self) {
+        if self.pixels.iter().any(|p| *p != 0) {
+            std::sync::Arc::make_mut(&mut self.pixels).fill(0);
+            self.rev += 1;
+        }
+    }
+}
+
 /// A drawing surface's shapes and its current point.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
+    /// The pixels set with `PSet`.
+    pub raster: Raster,
+    /// The drawable area in pixels (the control's inside), which the bitmap
+    /// is made to cover; set by the host from the control's size.
+    pub extent: (usize, usize),
     pub shapes: Vec<Shape>,
     /// Where `Step` counts from and `Line -(x, y)` starts: the end of the
     /// last thing drawn (`CurrentX`, `CurrentY`).
@@ -55,6 +133,7 @@ impl Canvas {
     /// `Cls`: clear it, and the current point with it.
     pub fn clear(&mut self) {
         self.shapes.clear();
+        self.raster.clear();
         self.current = (0.0, 0.0);
     }
 
@@ -95,7 +174,9 @@ impl Canvas {
             }
             DrawCmd::PSet { at, color } => {
                 let color = pick(color)?;
-                self.push(Shape::Dot { at, color });
+                let (w, h) = self.extent;
+                self.raster.ensure(w, h);
+                self.raster.set(at, color);
                 self.current = at;
             }
             DrawCmd::Circle {
@@ -190,7 +271,10 @@ mod tests {
 
     #[test]
     fn shapes_are_kept_in_order_with_the_fore_colour_by_default() {
-        let mut cv = Canvas::default();
+        let mut cv = Canvas {
+            extent: (20, 20),
+            ..Canvas::default()
+        };
         draw(
             &mut cv,
             DrawCmd::Line {
@@ -230,15 +314,18 @@ mod tests {
                     color: 0xABCDEF,
                     filled: true
                 },
-                Shape::Dot {
-                    at: (7.0, 8.0),
-                    color: FORE
-                },
             ]
         );
+        assert_eq!(
+            cv.raster.pixel(7, 8),
+            Some(FORE),
+            "PSet sets a bitmap pixel"
+        );
+        assert_eq!(cv.raster.count(), 1);
         assert_eq!(cv.current, (7.0, 8.0), "the last point drawn");
         cv.clear();
         assert!(cv.shapes.is_empty() && cv.current == (0.0, 0.0));
+        assert_eq!(cv.raster.count(), 0, "Cls clears the pixels too");
     }
 
     #[test]
@@ -291,20 +378,93 @@ mod tests {
         for i in 0..(MAX_SHAPES + 5) {
             draw(
                 &mut cv,
-                DrawCmd::PSet {
-                    at: (i as f32, 0.0),
+                DrawCmd::Line {
+                    from: (i as f32, 0.0),
+                    to: (i as f32, 1.0),
                     color: None,
+                    boxed: 0,
                 },
             );
         }
         assert_eq!(cv.shapes.len(), MAX_SHAPES);
         assert_eq!(
             cv.shapes[0],
-            Shape::Dot {
-                at: (5.0, 0.0),
+            Shape::Line {
+                from: (5.0, 0.0),
+                to: (5.0, 1.0),
                 color: FORE
             }
         );
+    }
+
+    #[test]
+    fn pset_fills_a_bitmap_of_any_size_without_a_shape_limit() {
+        // a whole 640 x 480 picture, a pixel at a time (the fractal sample)
+        let mut cv = Canvas {
+            extent: (640, 480),
+            ..Canvas::default()
+        };
+        for y in 0..480 {
+            for x in 0..640 {
+                draw(
+                    &mut cv,
+                    DrawCmd::PSet {
+                        at: (x as f32, y as f32),
+                        color: Some((x * 7 + y) as u32 & 0xFF_FFFF),
+                    },
+                );
+            }
+        }
+        assert!(cv.shapes.is_empty(), "pixels are not shapes");
+        assert_eq!(cv.raster.count(), 640 * 480);
+        assert_eq!(cv.raster.pixel(639, 479), Some(639 * 7 + 479));
+        // outside the bitmap is clipped; setting the same colour again
+        // isn't a change
+        let rev = cv.raster.rev;
+        draw(
+            &mut cv,
+            DrawCmd::PSet {
+                at: (-1.0, 700.0),
+                color: None,
+            },
+        );
+        draw(
+            &mut cv,
+            DrawCmd::PSet {
+                at: (0.0, 0.0),
+                color: Some(0),
+            },
+        );
+        assert_eq!(cv.raster.rev, rev);
+        assert_eq!(cv.raster.count(), 640 * 480);
+    }
+
+    #[test]
+    fn the_bitmap_grows_with_the_control_and_keeps_its_pixels() {
+        let mut cv = Canvas {
+            extent: (4, 4),
+            ..Canvas::default()
+        };
+        draw(
+            &mut cv,
+            DrawCmd::PSet {
+                at: (3.0, 3.0),
+                color: Some(0xFF0000),
+            },
+        );
+        let id = cv.raster.id;
+        cv.extent = (10, 8);
+        draw(
+            &mut cv,
+            DrawCmd::PSet {
+                at: (9.5, 7.2),
+                color: Some(0x00FF00),
+            },
+        );
+        assert_eq!((cv.raster.width, cv.raster.height), (10, 8));
+        assert_eq!(cv.raster.pixel(3, 3), Some(0xFF0000));
+        assert_eq!(cv.raster.pixel(9, 7), Some(0x00FF00));
+        assert_eq!(cv.raster.id, id, "the same bitmap, grown");
     }
 
     fn near(a: (f32, f32), b: (f32, f32)) -> bool {

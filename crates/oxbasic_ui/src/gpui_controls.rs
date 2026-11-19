@@ -385,9 +385,12 @@ fn list_rows<V: 'static>(
 fn draw_canvas(canvas: &crate::canvas::Canvas) -> gpui::Canvas<()> {
     use crate::canvas::{ellipse_points, Shape};
     let shapes = canvas.shapes.clone();
+    let raster = canvas.raster.clone();
     gpui::canvas(
         |_, _, _| (),
         move |bounds, _, window, _| {
+            // the pixels `PSet` set, as one image under the shapes
+            paint_raster(&raster, bounds.origin, window);
             let origin = bounds.origin;
             let pt = |p: (f32, f32)| gpui::point(origin.x + px(p.0), origin.y + px(p.1));
             // VB draws `DrawWidth` 1 lines; a half-pixel inset keeps them crisp
@@ -407,10 +410,6 @@ fn draw_canvas(canvas: &crate::canvas::Canvas) -> gpui::Canvas<()> {
             for shape in &shapes {
                 match shape {
                     Shape::Line { from, to, color } => stroke(window, &[*from, *to], *color),
-                    Shape::Dot { at, color } => window.paint_quad(gpui::fill(
-                        gpui::Bounds::new(pt(*at), gpui::size(px(1.0), px(1.0))),
-                        rgb(*color),
-                    )),
                     Shape::Rect {
                         from,
                         to,
@@ -451,6 +450,61 @@ fn draw_canvas(canvas: &crate::canvas::Canvas) -> gpui::Canvas<()> {
     .left_0()
     .top_0()
     .size_full()
+}
+
+thread_local! {
+    /// The image built for each PSet bitmap (by its id): its `rev` and the
+    /// GPUI image. Rebuilt only when the bitmap changed, and the old one
+    /// dropped from the window's atlas.
+    static RASTER_IMAGES: std::cell::RefCell<std::collections::HashMap<u64, (u64, std::sync::Arc<gpui::RenderImage>)>> =
+        Default::default();
+}
+
+/// Paint the pixels `PSet` set at `origin`, one pixel to a logical pixel.
+fn paint_raster(
+    raster: &crate::canvas::Raster,
+    origin: gpui::Point<gpui::Pixels>,
+    window: &mut gpui::Window,
+) {
+    if raster.id == 0 || raster.width == 0 || raster.height == 0 {
+        return;
+    }
+    let image = RASTER_IMAGES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((rev, img)) = cache.get(&raster.id) {
+            if *rev == raster.rev {
+                return Some(img.clone());
+            }
+        }
+        // GPUI wants BGRA bytes; an unset pixel stays transparent
+        let mut bytes = Vec::with_capacity(raster.pixels.len() * 4);
+        for p in raster.pixels.iter() {
+            if *p == 0 {
+                bytes.extend_from_slice(&[0, 0, 0, 0]);
+            } else {
+                bytes.extend_from_slice(&[*p as u8, (*p >> 8) as u8, (*p >> 16) as u8, 255]);
+            }
+        }
+        let buffer = image::RgbaImage::from_raw(raster.width as u32, raster.height as u32, bytes)?;
+        let img = std::sync::Arc::new(gpui::RenderImage::new(smallvec::SmallVec::from_elem(
+            image::Frame::new(buffer),
+            1,
+        )));
+        if let Some((_, old)) = cache.insert(raster.id, (raster.rev, img.clone())) {
+            let _ = window.drop_image(old);
+        }
+        Some(img)
+    });
+    if let Some(img) = image {
+        let size = gpui::size(px(raster.width as f32), px(raster.height as f32));
+        let _ = window.paint_image(
+            gpui::Bounds::new(origin, size),
+            gpui::Corners::default(),
+            img,
+            0,
+            false,
+        );
+    }
 }
 
 /// Draw control `c` as VB6 shows it, at its form position. `hook` attaches

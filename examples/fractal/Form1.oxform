@@ -1,0 +1,95 @@
+{
+  "name": "Form1",
+  "caption": "Mandelbrot Fractal",
+  "width": 674.0,
+  "height": 570.0,
+  "controls": [
+    {
+      "name": "picFractal",
+      "kind": "PictureBox",
+      "rect": {
+        "left": 16.0,
+        "top": 16.0,
+        "width": 642.0,
+        "height": 482.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": 0,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "cmdDraw",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 16.0,
+        "top": 510.0,
+        "width": 100.0,
+        "height": 32.0
+      },
+      "caption": "Draw",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "lblStatus",
+      "kind": "Label",
+      "rect": {
+        "left": 132.0,
+        "top": 518.0,
+        "width": 480.0,
+        "height": 20.0
+      },
+      "caption": "Press Draw.",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    }
+  ]
+}

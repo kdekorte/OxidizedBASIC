@@ -2214,7 +2214,7 @@ mod drawing_and_images {
         )
         .unwrap();
         let s = shapes(&h);
-        assert_eq!(s.len(), 5);
+        assert_eq!(s.len(), 4, "two lines, a box and a circle; PSet is a pixel");
         // VB's colours: vbRed is &H0000FF, which is red here
         assert_eq!(
             s[0],
@@ -2242,8 +2242,13 @@ mod drawing_and_images {
                 filled: true
             }
         );
-        assert!(matches!(s[3], Shape::Dot { at: (3.0, 4.0), .. }));
-        assert!(matches!(s[4], Shape::Ellipse { radius, .. } if radius == 10.0));
+        // PSet sets a pixel of the bitmap, not a shape: the circle is next
+        assert!(matches!(s[3], Shape::Ellipse { radius, .. } if radius == 10.0));
+        let raster = h.borrow().snapshot(0).unwrap().state[0]
+            .canvas
+            .raster
+            .clone();
+        assert_eq!(raster.pixel(3, 4), Some(crate::host::DEFAULT_FORE));
         assert_eq!(out, " 40  40 \n", "CurrentX/Y is the circle's centre");
     }
 
@@ -2258,15 +2263,16 @@ mod drawing_and_images {
         )
         .unwrap();
         let s = shapes(&h);
+        let raster = h.borrow().snapshot(0).unwrap().state[0]
+            .canvas
+            .raster
+            .clone();
+        assert!(
+            raster.pixel(15, 25).is_some(),
+            "PSet Step(5, 5) from (10, 20)"
+        );
         assert!(matches!(
             s[0],
-            crate::canvas::Shape::Dot {
-                at: (15.0, 25.0),
-                ..
-            }
-        ));
-        assert!(matches!(
-            s[1],
             crate::canvas::Shape::Line {
                 from: (15.0, 25.0),
                 to: (25.0, 25.0),
@@ -2276,6 +2282,11 @@ mod drawing_and_images {
         let out = run("Picture1.Cls\nPrint Picture1.CurrentX\n", &h).unwrap();
         assert_eq!(out, " 0 \n");
         assert!(shapes(&h).is_empty(), "Cls clears it");
+        let raster = h.borrow().snapshot(0).unwrap().state[0]
+            .canvas
+            .raster
+            .clone();
+        assert_eq!(raster.count(), 0, "and the pixels");
     }
 
     #[test]

@@ -121,7 +121,8 @@ crates/
 ├── oxbasic_runtime/     # Interpreter, Variant system, stdlib
 ├── oxbasic_ui/          # Form model + event dispatcher + GPUI backend
 └── oxbasic_ide/         # `oxbasic` CLI binary (ide / gui / run / repl)
-examples/                # hello.bas, demo.bas, fib.bas, clickme.bas + .oxform
+examples/                # hello.bas, demo.bas, fib.bas, clickme.bas + .oxform;
+                         # showcase/ (every control) and fractal/ (Mandelbrot, PSet)
 scripts/                 # gui_smoke.sh, ide_smoke.sh — launch smoke tests
 ```
 
@@ -135,7 +136,8 @@ IsArray IsEmpty IsNull IsDate VarType TypeName`
 Arrays: `Array UBound LBound`
 Dates: `Now Date Time Year Month Day Hour Minute Second Weekday DateSerial
 TimeSerial DateAdd DateValue` (VB serial dates, day 0 = 1899-12-30)
-Console: `Print`, `Debug.Print`, `MsgBox`, `InputBox`, `Beep`, `DoEvents`
+Console: `Print`, `Debug.Print`, `MsgBox`, `InputBox`, `Beep`, `DoEvents` (in the IDE it
+shows what a long handler has drawn so far, and lets Stop end it)
 Constants: `vbCrLf vbCr vbLf vbNewLine vbTab vbNullString vbOKOnly …`
 
 ## Building the GUI on macOS

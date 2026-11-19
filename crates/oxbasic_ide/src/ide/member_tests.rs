@@ -318,6 +318,8 @@ fn drawing_stretching_and_auto_sizing_show_in_the_live_window(cx: &mut gpui::Tes
         "Sub Form_Load()\n\
          \x20 Picture1.Line (5, 5)-(60, 40), vbRed\n\
          \x20 Picture1.Circle (60, 60), 20\n\
+         \x20 Picture1.PSet (10, 90), vbBlue\n\
+         \x20 Picture1.PSet (11, 90), vbBlue\n\
          \x20 Image1.Picture = LoadPicture(\"{p}\")\n\
          \x20 Image1.Stretch = True\n\
          \x20 Picture2.AutoSize = True\n\
@@ -329,6 +331,13 @@ fn drawing_stretching_and_auto_sizing_show_in_the_live_window(cx: &mut gpui::Tes
     // the drawing reached the window, and is painted over the picture box
     let shapes = live.read(|r| r.state[0].canvas.shapes.len());
     assert_eq!(shapes, 2, "a line and a circle");
+    // PSet reached the window as bitmap pixels, not shapes
+    let (count, blue) = live.read(|r| {
+        let raster = &r.state[0].canvas.raster;
+        (raster.count(), raster.pixel(10, 90))
+    });
+    assert_eq!(count, 2, "two PSet pixels");
+    assert_eq!(blue, Some(0x0000FF), "vbBlue");
     // a stretched Image fills its control; the picture is drawn at its size
     let image = live.win.debug_bounds("run-Image1").unwrap();
     let pic = live

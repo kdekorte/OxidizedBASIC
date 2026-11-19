@@ -214,7 +214,14 @@ negative `start` or `end` in `Circle` also draws the radius to it (a pie
 slice); `aspect` is height over width. `CurrentX`/`CurrentY` are where
 the last shape ended (a circle: its centre) and `Cls` resets them. Shapes
 are drawn over the picture in the order they were drawn, and a program
-keeps at most 20,000 of them (the oldest go).
+keeps at most 20,000 of them (the oldest go). `PSet` is the exception: it
+sets a pixel of a bitmap the size of the box (clipped to it, drawn under
+the shapes), so any number of pixels can be set, as in a fractal; `Cls`
+clears the bitmap too.
+
+`DoEvents` shows what the program has drawn so far, so a long drawing
+appears as it goes; Stop (or closing the window) ends it. Clicks and keys
+that arrive while a handler is busy are not delivered.
 
 `Line`, `PSet` and `Circle` are not reserved words: they are drawing
 statements only when a point `(x, y)` follows, so a variable called

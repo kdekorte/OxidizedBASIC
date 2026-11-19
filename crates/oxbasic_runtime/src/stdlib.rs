@@ -562,7 +562,11 @@ impl<'out> Interpreter<'out> {
                 let line = self.out.read_line().unwrap_or_default();
                 Ok(Variant::String(line))
             }
-            "beep" | "doevents" => Ok(Variant::Empty),
+            "beep" => Ok(Variant::Empty),
+            "doevents" => {
+                self.do_events()?;
+                Ok(Variant::Empty)
+            }
 
             "format" => {
                 let v = arg(args, 0)?.clone();

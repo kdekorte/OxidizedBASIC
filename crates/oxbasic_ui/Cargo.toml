@@ -11,6 +11,9 @@ serde_json = "1"
 imagesize = "0.13"
 oxbasic_runtime = { workspace = true }
 gpui = { version = "0.2.2", optional = true }
+# the same versions GPUI uses: a PSet bitmap is handed to it as an image
+image = { version = "0.25", default-features = false, optional = true }
+smallvec = { version = "1", optional = true }
 
 # the macOS wait cursor (see src/mac_cursor.rs); the version GPUI uses
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -21,4 +24,4 @@ oxbasic_parser = { workspace = true }
 
 [features]
 default = []
-gpui = ["dep:gpui"]
+gpui = ["dep:gpui", "dep:image", "dep:smallvec"]

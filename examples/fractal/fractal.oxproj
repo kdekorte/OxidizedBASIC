@@ -1,0 +1,12 @@
+{
+  "name": "fractal",
+  "startup": "Form1",
+  "forms": [
+    {
+      "name": "Form1",
+      "layout": "Form1.oxform",
+      "code": "Form1.bas"
+    }
+  ],
+  "modules": []
+}

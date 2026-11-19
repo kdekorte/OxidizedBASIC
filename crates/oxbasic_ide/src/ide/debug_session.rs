@@ -406,6 +406,36 @@ fn run_program(
     let cmd_rx = Rc::new(cmd_rx);
     let run_mode = matches!(cmd_rx.recv(), Ok(DebugCommand::Run));
     let first_pause = Rc::new(Cell::new(run_mode));
+    // `DoEvents`: show what the program has drawn so far, apply what the
+    // user typed meanwhile, and stop if asked to. Clicks and the like that
+    // arrive while a handler is busy are dropped, as a busy VB program
+    // can't take them in a loop of its own.
+    {
+        let (cmd_rx, host, tx) = (cmd_rx.clone(), host.clone(), evt_tx.clone());
+        rt.set_doevents_hook(Box::new(move || {
+            publish(&host, &tx);
+            loop {
+                match cmd_rx.try_recv() {
+                    Ok(DebugCommand::Stop) => return false,
+                    Ok(DebugCommand::Edit(form, e)) => apply_edit(&host, form, e),
+                    // closing the window while the program is busy ends it
+                    // (a draw can take a while; Stop does the same)
+                    Ok(DebugCommand::Close(_)) => return false,
+                    // a key waits for an answer: the control just gets it
+                    Ok(DebugCommand::Key { serial, key, .. }) => {
+                        let _ = tx.send(DebugEvent::KeyResult {
+                            serial,
+                            keep: true,
+                            typed: key.ascii.and_then(oxbasic_ui::events::typed_char),
+                        });
+                    }
+                    Ok(_) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return false,
+                }
+            }
+        }));
+    }
     {
         let (first_pause, cmd_rx, host, tx) = (
             first_pause.clone(),

@@ -36,6 +36,9 @@ impl FormHost {
             .fore_color
             .unwrap_or(super::host::DEFAULT_FORE);
         let resolve = |vb: u32| super::host::from_vb_color(vb as i32 as i64);
+        // the bitmap behind `PSet` covers the control's inside
+        let r = self.form.controls[i].rect;
+        self.state[i].canvas.extent = (r.width.max(0.0) as usize, r.height.max(0.0) as usize);
         self.state[i].canvas.draw(cmd, fore, resolve)?;
         self.changed = true;
         self.touched[i] = true;
