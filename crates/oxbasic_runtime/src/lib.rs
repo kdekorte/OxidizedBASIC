@@ -5,8 +5,10 @@
 //! with ByRef parameter sharing (`Rc<RefCell<...>>`), arrays, and
 //! `On Error GoTo` / `On Error Resume Next` trapping.
 
+mod fastmap;
 mod stdlib;
 
+use fastmap::{Lowered, NameMap};
 use oxbasic_ast::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -154,8 +156,8 @@ pub(crate) struct Frame {
     #[allow(dead_code)]
     name: String,
     is_main: bool,
-    locals: HashMap<String, Rc<RefCell<Variant>>>,
-    local_types: HashMap<String, String>,
+    locals: NameMap<Rc<RefCell<Variant>>>,
+    local_types: NameMap<String>,
     ret_name: Option<String>,
     ret: Variant,
     err_mode: ErrMode,
@@ -172,8 +174,8 @@ impl Frame {
         Frame {
             name: String::new(),
             is_main: true,
-            locals: HashMap::new(),
-            local_types: HashMap::new(),
+            locals: NameMap::default(),
+            local_types: NameMap::default(),
             ret_name: None,
             ret: Variant::Empty,
             err_mode: ErrMode::None,
@@ -188,8 +190,8 @@ impl Frame {
         Frame {
             name: decl.name.to_lowercase(),
             is_main: false,
-            locals: HashMap::new(),
-            local_types: HashMap::new(),
+            locals: NameMap::default(),
+            local_types: NameMap::default(),
             ret_name: match decl.kind {
                 ProcKind::Function => Some(decl.name.to_lowercase()),
                 ProcKind::Sub => None,
@@ -316,11 +318,11 @@ pub struct Interpreter<'out> {
     /// the project's, when run from the IDE.
     pub base_dir: Option<std::path::PathBuf>,
     pub(crate) decls: Vec<Rc<ProcDecl>>,
-    pub(crate) proc_index: HashMap<String, usize>,
+    pub(crate) proc_index: NameMap<usize>,
     top_level: Vec<Stmt>,
-    pub(crate) globals: HashMap<String, Rc<RefCell<Variant>>>,
-    pub(crate) global_types: HashMap<String, String>,
-    pub(crate) constants: HashMap<String, Variant>,
+    pub(crate) globals: NameMap<Rc<RefCell<Variant>>>,
+    pub(crate) global_types: NameMap<String>,
+    pub(crate) constants: NameMap<Variant>,
     pub(crate) out: &'out mut dyn Output,
     pub(crate) option_explicit: bool,
     pub(crate) rng: Cell<u64>,
@@ -402,10 +404,10 @@ impl<'out> Interpreter<'out> {
     pub fn new(prog: &Program, out: &'out mut dyn Output) -> Interpreter<'out> {
         let mut it = Interpreter {
             decls: Vec::new(),
-            proc_index: HashMap::new(),
+            proc_index: NameMap::default(),
             top_level: Vec::new(),
-            globals: HashMap::new(),
-            global_types: HashMap::new(),
+            globals: NameMap::default(),
+            global_types: NameMap::default(),
             constants: builtin_constants(),
             out,
             option_explicit: false,
@@ -771,33 +773,44 @@ impl<'out> Interpreter<'out> {
     // -- scope helpers ------------------------------------------------------
 
     fn lookup_rc(&self, f: &Frame, name: &str) -> Option<Rc<RefCell<Variant>>> {
-        let ln = name.to_lowercase();
+        self.lookup_ref(f, Lowered::new(name).as_str()).cloned()
+    }
+
+    /// The variable `ln` (already lowercase): the frame's own, else a
+    /// global.
+    #[inline]
+    fn lookup_ref<'a>(&'a self, f: &'a Frame, ln: &str) -> Option<&'a Rc<RefCell<Variant>>> {
         if !f.is_main {
-            if let Some(rc) = f.locals.get(&ln) {
-                return Some(rc.clone());
+            if let Some(rc) = f.locals.get(ln) {
+                return Some(rc);
             }
         }
-        self.globals.get(&ln).cloned()
+        self.globals.get(ln)
     }
 
     fn declared_type(&self, f: &Frame, name: &str) -> Option<String> {
-        let ln = name.to_lowercase();
+        self.declared_type_ref(f, Lowered::new(name).as_str())
+            .map(|t| t.to_string())
+    }
+
+    #[inline]
+    fn declared_type_ref<'a>(&'a self, f: &'a Frame, ln: &str) -> Option<&'a str> {
         if !f.is_main {
-            if let Some(t) = f.local_types.get(&ln) {
-                return Some(t.clone());
+            if let Some(t) = f.local_types.get(ln) {
+                return Some(t);
             }
         }
-        self.global_types.get(&ln).cloned()
+        self.global_types.get(ln).map(|t| t.as_str())
     }
 
     fn set_var(&mut self, f: &mut Frame, name: &str, value: Variant) -> ExecResult<()> {
-        let ln = name.to_lowercase();
-        let ty = self.declared_type(f, name);
-        let value = match &ty {
+        let lowered = Lowered::new(name);
+        let ln = lowered.as_str();
+        let value = match self.declared_type_ref(f, ln) {
             Some(t) => coerce_typed(&value, t)?,
             None => value,
         };
-        if let Some(rc) = self.lookup_rc(f, name) {
+        if let Some(rc) = self.lookup_ref(f, ln) {
             *rc.borrow_mut() = value;
             return Ok(());
         }
@@ -806,9 +819,9 @@ impl<'out> Interpreter<'out> {
         }
         let rc = Rc::new(RefCell::new(value));
         if f.is_main {
-            self.globals.insert(ln, rc);
+            self.globals.insert(ln.to_string(), rc);
         } else {
-            f.locals.insert(ln, rc);
+            f.locals.insert(ln.to_string(), rc);
         }
         Ok(())
     }
@@ -848,8 +861,8 @@ impl<'out> Interpreter<'out> {
     }
 }
 
-fn builtin_constants() -> HashMap<String, Variant> {
-    let mut c = HashMap::new();
+fn builtin_constants() -> NameMap<Variant> {
+    let mut c = NameMap::default();
     let mut ins = |k: &str, v: Variant| {
         c.insert(k.to_string(), v);
     };
@@ -1291,9 +1304,10 @@ impl<'out> Interpreter<'out> {
     fn assign(&mut self, target: &Expr, v: Variant, f: &mut Frame) -> ExecResult<()> {
         match target {
             Expr::Var(name) => {
-                let ln = name.to_lowercase();
+                let lowered = Lowered::new(name);
+                let ln = lowered.as_str();
                 if let Some(rn) = &f.ret_name {
-                    if *rn == ln {
+                    if rn == ln {
                         f.ret = v;
                         return Ok(());
                     }
@@ -1906,11 +1920,12 @@ impl<'out> Interpreter<'out> {
     }
 
     fn eval_var(&mut self, name: &str, f: &mut Frame) -> ExecResult<Variant> {
-        let ln = name.to_lowercase();
-        if let Some(rc) = self.lookup_rc(f, name) {
+        let lowered = Lowered::new(name);
+        let ln = lowered.as_str();
+        if let Some(rc) = self.lookup_ref(f, ln) {
             return Ok(rc.borrow().clone());
         }
-        if let Some(c) = self.constants.get(&ln) {
+        if let Some(c) = self.constants.get(ln) {
             return Ok(c.clone());
         }
         if let Some(rn) = &f.ret_name {
@@ -2062,9 +2077,29 @@ fn default_for_type(ty: Option<&str>) -> Variant {
 
 /// Coerce a value to a declared `Dim x As <Type>` type on assignment.
 pub(crate) fn coerce_typed(v: &Variant, ty: &str) -> ExecResult<Variant> {
-    let t = ty.to_ascii_lowercase();
-    let t = t.rsplit('.').next().unwrap_or(&t).to_string();
-    Ok(match t.as_str() {
+    // declared types are stored lowercase (`declare_var`); a qualified
+    // `Module.Type` counts by its last part
+    let t = match ty.rfind('.') {
+        Some(i) => &ty[i + 1..],
+        None => ty,
+    };
+    // the common case, a value already of the declared type, is a copy
+    match (t, v) {
+        ("double", Variant::Double(_))
+        | ("long", Variant::Long(_))
+        | ("integer", Variant::Integer(_))
+        | ("single", Variant::Single(_))
+        | ("boolean", Variant::Boolean(_)) => return Ok(v.clone()),
+        _ => {}
+    }
+    let owned;
+    let t = if t.bytes().any(|b| b.is_ascii_uppercase()) {
+        owned = t.to_ascii_lowercase();
+        owned.as_str()
+    } else {
+        t
+    };
+    Ok(match t {
         "integer" => Variant::Integer(to_i32(v)? as i16),
         "long" | "byte" => Variant::Long(to_i32(v)?),
         "single" => Variant::Single(to_f64(v)? as f32),
@@ -2107,6 +2142,29 @@ fn compare(l: &Variant, r: &Variant, op: BinaryOp) -> ExecResult<bool> {
     })
 }
 
+/// `a op b` for two numbers when the answer is a plain `Double` or a
+/// comparison; `None` for the operators that need the general rules
+/// (integer division, `Mod`, `And`, `Pow`, a zero divisor...).
+#[inline]
+fn fast_f64(op: &BinaryOp, a: f64, b: f64) -> Option<Variant> {
+    use BinaryOp::*;
+    Some(match op {
+        // as the general code: a result that is a whole number small enough
+        // for a Long becomes a Long (`numeric`)
+        Add => numeric(a + b),
+        Sub => numeric(a - b),
+        Mul => numeric(a * b),
+        Div if b != 0.0 => Variant::Double(a / b),
+        Lt => Variant::Boolean(a < b),
+        Gt => Variant::Boolean(a > b),
+        Le => Variant::Boolean(a <= b),
+        Ge => Variant::Boolean(a >= b),
+        Eq => Variant::Boolean(a == b),
+        Ne => Variant::Boolean(a != b),
+        _ => return None,
+    })
+}
+
 fn numeric(x: f64) -> Variant {
     if x == x.trunc() && x.abs() < i32::MAX as f64 {
         Variant::Long(x as i32)
@@ -2117,6 +2175,53 @@ fn numeric(x: f64) -> Variant {
 
 fn binary_op(op: &BinaryOp, l: &Variant, r: &Variant) -> ExecResult<Variant> {
     use BinaryOp::*;
+    // The hot cases of a numeric loop, with no coercion to go through:
+    // Double with Double (or Long), Long with Long. Anything else, or any
+    // overflow, falls through to the general code below, so results are the
+    // same as before.
+    match (l, r) {
+        (Variant::Double(a), Variant::Double(b)) => {
+            if let Some(v) = fast_f64(op, *a, *b) {
+                return Ok(v);
+            }
+        }
+        (Variant::Double(a), Variant::Long(b)) => {
+            if let Some(v) = fast_f64(op, *a, *b as f64) {
+                return Ok(v);
+            }
+        }
+        (Variant::Long(a), Variant::Double(b)) => {
+            if let Some(v) = fast_f64(op, *a as f64, *b) {
+                return Ok(v);
+            }
+        }
+        (Variant::Long(a), Variant::Long(b)) => {
+            let (a, b) = (*a as i64, *b as i64);
+            let long = |x: i64| i32::try_from(x).ok().map(Variant::Long);
+            let fast = match op {
+                Add => long(a + b),
+                Sub => long(a - b),
+                Mul => long(a * b),
+                Lt => Some(Variant::Boolean(a < b)),
+                Gt => Some(Variant::Boolean(a > b)),
+                Le => Some(Variant::Boolean(a <= b)),
+                Ge => Some(Variant::Boolean(a >= b)),
+                Eq => Some(Variant::Boolean(a == b)),
+                Ne => Some(Variant::Boolean(a != b)),
+                Mod if b != 0 => long(a % b),
+                _ => None,
+            };
+            if let Some(v) = fast {
+                return Ok(v);
+            }
+        }
+        (Variant::Boolean(a), Variant::Boolean(b)) => match op {
+            And => return Ok(Variant::Boolean(*a && *b)),
+            Or => return Ok(Variant::Boolean(*a || *b)),
+            _ => {}
+        },
+        _ => {}
+    }
     match op {
         Eq | Ne | Lt | Gt | Le | Ge => Ok(Variant::Boolean(compare(l, r, *op)?)),
         Concat => Ok(Variant::String(format!(

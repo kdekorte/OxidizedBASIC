@@ -23,3 +23,16 @@ pest_derive = "2.7"
 
 [profile.release]
 lto = true
+
+# The interpreter is the hot path of every program the IDE runs (a Mandelbrot
+# picture is millions of statements), and unoptimised it is about five times
+# slower. Optimise it, and what feeds it, even in a debug build; the IDE's own
+# code stays unoptimised for fast builds and good backtraces.
+[profile.dev.package.oxbasic_runtime]
+opt-level = 3
+
+[profile.dev.package.oxbasic_ast]
+opt-level = 3
+
+[profile.dev.package.oxbasic_parser]
+opt-level = 3
