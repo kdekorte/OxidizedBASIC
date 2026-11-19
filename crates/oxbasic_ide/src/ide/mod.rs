@@ -32,7 +32,7 @@ use debug_session::{DebugCommand, DebugEvent, DebugSession};
 use gpui::point;
 use oxbasic_runtime::PausedInfo;
 use oxbasic_ui::gpui_controls::{
-    edit_text, paint_control, typed_text as ks_text, ControlLook, ControlState, Part, FORM_BACK,
+    paint_control, typed_text as ks_text, ControlLook, ControlState, Part, FORM_BACK,
 };
 use oxbasic_ui::host::{set_value, FormSnapshot, UserEdit};
 use oxbasic_ui::{
@@ -720,6 +720,8 @@ mod editor_tests;
 #[cfg(test)]
 mod event_tests;
 #[cfg(test)]
+mod member_tests;
+#[cfg(test)]
 mod multiform_tests;
 #[cfg(test)]
 mod project_tests;
@@ -1218,9 +1220,12 @@ impl Render for Ide {
             }))
             .on_mouse_up(
                 gpui::MouseButton::Left,
-                cx.listener(|this, _ev: &gpui::MouseUpEvent, _win, _cx| {
+                cx.listener(|this, _ev: &gpui::MouseUpEvent, _win, cx| {
                     this.scrollbar_drag = None;
-                    this.drag = None;
+                    if let Some(DesignDrag::Move(idx, ..)) = this.drag.take() {
+                        this.drop_into_container(idx);
+                        cx.notify();
+                    }
                 }),
             )
             .flex()
@@ -1900,7 +1905,24 @@ impl Ide {
                 c.rect.width = 28.0;
                 c.rect.height = 28.0;
             }
-            let look = ControlLook::design(&c);
+            let mut look = ControlLook::design(&c);
+            look.base_dir = self
+                .workspace
+                .file
+                .as_deref()
+                .and_then(|p| p.parent())
+                .map(|p| p.to_path_buf());
+            // inside a Frame or PictureBox: drawn where its container puts it
+            let (ox, oy) = form.form_origin(idx);
+            if !is_timer {
+                look.origin = Some((ox, oy));
+            }
+            // and the selection outline follows it there
+            let shown_rect = if is_timer {
+                c.rect
+            } else {
+                Rect::new(ox, oy, c.rect.width, c.rect.height)
+            };
             // The designer wires only the control as a whole: the parts
             // inside it (a combo's arrow, a list's rows) are not live here.
             let mut hook = |part: Part,
@@ -1941,8 +1963,8 @@ impl Ide {
                 form_area = form_area.child(
                     div()
                         .absolute()
-                        .left(px(c.rect.left - 2.0))
-                        .top(px(c.rect.top - 2.0))
+                        .left(px(shown_rect.left - 2.0))
+                        .top(px(shown_rect.top - 2.0))
                         .w(px(c.rect.width.max(4.0) + 4.0))
                         .h(px(c.rect.height.max(4.0) + 4.0))
                         .border_1()
@@ -1953,7 +1975,7 @@ impl Ide {
                 // its designer icon is fixed-size.
                 if !is_timer {
                     for h in ResizeHandle::ALL {
-                        let (hx, hy) = h.center(&c.rect);
+                        let (hx, hy) = h.center(&shown_rect);
                         let sel_name = format!("designer-handle-{}-{}-{}", idx, h.dx, h.dy);
                         form_area = form_area.child(
                             div()
@@ -2055,6 +2077,39 @@ impl Ide {
             .child(form_area)
             .child(self.scrollbar_overlays("designer", &self.designer_scroll, cx))
     }
+    /// A control dragged in the designer is dropped where its top-left
+    /// corner is: into the topmost Frame or PictureBox there (not one inside
+    /// it), or onto the form. It stays where it is on screen; its
+    /// `Left`/`Top` become relative to its new container, as in VB.
+    fn drop_into_container(&mut self, idx: usize) {
+        if idx >= self.form.controls.len() || self.form.controls[idx].kind == ControlKind::Timer {
+            return;
+        }
+        let (x, y) = self.form.form_origin(idx);
+        let target = oxbasic_ui::gpui_controls::z_order(&self.form)
+            .into_iter()
+            .rev()
+            .find(|&j| {
+                let c = &self.form.controls[j];
+                let (l, t) = self.form.form_origin(j);
+                j != idx
+                    && c.kind.is_container()
+                    && !self.form.contains(idx, j)
+                    && x >= l
+                    && x < l + c.rect.width
+                    && y >= t
+                    && y < t + c.rect.height
+            });
+        let (bx, by) = target.map_or((0.0, 0.0), |j| self.form.form_origin(j));
+        let key = target.map(|j| oxbasic_ui::container_key(&self.form.controls[j]));
+        let c = &mut self.form.controls[idx];
+        if c.container != key {
+            c.container = key;
+            c.rect.left = (x - bx).round();
+            c.rect.top = (y - by).round();
+        }
+    }
+
     /// Track a designer drag — moving or resizing a control, or resizing the
     /// form — while the button is held. On the workspace root (not just the
     /// designer pane), so a drag keeps working when the pointer crosses into
@@ -2068,9 +2123,16 @@ impl Ide {
         let y = f32::from(ev.position.y);
         let drag = match self.drag {
             Some(DesignDrag::Move(idx, last_x, last_y)) => {
+                // on the form a control stays inside it; in a container it
+                // may go past the container's edge (the drop takes it out)
+                let floor = if self.form.container_of(idx).is_some() {
+                    f32::MIN
+                } else {
+                    0.0
+                };
                 let c = &mut self.form.controls[idx];
-                c.rect.left = (c.rect.left + x - last_x).max(0.0).round();
-                c.rect.top = (c.rect.top + y - last_y).max(0.0).round();
+                c.rect.left = (c.rect.left + x - last_x).max(floor).round();
+                c.rect.top = (c.rect.top + y - last_y).max(floor).round();
                 Some(DesignDrag::Move(idx, x, y))
             }
             Some(DesignDrag::Resize(idx, h, last_x, last_y)) => {
@@ -2193,6 +2255,12 @@ struct FormRunner {
     /// new serial; the task of the old one sees that and ends.
     timers: HashMap<usize, (u64, u64)>,
     timer_serial: u64,
+    /// The project's folder, which a PictureBox's `Picture` file name is
+    /// relative to (`LoadPicture("logo.png")`).
+    base_dir: Option<std::path::PathBuf>,
+    /// The modifier keys held at the last press (a MultiSelect list's
+    /// Ctrl- and Shift-clicks).
+    press_mods: gpui::Modifiers,
     /// The events the program has handlers for, as `(object, event)` in
     /// lower case: events nobody handles aren't sent. `None` until the
     /// program says (then every event VB raises is sent).
@@ -2239,6 +2307,8 @@ impl FormRunner {
             focus,
             timers: HashMap::new(),
             timer_serial: 0,
+            base_dir: None,
+            press_mods: gpui::Modifiers::none(),
             handlers: None,
             form_focus: cx.focus_handle(),
             pressed: None,
@@ -2317,13 +2387,63 @@ impl FormRunner {
     /// state of the controls it touched, the timers it started or stopped,
     /// and the control it gave the focus to.
     fn show(&mut self, snap: &FormSnapshot, win: &mut Window, cx: &mut Context<Self>) {
+        // Load / Unload / ZOrder changed the controls: what the window keys
+        // by a control's place (focus handles, timers) follows its control
+        let before: Vec<(String, Option<i32>)> = self
+            .form
+            .controls
+            .iter()
+            .map(|c| (c.name.to_lowercase(), c.index))
+            .collect();
         snap.apply_to(&mut self.form, &mut self.state);
+        let after: Vec<(String, Option<i32>)> = self
+            .form
+            .controls
+            .iter()
+            .map(|c| (c.name.to_lowercase(), c.index))
+            .collect();
+        if before != after {
+            self.renumber(&before, &after, cx);
+        }
         win.set_window_title(&self.form.caption);
         self.sync_timers(cx);
         // `SetFocus`
-        if let Some(handle) = snap.focus.and_then(|i| self.focus.get(&i)) {
-            win.focus(handle);
+        if let Some(i) = snap.focus {
+            if let Some(handle) = self.focus.get(&i) {
+                win.focus(handle);
+            }
         }
+    }
+
+    /// The controls were reordered or some added or removed: keep each
+    /// control's focus handle and timer, make handles for new controls, and
+    /// forget those of removed ones.
+    fn renumber(
+        &mut self,
+        before: &[(String, Option<i32>)],
+        after: &[(String, Option<i32>)],
+        cx: &mut Context<Self>,
+    ) {
+        let old_focus = std::mem::take(&mut self.focus);
+        // a running timer's task holds its control's place: the timers
+        // start again (sync_timers) at their new places
+        self.timers.clear();
+        let place = |key: &(String, Option<i32>)| before.iter().position(|k| k == key);
+        for (i, key) in after.iter().enumerate() {
+            let old = place(key);
+            if self.form.controls[i].kind.can_focus() {
+                let handle = old
+                    .and_then(|o| old_focus.get(&o).cloned())
+                    .unwrap_or_else(|| cx.focus_handle());
+                self.focus.insert(i, handle);
+            }
+        }
+        self.focused = self
+            .focused
+            .and_then(|f| before.get(f))
+            .and_then(|key| after.iter().position(|k| k == key));
+        self.pressed = None;
+        self.pending_keys.clear();
     }
 
     fn close_lists(&mut self, keep: Option<usize>) {
@@ -2370,6 +2490,30 @@ impl FormRunner {
                 }
             }
             Part::ListItem(i) | Part::DropItem(i) => {
+                // MultiSelect: a click (Simple, 1) or a Ctrl-click
+                // (Extended, 2) toggles the row; Extended's plain click
+                // selects just it
+                if spec.kind == ControlKind::ListBox && spec.multi_select != 0 {
+                    let ctrl = self.press_mods.control || self.press_mods.platform;
+                    let shift = self.press_mods.shift;
+                    if spec.multi_select == 1 || ctrl {
+                        self.toggle_row(idx, i);
+                    } else if shift {
+                        // Extended + Shift: the rows from the focused one
+                        let from = self.state[idx].list_index.unwrap_or(i);
+                        let (a, b) = (from.min(i), from.max(i));
+                        self.state[idx].selected = (a..=b).collect();
+                        self.state[idx].list_index = Some(i);
+                        self.tell_selected(idx);
+                        self.fire(idx, "Click");
+                    } else {
+                        self.state[idx].selected = vec![i];
+                        self.state[idx].list_index = Some(i);
+                        self.tell_selected(idx);
+                        self.fire(idx, "Click");
+                    }
+                    return;
+                }
                 let was = self.state[idx].text.clone();
                 self.state[idx].pick(&spec, i);
                 self.close_lists(None);
@@ -2414,22 +2558,98 @@ impl FormRunner {
 
     /// Handle a keystroke in control `idx`. Returns whether it changed.
     fn key(&mut self, idx: usize, ks: &gpui::Keystroke) -> bool {
-        let spec = &self.form.controls[idx];
+        let spec = self.form.controls[idx].clone();
         let editable = match spec.kind {
             ControlKind::TextBox => true,
             ControlKind::ComboBox => spec.style != 2,
+            ControlKind::ListBox => return self.list_key(idx, ks),
             _ => false,
         };
-        if !editable || !edit_text(&mut self.state[idx].text, ks) {
+        if !editable {
             return false;
         }
-        self.state[idx].list_index = None;
-        self.tell(UserEdit::Text {
-            control: idx,
-            text: self.state[idx].text.clone(),
-        });
-        self.fire(idx, "Change");
+        let typed = ks_text(ks);
+        let m = &ks.modifiers;
+        if m.platform || m.control {
+            return false;
+        }
+        let (changed, moved) = self.state[idx].edit_key(&spec, &ks.key, typed.as_deref(), m.shift);
+        if changed {
+            self.state[idx].list_index = None;
+            self.tell(UserEdit::Text {
+                control: idx,
+                text: self.state[idx].text.clone(),
+            });
+        }
+        if changed || moved {
+            // after the text: SelStart / SelLength, as the program reads them
+            self.tell(UserEdit::Caret {
+                control: idx,
+                caret: self.state[idx].caret,
+                anchor: self.state[idx].anchor,
+            });
+        }
+        if changed {
+            self.fire(idx, "Change");
+        }
+        changed || moved
+    }
+
+    /// Up / Down (and Space, in a MultiSelect list) in a ListBox: move the
+    /// focused row, picking it in a one-row list, as VB does.
+    fn list_key(&mut self, idx: usize, ks: &gpui::Keystroke) -> bool {
+        let spec = self.form.controls[idx].clone();
+        let n = spec.items.len();
+        if n == 0 {
+            return false;
+        }
+        let at = self.state[idx].list_index;
+        let to = match ks.key.as_str() {
+            "up" => at.map_or(0, |i| i.saturating_sub(1)),
+            "down" => at.map_or(0, |i| (i + 1).min(n - 1)),
+            "home" => 0,
+            "end" => n - 1,
+            "space" if spec.multi_select != 0 => {
+                let row = at.unwrap_or(0);
+                self.toggle_row(idx, row);
+                return true;
+            }
+            _ => return false,
+        };
+        if Some(to) == at {
+            return false;
+        }
+        if spec.multi_select == 0 {
+            self.act_on_press(idx, Part::ListItem(to));
+        } else {
+            // the focus moves; the selection stays (Space toggles it)
+            self.state[idx].list_index = Some(to);
+            self.tell_selected(idx);
+        }
         true
+    }
+
+    /// A MultiSelect list's row `row` is selected or not, the other way
+    /// round, and has the focus.
+    fn toggle_row(&mut self, idx: usize, row: usize) {
+        let s = &mut self.state[idx];
+        if let Some(p) = s.selected.iter().position(|&r| r == row) {
+            s.selected.remove(p);
+        } else {
+            s.selected.push(row);
+            s.selected.sort_unstable();
+        }
+        s.list_index = Some(row);
+        self.tell_selected(idx);
+        self.fire(idx, "Click");
+    }
+
+    fn tell_selected(&self, idx: usize) {
+        self.tell(UserEdit::Selected {
+            control: idx,
+            rows: self.state[idx].selected.clone(),
+            index: self.state[idx].list_index,
+        });
     }
 }
 
@@ -2458,6 +2678,16 @@ impl Ide {
         match key {
             "tabindex" => format!("{}", self.form.tab_index_of(idx)),
             "tabstop" => if c.tab_stop { "True" } else { "False" }.to_string(),
+            "locked" => if c.locked { "True" } else { "False" }.to_string(),
+            "maxlength" => format!("{}", c.max_length),
+            "multiline" => if c.multi_line { "True" } else { "False" }.to_string(),
+            "scrollbars" => format!("{}", c.scroll_bars),
+            "multiselect" => format!("{}", c.multi_select),
+            "picture" => c.picture.clone(),
+            // blank: on the form itself
+            "container" => c.container.clone().unwrap_or_default(),
+            "tooltiptext" => c.tool_tip.clone(),
+            "mousepointer" => format!("{}", c.mouse_pointer),
             "name" => c.name.clone(),
             "caption" => c.caption.clone(),
             "text" => c.text.clone().unwrap_or_default(),
@@ -2564,6 +2794,32 @@ impl Ide {
             }
             return;
         }
+        // Container: a Frame or PictureBox of the form (blank: the form);
+        // taken only once it names one, and never the control itself or
+        // what it contains
+        if key == "container" {
+            let name = val.trim();
+            if name.is_empty() {
+                self.form.controls[idx].container = None;
+                return;
+            }
+            let (base, index) = oxbasic_ui::split_element(name);
+            let target = self
+                .form
+                .controls
+                .iter()
+                .position(|c| c.name.eq_ignore_ascii_case(base) && c.index == index);
+            if let Some(j) = target {
+                let ok = self.form.controls[j].kind.is_container()
+                    && j != idx
+                    && !self.form.contains(idx, j);
+                if ok {
+                    self.form.controls[idx].container =
+                        Some(oxbasic_ui::container_key(&self.form.controls[j]));
+                }
+            }
+            return;
+        }
         let Some(c) = self.form.controls.get_mut(idx) else {
             return;
         };
@@ -2623,6 +2879,40 @@ impl Ide {
             "tabstop" => {
                 if let Some(b) = Self::parse_bool(val) {
                     c.tab_stop = b;
+                }
+            }
+            "locked" => {
+                if let Some(b) = Self::parse_bool(val) {
+                    c.locked = b;
+                }
+            }
+            "multiline" => {
+                if let Some(b) = Self::parse_bool(val) {
+                    c.multi_line = b;
+                }
+            }
+            "maxlength" => c.max_length = val.trim().parse().unwrap_or(c.max_length),
+            "scrollbars" => {
+                if let Ok(n) = val.trim().parse::<u8>() {
+                    if n <= 3 {
+                        c.scroll_bars = n;
+                    }
+                }
+            }
+            "multiselect" => {
+                if let Ok(n) = val.trim().parse::<u8>() {
+                    if n <= 2 {
+                        c.multi_select = n;
+                    }
+                }
+            }
+            "picture" => c.picture = val.trim().to_string(),
+            "tooltiptext" => c.tool_tip = val.to_string(),
+            "mousepointer" => {
+                if let Ok(n) = val.trim().parse::<i16>() {
+                    if (0..=15).contains(&n) || n == 99 {
+                        c.mouse_pointer = n;
+                    }
                 }
             }
             "backcolor" => {
@@ -3008,6 +3298,28 @@ impl Ide {
                 ("width", "Width"),
                 ("height", "Height"),
             ]);
+        }
+        if k == ControlKind::TextBox {
+            rows.extend([
+                ("locked", "Locked"),
+                ("maxlength", "MaxLength"),
+                ("multiline", "MultiLine"),
+                ("scrollbars", "ScrollBars"),
+            ]);
+        }
+        if k == ControlKind::ComboBox {
+            rows.push(("locked", "Locked"));
+        }
+        if k == ControlKind::ListBox {
+            rows.push(("multiselect", "MultiSelect"));
+        }
+        if k == ControlKind::PictureBox {
+            rows.push(("picture", "Picture"));
+        }
+        if k != ControlKind::Timer {
+            rows.push(("container", "Container"));
+            rows.push(("tooltiptext", "ToolTipText"));
+            rows.push(("mousepointer", "MousePointer"));
         }
         rows.push(("enabled", "Enabled"));
         rows.push(("index", "Index"));

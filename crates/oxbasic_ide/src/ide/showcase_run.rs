@@ -53,6 +53,7 @@ impl Run {
                 forms: forms.clone(),
                 startup: 0,
                 bare: false,
+                base_dir: None,
             },
             Arc::new(Mutex::new(HashSet::new())),
             tx,

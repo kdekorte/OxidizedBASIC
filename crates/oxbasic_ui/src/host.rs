@@ -95,6 +95,156 @@ impl ControlState {
         self.text = s;
     }
 
+    /// A key in a text field, as a TextBox / ComboBox does it: typing
+    /// replaces the selection, Backspace / Delete remove it or the
+    /// character beside the caret, arrows / Home / End move the caret
+    /// (Shift extends the selection), Enter starts a new line in a
+    /// MultiLine box. `Locked` refuses changes but allows moving; `MaxLength`
+    /// refuses typing past it. Returns `(text changed, caret moved)`.
+    pub fn edit_key(
+        &mut self,
+        c: &ControlSpec,
+        key: &str,
+        typed: Option<&str>,
+        shift: bool,
+    ) -> (bool, bool) {
+        let len = self.text.chars().count();
+        let caret = self.caret.min(len);
+        let multi = c.multi_line && c.kind == ControlKind::TextBox;
+        let move_to = |s: &mut ControlState, to: usize| {
+            if shift {
+                if s.anchor.is_none() {
+                    s.anchor = Some(caret);
+                }
+            } else {
+                s.anchor = None;
+            }
+            s.caret = to.min(len);
+            if s.anchor == Some(s.caret) {
+                s.anchor = None;
+            }
+        };
+        let (start, sel_len) = self.selection();
+        let has_sel = sel_len > 0;
+        let chars: Vec<char> = self.text.chars().collect();
+        // the start and end of the line the caret is on (MultiLine)
+        let line_start = chars[..caret]
+            .iter()
+            .rposition(|&ch| ch == '\n')
+            .map_or(0, |p| p + 1);
+        let line_end = chars[caret..]
+            .iter()
+            .position(|&ch| ch == '\n')
+            .map_or(len, |p| caret + p);
+        match key {
+            "left" => {
+                let to = if has_sel && !shift {
+                    start
+                } else {
+                    caret.saturating_sub(1)
+                };
+                move_to(self, to);
+                return (false, true);
+            }
+            "right" => {
+                let to = if has_sel && !shift {
+                    start + sel_len
+                } else {
+                    caret + 1
+                };
+                move_to(self, to);
+                return (false, true);
+            }
+            "home" => {
+                move_to(self, if multi { line_start } else { 0 });
+                return (false, true);
+            }
+            "end" => {
+                move_to(self, if multi { line_end } else { len });
+                return (false, true);
+            }
+            "up" | "down" if multi => {
+                let col = caret - line_start;
+                let to = if key == "up" {
+                    if line_start == 0 {
+                        0
+                    } else {
+                        let prev_start = chars[..line_start - 1]
+                            .iter()
+                            .rposition(|&ch| ch == '\n')
+                            .map_or(0, |p| p + 1);
+                        (prev_start + col).min(line_start - 1)
+                    }
+                } else if line_end >= len {
+                    len
+                } else {
+                    let next_end = chars[line_end + 1..]
+                        .iter()
+                        .position(|&ch| ch == '\n')
+                        .map_or(len, |p| line_end + 1 + p);
+                    (line_end + 1 + col).min(next_end)
+                };
+                move_to(self, to);
+                return (false, true);
+            }
+            _ => {}
+        }
+        if c.locked {
+            return (false, false);
+        }
+        let max = c.max_length as usize;
+        // what typing may add without going past MaxLength
+        let room = |s: &ControlState| {
+            if max == 0 {
+                usize::MAX
+            } else {
+                max.saturating_sub(s.text.chars().count() - s.selection().1)
+            }
+        };
+        match key {
+            "backspace" => {
+                if !has_sel {
+                    if caret == 0 {
+                        return (false, false);
+                    }
+                    self.anchor = Some(caret - 1);
+                    self.caret = caret;
+                }
+                self.replace_selection("");
+                (true, true)
+            }
+            "delete" => {
+                if !has_sel {
+                    if caret >= len {
+                        return (false, false);
+                    }
+                    self.anchor = Some(caret + 1);
+                    self.caret = caret;
+                }
+                self.replace_selection("");
+                (true, true)
+            }
+            "enter" if multi => {
+                if room(self) == 0 {
+                    return (false, false);
+                }
+                self.replace_selection("\n");
+                (true, true)
+            }
+            _ => match typed {
+                Some(t) if !t.is_empty() => {
+                    let t: String = t.chars().take(room(self)).collect();
+                    if t.is_empty() {
+                        return (false, false);
+                    }
+                    self.replace_selection(&t);
+                    (true, true)
+                }
+                _ => (false, false),
+            },
+        }
+    }
+
     /// The user picked item `i` of the control's list.
     pub fn pick(&mut self, c: &ControlSpec, i: usize) {
         self.list_index = Some(i);

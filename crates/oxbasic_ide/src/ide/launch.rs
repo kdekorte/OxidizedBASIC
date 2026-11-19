@@ -35,6 +35,12 @@ impl Ide {
             forms,
             startup,
             bare: false,
+            base_dir: self
+                .workspace
+                .file
+                .as_deref()
+                .and_then(|p| p.parent())
+                .map(|p| p.to_path_buf()),
         };
         (spec, program)
     }

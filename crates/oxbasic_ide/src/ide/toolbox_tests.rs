@@ -220,8 +220,16 @@ fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppCont
         "fontitalic",
         "fontunderline",
     ];
-    let with = |first: &[&'static str], shows_text: bool, focus: bool| -> Vec<&'static str> {
+    // after the geometry, a kind's own rows, then Container, ToolTipText
+    // and MousePointer (all but a Timer)
+    let with = |first: &[&'static str],
+                own: &[&'static str],
+                shows_text: bool,
+                focus: bool|
+     -> Vec<&'static str> {
         let mut v: Vec<&'static str> = first.iter().copied().chain(geometry).collect();
+        v.extend(own.iter().copied());
+        v.extend(["container", "tooltiptext", "mousepointer"]);
         v.extend(["enabled", "index", "tabindex"]);
         if focus {
             v.push("tabstop");
@@ -232,32 +240,48 @@ fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppCont
         }
         v
     };
+    let text_rows = ["locked", "maxlength", "multiline", "scrollbars"];
     let expect: [(ControlKind, Vec<&str>); 10] = [
-        (ControlKind::Label, with(&["name", "caption"], true, false)),
-        (ControlKind::TextBox, with(&["name", "text"], true, true)),
+        (
+            ControlKind::Label,
+            with(&["name", "caption"], &[], true, false),
+        ),
+        (
+            ControlKind::TextBox,
+            with(&["name", "text"], &text_rows, true, true),
+        ),
         (
             ControlKind::CommandButton,
-            with(&["name", "caption"], true, true),
+            with(&["name", "caption"], &[], true, true),
         ),
-        (ControlKind::Frame, with(&["name", "caption"], true, false)),
-        (ControlKind::ListBox, with(&["name", "items"], true, true)),
+        (
+            ControlKind::Frame,
+            with(&["name", "caption"], &[], true, false),
+        ),
+        (
+            ControlKind::ListBox,
+            with(&["name", "items"], &["multiselect"], true, true),
+        ),
         (
             ControlKind::ComboBox,
-            with(&["name", "text", "items", "style"], true, true),
+            with(&["name", "text", "items", "style"], &["locked"], true, true),
         ),
         // a PictureBox takes the focus; a Timer isn't on the tab order
-        (ControlKind::PictureBox, with(&["name"], false, true)),
+        (
+            ControlKind::PictureBox,
+            with(&["name"], &["picture"], false, true),
+        ),
         (
             ControlKind::Timer,
             vec!["name", "interval", "enabled", "index"],
         ),
         (
             ControlKind::CheckBox,
-            with(&["name", "caption", "value"], true, true),
+            with(&["name", "caption", "value"], &[], true, true),
         ),
         (
             ControlKind::OptionButton,
-            with(&["name", "caption", "value"], true, true),
+            with(&["name", "caption", "value"], &[], true, true),
         ),
     ];
 
@@ -864,5 +888,63 @@ fn the_inspector_edits_tab_index_tab_stop_and_key_preview(cx: &mut gpui::TestApp
     ide.update(cx, |ide, _| {
         assert!(!ide.inspector_rows(2).iter().any(|(k, _)| *k == "tabstop"));
         assert!(ide.inspector_rows(2).iter().any(|(k, _)| *k == "tabindex"));
+    });
+}
+
+#[gpui::test]
+fn dragging_a_control_onto_a_frame_puts_it_in_and_off_takes_it_out(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    ide.update(cx, |ide, cx| {
+        let mut frame = ControlSpec::new(
+            "Frame1",
+            ControlKind::Frame,
+            Rect::new(150.0, 20.0, 200.0, 150.0),
+        );
+        frame.caption = "Box".into();
+        ide.form.control(frame);
+        ide.form
+            .button("Command1", "Go", Rect::new(16.0, 200.0, 90.0, 28.0));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    // drag the button 200 right and 150 up, into the frame
+    let b = cx.debug_bounds("designer-control-1").expect("Command1");
+    drag_by(
+        cx,
+        gpui::point(b.origin.x + px(5.0), b.origin.y + px(5.0)),
+        200.0,
+        -150.0,
+    );
+    ide.read_with(cx, |ide, _| {
+        let c = &ide.form.controls[1];
+        assert_eq!(c.container.as_deref(), Some("Frame1"));
+        // it stays where it was dropped on screen: 216,50 on the form is
+        // 66,30 inside the frame at 150,20
+        assert_eq!((c.rect.left, c.rect.top), (66.0, 30.0));
+        assert_eq!(ide.form.form_origin(1), (216.0, 50.0));
+    });
+    // moving the frame moves what is in it
+    ide.update(cx, |ide, cx| {
+        ide.form.controls[0].rect.left = 160.0;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let b2 = cx.debug_bounds("designer-control-1").expect("Command1");
+    assert_eq!(
+        b2.origin.x - b.origin.x,
+        px(210.0),
+        "200 dragged + 10 the frame moved"
+    );
+    // and dragging it back out leaves it on the form
+    drag_by(
+        cx,
+        gpui::point(b2.origin.x + px(5.0), b2.origin.y + px(5.0)),
+        -200.0,
+        150.0,
+    );
+    ide.read_with(cx, |ide, _| {
+        let c = &ide.form.controls[1];
+        assert_eq!(c.container, None);
+        assert_eq!((c.rect.left, c.rect.top), (26.0, 200.0));
     });
 }

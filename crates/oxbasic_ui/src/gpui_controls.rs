@@ -15,8 +15,8 @@
 
 use crate::{ControlKind, ControlSpec, FormSpec, DEFAULT_FONT_SIZE};
 use gpui::{
-    deferred, div, prelude::*, px, rgb, AnyElement, Context, Div, FontWeight, Keystroke,
-    SharedString, Stateful,
+    deferred, div, img, prelude::*, px, rgb, AnyElement, Context, CursorStyle, Div, FontWeight,
+    Keystroke, ObjectFit, SharedString, Stateful,
 };
 
 pub use crate::FORM_BACK;
@@ -65,6 +65,17 @@ pub struct ControlLook {
     pub focused: bool,
     /// `Value` of a CheckBox (0, 1, 2) or OptionButton (0, 1).
     pub value: i32,
+    /// Where the control is on the form (its `Left`/`Top` plus those of the
+    /// containers around it); `None` is its own `Left`/`Top`.
+    pub origin: Option<(f32, f32)>,
+    /// The caret and the other end of the selection in a text field, when
+    /// it has the focus.
+    pub caret: usize,
+    pub anchor: Option<usize>,
+    /// The rows a MultiSelect ListBox has selected.
+    pub selected: Vec<usize>,
+    /// The folder a `Picture` file name is relative to.
+    pub base_dir: Option<std::path::PathBuf>,
 }
 
 impl ControlLook {
@@ -76,6 +87,64 @@ impl ControlLook {
             value: c.value,
             ..Default::default()
         }
+    }
+
+    /// How a running control looks: its state, at `origin` on the form.
+    pub fn running(state: &ControlState, origin: (f32, f32), focused: bool) -> ControlLook {
+        ControlLook {
+            design: false,
+            text: state.text.clone(),
+            list_index: state.list_index,
+            dropped: state.dropped,
+            focused,
+            value: state.value,
+            origin: Some(origin),
+            caret: state.caret,
+            anchor: state.anchor,
+            selected: state.selected.clone(),
+            base_dir: None,
+        }
+    }
+}
+
+/// VB's `MousePointer` as a GPUI cursor (`None`: the control's usual one).
+pub fn cursor_for(pointer: i16) -> Option<CursorStyle> {
+    Some(match pointer {
+        1 => CursorStyle::Arrow,
+        2 => CursorStyle::Crosshair,
+        3 => CursorStyle::IBeam,
+        // VB's size pointers: the four-way and each axis
+        5 | 15 => CursorStyle::ClosedHand,
+        6 => CursorStyle::ResizeUpRightDownLeft,
+        7 => CursorStyle::ResizeUpDown,
+        8 => CursorStyle::ResizeUpLeftDownRight,
+        9 => CursorStyle::ResizeLeftRight,
+        10 => CursorStyle::ResizeUp,
+        // no hourglass on a Mac: the "not allowed" sign is closest for
+        // No Drop, and the arrow (VB 13 is arrow + hourglass) for the rest
+        11 | 13 => CursorStyle::Arrow,
+        12 => CursorStyle::OperationNotAllowed,
+        14 => CursorStyle::ContextualMenu,
+        99 => CursorStyle::PointingHand,
+        _ => return None,
+    })
+}
+
+/// The text of a tooltip: a small yellow box (VB's ToolTipText).
+pub struct Tip(pub SharedString);
+
+impl Render for Tip {
+    fn render(&mut self, _w: &mut gpui::Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| "tooltip".into())
+            .px_1()
+            .py(px(1.0))
+            .bg(rgb(0xFFFFE1))
+            .border_1()
+            .border_color(rgb(0x646464))
+            .text_size(px(12.0))
+            .text_color(rgb(TEXT))
+            .child(self.0.clone())
     }
 }
 
@@ -119,29 +188,130 @@ pub fn edit_text(text: &mut String, ks: &Keystroke) -> bool {
     }
 }
 
-/// Drawing order: frames first, so they never cover the controls on them.
+/// Drawing order: the controls in their order (`ZOrder` moves a control to
+/// the end, on top, or the start), except that a container is drawn before
+/// what it contains, so what is in a Frame is never hidden by it. Frames on
+/// the form are drawn first, as VB's designer puts them behind the rest.
 pub fn z_order(form: &FormSpec) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..form.controls.len()).collect();
-    order.sort_by_key(|&i| form.controls[i].kind != ControlKind::Frame);
-    order
+    let mut out = Vec::with_capacity(form.controls.len());
+    // the form's own controls, frames first, then each one's contents
+    let mut roots: Vec<usize> = (0..form.controls.len())
+        .filter(|&i| form.container_of(i).is_none())
+        .collect();
+    roots.sort_by_key(|&i| form.controls[i].kind != ControlKind::Frame);
+    fn add(form: &FormSpec, i: usize, out: &mut Vec<usize>) {
+        if out.contains(&i) {
+            return; // a loop in a hand-edited file
+        }
+        out.push(i);
+        for j in 0..form.controls.len() {
+            if form.container_of(j) == Some(i) {
+                add(form, j, out);
+            }
+        }
+    }
+    for i in roots {
+        add(form, i, &mut out);
+    }
+    // anything not reached (a container loop) still gets drawn
+    for i in 0..form.controls.len() {
+        if !out.contains(&i) {
+            out.push(i);
+        }
+    }
+    out
 }
 
 fn caret() -> Div {
     div().flex_none().w(px(1.5)).h(px(14.0)).bg(rgb(ACCENT))
 }
 
-/// A single-line white field showing `text`.
-fn text_field(base: Stateful<Div>, text: &str, focused: bool) -> Stateful<Div> {
-    base.flex()
-        .items_center()
+/// A text field showing `text`: one line, or wrapped lines for a
+/// MultiLine TextBox (scrolling when it has `ScrollBars`). With the focus
+/// it shows the caret, and the selection (`SelStart`/`SelLength`) tinted.
+fn text_field(base: Stateful<Div>, c: &ControlSpec, look: &ControlLook) -> Stateful<Div> {
+    let multi = c.multi_line && c.kind == ControlKind::TextBox;
+    let mut field = base
         .px_1()
         .bg(rgb(0xFFFFFF))
         .border_1()
-        .border_color(rgb(if focused { ACCENT } else { FIELD_BORDER }))
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .child(SharedString::from(text.to_string()))
-        .when(focused, |s| s.child(caret()))
+        .border_color(rgb(if look.focused { ACCENT } else { FIELD_BORDER }));
+    field = if multi {
+        // ScrollBars: 1 horizontal (no wrapping), 2 vertical, 3 both
+        let field = field.flex().flex_col().items_start();
+        match c.scroll_bars {
+            1 => field.overflow_x_scroll().whitespace_nowrap(),
+            2 => field.overflow_y_scroll().whitespace_normal(),
+            3 => field.overflow_scroll().whitespace_nowrap(),
+            _ => field.overflow_hidden().whitespace_normal(),
+        }
+    } else {
+        field
+            .flex()
+            .items_center()
+            .overflow_hidden()
+            .whitespace_nowrap()
+    };
+    if !look.focused || look.design {
+        return if multi {
+            field.children(look.text.split('\n').map(|l| {
+                div()
+                    .min_h(px(16.0))
+                    .child(SharedString::from(l.to_string()))
+            }))
+        } else {
+            field.child(SharedString::from(look.text.clone()))
+        };
+    }
+    // the text in three runs around the caret: before the selection, the
+    // selection (tinted), after it; the caret at its end
+    let chars: Vec<char> = look.text.chars().collect();
+    let caret = look.caret.min(chars.len());
+    let (from, to) = match look.anchor.map(|a| a.min(chars.len())) {
+        Some(a) if a != caret => (a.min(caret), a.max(caret)),
+        _ => (caret, caret),
+    };
+    if multi {
+        // one row per line, the caret and tint on the rows they fall in
+        let mut rows = Vec::new();
+        let mut start = 0;
+        for line in look.text.split('\n') {
+            let end = start + line.chars().count();
+            rows.push(text_row(&chars, start, end, from, to, caret));
+            start = end + 1;
+        }
+        return field.children(rows);
+    }
+    field.child(text_row(&chars, 0, chars.len(), from, to, caret))
+}
+
+/// Characters `start..end` of `chars` as one row: the part in `from..to`
+/// tinted as selected, and the caret where it is in the row.
+fn text_row(chars: &[char], start: usize, end: usize, from: usize, to: usize, at: usize) -> Div {
+    let piece = |a: usize, b: usize| -> String { chars[a..b].iter().collect() };
+    let (sel_a, sel_b) = (from.clamp(start, end), to.clamp(start, end));
+    let mut row = div()
+        .flex()
+        .items_center()
+        .min_h(px(16.0))
+        .whitespace_nowrap();
+    let before = piece(start, sel_a);
+    let sel = piece(sel_a, sel_b);
+    let after = piece(sel_b, end);
+    let caret_here = at >= start && at <= end;
+    // the caret sits at the selection's start or its end (or alone)
+    let caret_at_start = caret_here && at == sel_a && sel_a != sel_b;
+    row = row.child(SharedString::from(before));
+    if caret_at_start {
+        row = row.child(caret());
+    }
+    if !sel.is_empty() {
+        row = row.child(div().bg(rgb(0xB4D7FF)).child(SharedString::from(sel)));
+    }
+    if caret_here && !caret_at_start {
+        row = row.child(caret());
+    }
+    row.child(SharedString::from(after))
 }
 
 /// A list's rows: `items`, the selected one highlighted, each wired by
@@ -167,7 +337,12 @@ fn list_rows<V: 'static>(
         );
     }
     for (i, item) in c.items.iter().enumerate() {
-        let selected = look.list_index == Some(i);
+        // a MultiSelect list shows every selected row; the others the one
+        let selected = if c.multi_select != 0 {
+            look.selected.contains(&i)
+        } else {
+            look.list_index == Some(i)
+        };
         let mut row = div()
             .id((id.clone(), i))
             .debug_selector(|| format!("{}-item-{}", c.name, i))
@@ -183,6 +358,10 @@ fn list_rows<V: 'static>(
             row = row.bg(rgb(ACCENT)).text_color(rgb(0xFFFFFF));
         } else if !look.design {
             row = row.hover(|s| s.bg(rgb(ROW_HOVER)));
+        }
+        // the focused row of a MultiSelect list has a dotted box, as in VB
+        if c.multi_select != 0 && look.focused && look.list_index == Some(i) {
+            row = row.border_1().border_dashed().border_color(rgb(TEXT));
         }
         list = list.child(hook(part(i), row, cx));
     }
@@ -207,12 +386,13 @@ pub fn paint_control<V: 'static>(
     } else {
         (c.rect.width.max(4.0), c.rect.height.max(4.0))
     };
+    let (left, top) = look.origin.unwrap_or((c.rect.left, c.rect.top));
     let font = &c.font;
     let mut base = div()
         .id(id.clone())
         .absolute()
-        .left(px(c.rect.left))
-        .top(px(c.rect.top))
+        .left(px(left))
+        .top(px(top))
         .w(px(w))
         .h(px(h))
         .text_color(rgb(if !c.enabled {
@@ -220,6 +400,16 @@ pub fn paint_control<V: 'static>(
         } else {
             c.fore_color.unwrap_or(TEXT)
         }));
+    // `MousePointer` and `ToolTipText` at run time
+    if !look.design {
+        if let Some(cursor) = cursor_for(c.mouse_pointer) {
+            base = base.cursor(cursor);
+        }
+        if !c.tool_tip.is_empty() {
+            let tip = SharedString::from(c.tool_tip.clone());
+            base = base.tooltip(move |_w, cx| cx.new(|_| Tip(tip.clone())).into());
+        }
+    }
     // `Font`: points to pixels at 96 dpi (VB's 8.25 pt MS Sans Serif is
     // 11 px); an unset size keeps the size controls are drawn at
     if c.kind.has_font() {
@@ -280,11 +470,7 @@ pub fn paint_control<V: 'static>(
             }
             hook(Part::Body, body, cx)
         }
-        ControlKind::TextBox => hook(
-            Part::Body,
-            text_field(base, &look.text, look.focused).bg(back(0xFFFFFF)),
-            cx,
-        ),
+        ControlKind::TextBox => hook(Part::Body, text_field(base, c, look).bg(back(0xFFFFFF)), cx),
         // VB6 Frame: a group box. The caption interrupts the top border.
         ControlKind::Frame => {
             let outline = div()
@@ -334,10 +520,27 @@ pub fn paint_control<V: 'static>(
         }
         ControlKind::ComboBox => paint_combo(c, look, base, hook, cx),
         ControlKind::PictureBox => {
-            let body = base
+            let mut body = base
                 .bg(back(0xFFFFFF))
                 .border_1()
-                .border_color(rgb(FIELD_BORDER));
+                .border_color(rgb(FIELD_BORDER))
+                .overflow_hidden();
+            // `Picture`: the image, at its own size from the top-left corner
+            // as VB draws it (AutoSize off)
+            if !c.picture.is_empty() {
+                let path = match &look.base_dir {
+                    Some(dir) => dir.join(&c.picture),
+                    None => std::path::PathBuf::from(&c.picture),
+                };
+                body = body.child(
+                    img(path)
+                        .debug_selector(|| format!("{}-picture", c.name))
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .object_fit(ObjectFit::None),
+                );
+            }
             hook(Part::Body, body, cx)
         }
         // VB6 CheckBox / OptionButton: a box (☑) or circle (◉) and the
@@ -424,8 +627,8 @@ fn paint_combo<V: 'static>(
         // Text field on top, list below.
         let field = text_field(
             div().id((id.clone(), 0usize)).h(px(field_h)).w_full(),
-            &look.text,
-            look.focused,
+            c,
+            look,
         );
         let rows = list_rows(
             SharedString::from(format!("{}-list", c.name)),

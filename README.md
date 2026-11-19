@@ -155,22 +155,29 @@ xcodebuild -downloadComponent MetalToolchain
   - every control: `Caption`, `Text`, `Visible`, `Enabled`,
     `Left/Top/Width/Height`, `BackColor`, `ForeColor`, `Font.Name`,
     `Font.Size`, `Font.Bold/Italic/Underline/Strikethrough` (also
-    `FontBold` etc.), `SetFocus`; the form: `Caption`, `Width`, `Height`
-    through `Me` or its name;
+    `FontBold` etc.), `TabIndex`, `TabStop`, `ToolTipText`,
+    `MousePointer`, `Container` (`Set X.Container = Frame1`), `SetFocus`,
+    `Move`, `ZOrder`; the form: `Caption`, `Width`, `Height`,
+    `KeyPreview` through `Me` or its name;
   - `CheckBox.Value` (`vbUnchecked`/`vbChecked`/`vbGrayed`) and
-    `OptionButton.Value` (True clears the form's other option buttons);
+    `OptionButton.Value` (True clears the other option buttons in the
+    same Frame, PictureBox or form);
+  - text boxes: `SelStart`, `SelLength`, `SelText`, `Locked`,
+    `MaxLength`, and (set in the designer) `MultiLine` and `ScrollBars`;
   - list and combo boxes: `AddItem [, index]`, `RemoveItem`, `Clear`,
-    `List(i)`, `ListCount`, `ListIndex`;
+    `List(i)`, `ListCount`, `ListIndex`, and for a ListBox
+    `Selected(i)`, `SelCount` and (set in the designer) `MultiSelect`;
+  - a PictureBox's `Picture = LoadPicture("file.png")`;
   - timers: `Interval` and `Enabled` take effect on the running timer;
   - control arrays: give controls the same name and distinct `Index`
-    values (Properties window); the program says `Cmd(2).Caption = "x"`
-    and handlers take `Index As Integer`;
-  - colours are VB `Long`s: `RGB(r, g, b)`, `vbRed`... Errors are VB's:
-    438 unsupported member, 380 bad value, 381 bad list index, 340/343
-    control-array element missing / not an array.
-  Not yet: system colours, `Picture`, `ZOrder`, `Move`, `Container`
-  (option buttons are one group per form), `Load`/`Unload` of array
-  elements at run time.
+    values (Properties window); the program says `Cmd(2).Caption = "x"`,
+    adds and removes elements with `Load Cmd(3)` / `Unload Cmd(3)`, and
+    handlers take `Index As Integer`;
+  - colours are VB `Long`s: `RGB(r, g, b)`, `vbRed`..., and the system
+    colours (`vbButtonFace`, `vbWindowBackground`...). Errors are VB's:
+    438 unsupported member, 380 bad value, 381 bad list index, 382
+    read-only, 340/343/360/362 control arrays, 53 picture not found.
+  See `docs/controls.md` for every member.
 - Run opens the form in its own OS window. Every event the code window
   lists reaches the program, in VB's order: mouse (`MouseDown`,
   `MouseMove`, `MouseUp` with button, shift and position; `Click` on

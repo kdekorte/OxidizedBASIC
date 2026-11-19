@@ -47,6 +47,7 @@ fn start(docs: &[Doc]) -> (DebugSession, Receiver<DebugEvent>) {
             forms,
             startup: 0,
             bare: false,
+            base_dir: None,
         },
         Arc::new(Mutex::new(HashSet::new())),
         tx,

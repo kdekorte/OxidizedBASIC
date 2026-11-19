@@ -51,6 +51,17 @@ everything except Timer. "Focus" means `SetFocus` works.
 | `Visible` | Boolean | R/W | — | Not in the Properties window. A Timer is always invisible. |
 | `TabIndex` | Integer | R/W | R/W | Place in the tab order, from 0; every control but a Timer has one. Setting it moves the control there and the ones after it down one, as in VB. Out of range raises 380. |
 | `TabStop` | Boolean | R/W | R/W | Tab skips the control when False (a click still focuses it). Only controls that take the focus. |
+| `Container` | object | R/W (`Set`) | R/W | The Frame or PictureBox it sits in (reads as its name; the form's name when on the form). `Set Text1.Container = Frame1` moves it in, `= Me` back out; `Left`/`Top` then count from the container. A hidden or disabled container hides or disables what it holds. Anything but a Frame/PictureBox, or a container inside the control itself, raises 380. In the designer, dropping a control on a Frame puts it in. |
+| `ToolTipText` | String | R/W | R/W | Shown after the pointer rests on the control for half a second. |
+| `MousePointer` | Integer | R/W | R/W | `vbArrow` 1, `vbCrosshair` 2, `vbIbeam` 3, `vbSizeNESW` 6 … `vbNoDrop` 12, `vbCustom` 99 (a pointing hand). macOS has no hourglass: 11 and 13 show the arrow. Others raise 380. |
+| `Move left [, top [, width [, height]]]` | method | yes | — | Sets those given; a size change raises `Resize` as `Width` would. |
+| `ZOrder [position]` | method | yes | — | 0 (`vbBringToFront`, the default) draws it over the others, 1 (`vbSendToBack`) under them. The tab order is kept. |
+
+System colours: every colour property also takes VB's system colours
+(`vbButtonFace`, `vbWindowBackground`, `vbInfoBackground`… the
+`&H800000nn` values). They read back as set, and are drawn in this IDE's
+light look. In the Properties window they are typed and shown as
+`&H8000000F&`.
 
 ## Properties of the text-showing controls
 
@@ -67,7 +78,8 @@ All controls except PictureBox and Timer.
 | `Font.Strikethrough` (`FontStrikethru`) | Boolean | R/W | — | Not in the Properties window. |
 
 `BackColor` (Long, R/W run time, R/W design time) applies to every control
-except Timer. Values outside `0..&HFFFFFF` raise 380.
+except Timer. Values outside `0..&HFFFFFF` that aren't a system colour raise
+380.
 
 ## Properties and methods per control
 
@@ -86,9 +98,32 @@ except Timer. Values outside `0..&HFFFFFF` raise 380.
 | Member | Kind | Type | Run time | Design time |
 |---|---|---|---|---|
 | `Text` | property | String | R/W | R/W |
+| `SelStart` | property | Long | R/W | — |
+| `SelLength` | property | Long | R/W | — |
+| `SelText` | property | String | R/W | — |
+| `Locked` | property | Boolean | R/W | R/W |
+| `MaxLength` | property | Long | R/W | R/W |
+| `MultiLine` | property | Boolean | R | R/W |
+| `ScrollBars` | property | Integer | R | R/W |
 | `SetFocus` | method | | yes | |
 
 Typing in the window updates `Text` before `Change` fires.
+
+- **Selection.** `SelStart` is the caret (in characters, from 0) and
+  `SelLength` the selected characters after it; setting `SelStart` drops the
+  selection, `SelLength` extends it from `SelStart`. `SelText` reads the
+  selection, and setting it replaces the selection (or inserts at the
+  caret). In the window, Shift with the arrows, Home and End selects, and
+  typing replaces the selection. Negative values raise 380.
+- **`Locked`**: the text can't be changed by typing (the program still can).
+- **`MaxLength`**: typing, `Text` and `SelText` stop at that many characters;
+  0 is no limit.
+- **`MultiLine`** and **`ScrollBars`** (0 none, 1 horizontal, 2 vertical,
+  3 both) are set at design time, as in VB; assigning them raises 382. A
+  MultiLine box takes Enter as a new line, moves with Up/Down, and wraps
+  lines unless it has a horizontal scroll bar.
+- A click puts the caret at the end of the text (where in the text a click
+  lands isn't measured yet); a double click selects all of it.
 
 ### Frame
 | Member | Kind | Type | Run time | Design time |
@@ -105,9 +140,19 @@ Typing in the window updates `Text` before `Change` fires.
 | `AddItem item [, index]` | method | | yes | |
 | `RemoveItem index` | method | | yes | |
 | `Clear` | method | | yes | |
+| `Selected(i)` | property | Boolean | R/W | — |
+| `SelCount` | property | Long | R | — |
+| `MultiSelect` | property | Integer | R | R/W |
 | `SetFocus` | method | | yes | |
 
 `ListIndex` is -1 when nothing is selected. Out-of-range indexes raise 381.
+
+`MultiSelect` (design time only; assigning raises 382): 0 one row, 1
+(`vbMultiSelectSimple`) a click or Space toggles a row, 2
+(`vbMultiSelectExtended`) a click selects one row, Shift-click a range and
+⌘/Ctrl-click toggles one. `Selected(i)` says whether row `i` is selected,
+and selects it; in a one-row list it is the same as `ListIndex = i`.
+`ListIndex` is the row with the focus.
 
 ### ComboBox
 | Member | Kind | Type | Run time | Design time |
@@ -115,6 +160,7 @@ Typing in the window updates `Text` before `Change` fires.
 | `Text` | property | String | R/W | R/W |
 | `Style` | property | Integer | R/W | R/W |
 | `List(i)`, `ListCount`, `ListIndex` | properties | | as ListBox | as ListBox |
+| `SelStart`, `SelLength`, `SelText`, `Locked` | properties | | as TextBox | `Locked` R/W |
 | `AddItem`, `RemoveItem`, `Clear`, `SetFocus` | methods | | yes | |
 
 `Style`: 0 Dropdown Combo, 1 Simple Combo, 2 Dropdown List. (Real VB makes
@@ -122,8 +168,19 @@ Typing in the window updates `Text` before `Change` fires.
 copies the item into `Text`.
 
 ### PictureBox
-No properties of its own beyond the common ones and `BackColor`. It takes
-the focus (`SetFocus`, Tab, a click), so it gets keys, as in VB.
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Picture` | property | picture | R/W | R/W (a file name) |
+| `SetFocus` | method | | yes | |
+
+`Picture = LoadPicture("logo.png")` shows the image at its own size from
+the top-left corner (as VB does without `AutoSize`); `LoadPicture()` clears
+it. Relative file names are in the project's folder. A file that isn't
+there raises 53. Here a picture is its file name, so `Picture` reads as
+that name. Changing it raises `Change`.
+
+It takes the focus (`SetFocus`, Tab, a click), so it gets keys, and it can
+hold other controls (`Container`), as in VB.
 
 ### CheckBox
 | Member | Kind | Type | Run time | Design time |
@@ -142,8 +199,9 @@ A click toggles 0 and 1.
 | `Value` | property | Boolean | R/W | R/W (0 or 1) |
 | `SetFocus` | method | | yes | |
 
-Setting or clicking one to True clears every other OptionButton on the
-form (one group per form).
+Setting or clicking one to True clears the other OptionButtons of its group:
+those in the same container (the same Frame or PictureBox, or the form
+itself), as in VB.
 
 ### Timer
 | Member | Kind | Type | Run time | Design time |
@@ -183,7 +241,7 @@ reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
 | Frame | `Click`, `DblClick`, `Mouse*` |
 | ListBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Scroll` |
 | ComboBox | `Change`, `Click`, `DblClick`, `DropDown`, `GotFocus`, `Key*`, `LostFocus`, `Scroll` |
-| PictureBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Paint`, `Resize` |
+| PictureBox | `Change`, `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Paint`, `Resize` |
 | CheckBox, OptionButton | `Click`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
 | Timer | `Timer` |
 | Form | `Activate`, `Click`, `DblClick`, `Deactivate`, `Key*`, `Load`, `Mouse*`, `Paint`, `QueryUnload`, `Resize`, `Unload` |
@@ -235,28 +293,44 @@ reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
 `Click` on a ListBox or ComboBox fires after the row is picked, so
 `ListIndex` and `Text` already show it.
 
-Not raised: a ListBox's `ItemCheck` and `Change`, and a PictureBox's
-`Change`. VB raises these only for checkbox-style lists and for `Picture`,
-which aren't supported, so the event box doesn't list them.
+Not raised: a ListBox's `ItemCheck` and `Change`. VB raises these only for
+checkbox-style lists (`Style` 1), which aren't supported, so the event box
+doesn't list them.
+
+## Control arrays at run time
+
+`Load Cmd(n)` adds element `n` to control array `Cmd`: a copy of its
+lowest-numbered element as designed, hidden (`Visible = False`) until the
+program shows it, with an empty text and selection. It raises the array's
+events with its `Index`. `Unload Cmd(n)` removes it again. Loading an
+element that exists raises 360, unloading one placed in the designer 362,
+an element that doesn't exist 340; `Load` of something that isn't an array
+343.
 
 ## Run-time errors
 
 | Number | Meaning here |
 |---|---|
-| 5 | `SetFocus` on a disabled or invisible control |
+| 5 | `SetFocus` on a disabled or invisible control (or one in a disabled or hidden container); `ZOrder` other than 0 or 1 |
+| 53 | `LoadPicture` of a file that isn't there |
 | 340 | Control-array element doesn't exist (`Cmd(9)`) |
-| 343 | Not an array (`Label1(0)`, `Cmd.Caption` on an array, `Index` of a plain control) |
-| 380 | Invalid property value (size/colour/`Value`/`Style`/`Interval` out of range) |
+| 343 | Not an array (`Label1(0)`, `Cmd.Caption` on an array, `Index` of a plain control, `Load Label1(1)`) |
+| 360 | `Load` of an array element that is loaded already |
+| 362 | `Unload` of an array element placed in the designer |
+| 380 | Invalid property value (size/colour/`Value`/`Style`/`Interval`/`TabIndex`/`MousePointer`/`SelStart` out of range, a `Container` that can't hold the control) |
 | 381 | Invalid list index |
-| 382 | Read-only property assigned (`ListBox.Text`) |
+| 382 | Read-only property assigned (`ListBox.Text`; `MultiLine`, `ScrollBars` and `MultiSelect` at run time) |
 | 424 | Unknown object |
 | 438 | Control doesn't have that property or method |
 | 450 | Wrong number of arguments |
 
 ## Not supported yet
 
-System colours, `Picture`, `Move`, `ZOrder`, `Container` (option buttons
-are one group per form), `Load`/`Unload` of array elements at run time,
-`ToolTipText`, `MousePointer`, `Locked`, `MaxLength`,
-`MultiLine`, `ScrollBars`, `Selected()`/`MultiSelect`, `SelStart`/`SelText`.
+`AutoSize`, `Stretch` and the drawing methods (`Line`, `Circle`, `PSet`,
+`Cls`) of a PictureBox; a picture is shown, not drawn on. A click doesn't
+place the caret where it lands in a TextBox's text (it goes to the end), and
+the mouse doesn't drag out a text selection. Checkbox-style lists
+(`ListBox.Style` 1), `Sorted`, `ItemData`, `TopIndex`, `ListBox.Columns`.
+`MousePointer` 99 shows a pointing hand rather than a `MouseIcon`; `Image`
+controls and `DragDrop`/`OLEDrag`.
 

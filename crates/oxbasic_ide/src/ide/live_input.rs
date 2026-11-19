@@ -92,8 +92,11 @@ impl FormRunner {
     /// are relative to the control, or to the inside of the form).
     fn local(&self, target: Option<usize>, pos: gpui::Point<gpui::Pixels>) -> (f32, f32) {
         let (x, y) = (f32::from(pos.x), f32::from(pos.y));
-        match target.and_then(|i| self.form.controls.get(i)) {
-            Some(c) => (x - c.rect.left, y - c.rect.top),
+        match target.filter(|&i| i < self.form.controls.len()) {
+            Some(i) => {
+                let (left, top) = self.form.form_origin(i);
+                (x - left, y - top)
+            }
             None => (x, y),
         }
     }
@@ -102,19 +105,21 @@ impl FormRunner {
     /// `None` is the form (a disabled control passes the mouse to it).
     pub(super) fn hit(&self, pos: gpui::Point<gpui::Pixels>) -> Option<usize> {
         let (x, y) = (f32::from(pos.x), f32::from(pos.y));
-        oxbasic_ui::gpui_controls::z_order(&self.form)
+        let f = &self.form;
+        oxbasic_ui::gpui_controls::z_order(f)
             .into_iter()
             .rev()
             .find(|&i| {
-                let c = &self.form.controls[i];
-                c.visible
+                let c = &f.controls[i];
+                let (left, top) = f.form_origin(i);
+                f.shown(i)
                     && c.kind != ControlKind::Timer
-                    && x >= c.rect.left
-                    && x < c.rect.left + c.rect.width
-                    && y >= c.rect.top
-                    && y < c.rect.top + c.rect.height
+                    && x >= left
+                    && x < left + c.rect.width
+                    && y >= top
+                    && y < top + c.rect.height
             })
-            .filter(|&i| self.form.controls[i].enabled)
+            .filter(|&i| f.usable(i))
     }
 
     /// The controls Tab stops on, in the form's `TabIndex` order.
@@ -448,21 +453,19 @@ impl Render for FormRunner {
         let form = self.form.clone();
         for idx in oxbasic_ui::gpui_controls::z_order(&form) {
             let c = &form.controls[idx];
-            if !c.visible || c.kind == ControlKind::Timer {
+            // a control in a hidden frame is hidden too
+            if !form.shown(idx) || c.kind == ControlKind::Timer {
                 continue;
             }
             let focus = self.focus.get(&idx).cloned();
-            let look = ControlLook {
-                design: false,
-                text: self.state[idx].text.clone(),
-                list_index: self.state[idx].list_index,
-                dropped: self.state[idx].dropped,
-                focused: focus.as_ref().is_some_and(|f| f.contains_focused(win, cx)),
-                value: self.state[idx].value,
-            };
+            let focused = focus.as_ref().is_some_and(|f| f.contains_focused(win, cx));
+            let mut look = ControlLook::running(&self.state[idx], form.form_origin(idx), focused);
+            look.base_dir = self.base_dir.clone();
+            // in a disabled frame, a control takes no input either
+            let usable = form.usable(idx);
             let mut hook =
                 |part: Part, el: gpui::Stateful<gpui::Div>, cx: &mut Context<FormRunner>| {
-                    run_part(c, idx, part, el, focus.clone(), cx)
+                    run_part(c, idx, part, el, focus.clone(), usable, cx)
                 };
             area = area.child(paint_control(c, &look, &mut hook, cx));
         }
@@ -479,6 +482,7 @@ fn run_part(
     part: Part,
     el: gpui::Stateful<gpui::Div>,
     focus: Option<FocusHandle>,
+    usable: bool,
     cx: &mut Context<FormRunner>,
 ) -> gpui::Stateful<gpui::Div> {
     let name = match c.index {
@@ -495,7 +499,7 @@ fn run_part(
     if let (Part::Body, Some(f)) = (part, &focus) {
         el = el.track_focus(f);
     }
-    if !c.enabled {
+    if !usable {
         return el;
     }
     let el = el.on_any_mouse_down(cx.listener(
@@ -536,9 +540,36 @@ impl FormRunner {
     fn press_part(&mut self, idx: usize, part: Part, ev: &MouseDownEvent, win: &mut Window) {
         let left = ev.button == gpui::MouseButton::Left;
         let clicks = left && self.clicks_on_release(idx, part);
+        self.press_mods = ev.modifiers;
         self.mouse_down(Some(idx), clicks, ev, win);
         if left {
             self.act_on_press(idx, part);
+        }
+        // a click in a text field puts the caret at the end of what it
+        // shows (where a click lands in the text isn't measured here),
+        // Shift-click selects up to there
+        if left && self.form.controls[idx].kind.has_text() && part != Part::Arrow {
+            let s = &mut self.state[idx];
+            let end = s.text.chars().count();
+            if ev.modifiers.shift {
+                if s.anchor.is_none() {
+                    s.anchor = Some(s.caret);
+                }
+            } else {
+                s.anchor = None;
+            }
+            s.caret = end;
+            if ev.click_count >= 2 {
+                // a double click selects everything, as a word select would
+                // in a one-word field
+                s.anchor = Some(0);
+            }
+            let (caret, anchor) = (s.caret, s.anchor);
+            self.tell(UserEdit::Caret {
+                control: idx,
+                caret,
+                anchor,
+            });
         }
     }
 

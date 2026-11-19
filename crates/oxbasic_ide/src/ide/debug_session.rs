@@ -141,6 +141,7 @@ pub enum DebugEvent {
 
 /// What a session runs: the program, the forms' layouts in project order,
 /// and which form starts.
+#[derive(Default)]
 pub struct ProgramSpec {
     pub source: String,
     pub forms: Vec<FormSpec>,
@@ -149,6 +150,8 @@ pub struct ProgramSpec {
     /// `Form1__Command1_Click`): a single-form program that wasn't built
     /// from a project.
     pub bare: bool,
+    /// The project's folder: relative file names (`LoadPicture`) are in it.
+    pub base_dir: Option<std::path::PathBuf>,
 }
 
 /// The program's procedure names, and how a form's handler is spelled in
@@ -275,6 +278,7 @@ impl DebugSession {
             forms: form.into_iter().collect(),
             startup: 0,
             bare: true,
+            base_dir: None,
         };
         DebugSession::start_program(spec, breakpoints, evt_tx)
     }
@@ -380,6 +384,7 @@ fn run_program(
     let mut out = ChannelOutput { tx: evt_tx.clone() };
     let mut rt = Interpreter::new(&prog, &mut out);
     rt.set_breakpoints(breakpoints);
+    rt.base_dir = spec.base_dir.clone();
     // The program's forms; the interpreter reaches their controls through
     // it, and this thread keeps a handle to publish changes and to apply
     // what the user did in the windows. A program with no form still gets

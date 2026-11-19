@@ -130,20 +130,14 @@ impl Render for FormWindow {
         let form = self.form.clone();
         for idx in z_order(&form) {
             let c = &form.controls[idx];
-            if !c.visible || c.kind == ControlKind::Timer {
+            if !form.shown(idx) || c.kind == ControlKind::Timer {
                 continue;
             }
-            let look = ControlLook {
-                design: false,
-                text: self.state[idx].text.clone(),
-                list_index: self.state[idx].list_index,
-                dropped: self.state[idx].dropped,
-                focused: self
-                    .focus
-                    .get(&idx)
-                    .is_some_and(|f| f.contains_focused(window, cx)),
-                value: self.state[idx].value,
-            };
+            let focused = self
+                .focus
+                .get(&idx)
+                .is_some_and(|f| f.contains_focused(window, cx));
+            let look = ControlLook::running(&self.state[idx], form.form_origin(idx), focused);
             let mut hook = |part: Part,
                             el: gpui::Stateful<gpui::Div>,
                             cx: &mut Context<FormWindow>|

@@ -39,6 +39,12 @@ impl Ide {
         };
         let (form, state) = (snap.form, snap.state);
         let handlers = self.live_handlers.get(index).cloned();
+        let base_dir = self
+            .workspace
+            .file
+            .as_deref()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf());
         let ide = cx.entity().downgrade();
         // later windows are offset so they don't hide the first
         let mut bounds = Bounds::centered(
@@ -63,6 +69,7 @@ impl Ide {
                     let mut runner = FormRunner::new(form.clone(), index, session.clone(), cx);
                     runner.state = state.clone();
                     runner.handlers = handlers.clone();
+                    runner.base_dir = base_dir.clone();
                     // Form_Activate / Form_Deactivate
                     let sub =
                         cx.observe_window_activation(win, |runner: &mut FormRunner, win, _cx| {

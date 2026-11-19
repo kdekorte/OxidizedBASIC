@@ -334,7 +334,13 @@ impl<'out> Interpreter<'out> {
                     None | Some(Variant::Empty) => String::new(),
                     Some(v) => to_string(v)?,
                 };
-                if !path.is_empty() && !std::path::Path::new(&path).is_file() {
+                // relative to the project's folder, which a program run
+                // from the IDE is given
+                let full = match &self.base_dir {
+                    Some(dir) => dir.join(&path),
+                    None => std::path::PathBuf::from(&path),
+                };
+                if !path.is_empty() && !full.is_file() {
                     return Err(VbError {
                         number: 53,
                         description: format!("File not found: {}", path),

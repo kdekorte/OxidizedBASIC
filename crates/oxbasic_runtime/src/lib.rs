@@ -269,6 +269,9 @@ pub struct RaisedEvent {
 
 /// The OxidizedBASIC interpreter.
 pub struct Interpreter<'out> {
+    /// The folder relative file names (`LoadPicture("logo.png")`) are in:
+    /// the project's, when run from the IDE.
+    pub base_dir: Option<std::path::PathBuf>,
     pub(crate) decls: Vec<Rc<ProcDecl>>,
     pub(crate) proc_index: HashMap<String, usize>,
     top_level: Vec<Stmt>,
@@ -367,6 +370,7 @@ impl<'out> Interpreter<'out> {
             debug_hook: None,
             objects: None,
             ended: false,
+            base_dir: None,
         };
         it.add_program(prog);
         it
