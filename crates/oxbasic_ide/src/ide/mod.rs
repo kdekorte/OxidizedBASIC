@@ -10,6 +10,7 @@ pub mod code_model;
 pub mod code_window;
 pub mod debug_session;
 pub mod highlight;
+pub mod workspace;
 
 use debug_session::{DebugCommand, DebugEvent, DebugSession};
 #[cfg(test)]
