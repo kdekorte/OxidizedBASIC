@@ -10,6 +10,7 @@ pub mod code_model;
 pub mod code_window;
 pub mod debug_session;
 pub mod highlight;
+pub mod program;
 pub mod project_commands;
 pub mod workspace;
 
