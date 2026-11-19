@@ -201,7 +201,17 @@ impl Ide {
             (true, p) => format!("Index As Integer, {}", p),
         };
         let handler = format!("{}_{}", object, event);
+        let before = self.lines.clone();
+        let cursor_before = self.cursor;
         let (row, col, inserted) = code_model::ensure_handler(&mut self.lines, &handler, &params);
+        if inserted {
+            // the new placeholder undoes as one step
+            let after = std::mem::replace(&mut self.lines, before);
+            self.cursor = cursor_before;
+            self.begin_ide_edit();
+            self.lines = after;
+        }
+        self.anchor = None;
         self.cursor = (row, col);
         if inserted {
             self.status = format!("added {} placeholder", handler);
@@ -432,6 +442,26 @@ impl Ide {
             .on_action(cx.listener(|this, _: &SaveCode, _win, cx| {
                 this.save_code();
                 cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &EditUndo, win, cx| {
+                this.edit_action(win, cx, |ide, _| ide.undo());
+            }))
+            .on_action(cx.listener(|this, _: &EditRedo, win, cx| {
+                this.edit_action(win, cx, |ide, _| ide.redo());
+            }))
+            .on_action(cx.listener(|this, _: &EditCut, win, cx| {
+                this.edit_action(win, cx, |ide, cx| ide.cut(cx));
+            }))
+            .on_action(cx.listener(|this, _: &EditCopy, win, cx| {
+                this.edit_action(win, cx, |ide, cx| {
+                    ide.copy(cx);
+                });
+            }))
+            .on_action(cx.listener(|this, _: &EditPaste, win, cx| {
+                this.edit_action(win, cx, |ide, cx| ide.paste(cx));
+            }))
+            .on_action(cx.listener(|this, _: &EditSelectAll, win, cx| {
+                this.edit_action(win, cx, |ide, _| ide.select_all());
             }))
             .on_action(cx.listener(|this, _: &RunProgram, _win, cx| {
                 this.run_program();

@@ -32,6 +32,10 @@ impl Ide {
         self.form = doc.form;
         self.lines = doc.lines;
         self.cursor = doc.cursor;
+        // a different text: its selection and undo history start afresh
+        self.anchor = None;
+        self.selecting = false;
+        self.history.clear();
         *self.breakpoints.lock().unwrap() = doc.breakpoints;
         self.selected = None;
         self.drag = None;
@@ -339,7 +343,14 @@ impl Ide {
             }
             changed += code_model::rename_identifier(&mut doc.lines, old, new);
         }
-        changed += code_model::rename_identifier(&mut self.lines, old, new);
+        let renamed = code_model::rename_identifier(&mut self.lines, old, new);
+        if renamed > 0 {
+            // as for a control rename: the form changed too, so the code's
+            // older undo steps no longer fit it
+            self.anchor = None;
+            self.history.clear();
+        }
+        changed += renamed;
         changed
     }
 }

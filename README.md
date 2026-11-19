@@ -51,6 +51,13 @@ phases.
     box for that object (bold = has code). Picking an event jumps to its
     handler, inserting a `Private Sub Object_Event(...)` placeholder if it
     doesn't exist. Double-clicking a control opens its default event.
+  - **Code editor**: select with Shift + arrows (⌥ by word, ⌘ to the
+    line or text ends) or the mouse (drag, Shift-click, double-click a
+    word, triple-click a line); ⌘A selects all. Typing, Backspace and
+    Delete replace the selection. **Cut / Copy / Paste** (⌘X ⌘C ⌘V) use
+    the system clipboard, and **Undo / Redo** (⌘Z ⇧⌘Z) step through the
+    edits (a run of typing is one step; an inserted event placeholder is
+    one too). All are also on the new Edit menu.
   - **Visual form designer**: the form canvas renders the `.oxform`
     layout; click to select controls, **drag to move** them and **drag
     the eight selection handles** to resize them (like VB6), and add
@@ -170,8 +177,10 @@ xcodebuild -downloadComponent MetalToolchain
 - Property-inspector editing and toolbox adding were reworked (per-field
   focus, redraw on add) but have only been checked by build/tests, not
   yet by hand.
-- The IDE's editor is line-based (no mouse text selection yet); the
-  debugger supports breakpoints, step-over, and watch (no step-into).
+- The IDE's editor has no find/replace, word wrap, or multiple carets;
+  undo history is per document and is cleared when you switch documents
+  or a rename changes the code. The debugger supports breakpoints,
+  step-over, and watch (no step-into).
 - `MsgBox` prints to the console/output pane (a native GPUI dialog is a
   follow-up).
 - `Resume`/`Resume Next` resume precisely when the handler sits at the

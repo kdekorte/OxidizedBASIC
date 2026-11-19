@@ -9,6 +9,8 @@
 pub mod code_model;
 pub mod code_window;
 pub mod debug_session;
+pub mod editor;
+pub mod editor_input;
 pub mod highlight;
 pub mod launch;
 pub mod live_forms;
@@ -116,7 +118,13 @@ gpui::actions!(
         StepProgram,
         StopProgram,
         ViewCode,
-        ViewObject
+        ViewObject,
+        EditUndo,
+        EditRedo,
+        EditCut,
+        EditCopy,
+        EditPaste,
+        EditSelectAll
     ]
 );
 
@@ -136,6 +144,12 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
             gpui::KeyBinding::new("cmd-shift-r", StopProgram, None),
             gpui::KeyBinding::new("f7", ViewCode, None),
             gpui::KeyBinding::new("shift-f7", ViewObject, None),
+            gpui::KeyBinding::new("cmd-z", EditUndo, None),
+            gpui::KeyBinding::new("cmd-shift-z", EditRedo, None),
+            gpui::KeyBinding::new("cmd-x", EditCut, None),
+            gpui::KeyBinding::new("cmd-c", EditCopy, None),
+            gpui::KeyBinding::new("cmd-v", EditPaste, None),
+            gpui::KeyBinding::new("cmd-a", EditSelectAll, None),
         ]);
         cx.set_menus(vec![
             gpui::Menu {
@@ -158,6 +172,18 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
                     gpui::MenuItem::action("Remove Form or Module", RemoveDocument),
                     gpui::MenuItem::separator(),
                     gpui::MenuItem::action("Close Project", CloseProject),
+                ],
+            },
+            gpui::Menu {
+                name: "Edit".into(),
+                items: vec![
+                    gpui::MenuItem::action("Undo", EditUndo),
+                    gpui::MenuItem::action("Redo", EditRedo),
+                    gpui::MenuItem::separator(),
+                    gpui::MenuItem::action("Cut", EditCut),
+                    gpui::MenuItem::action("Copy", EditCopy),
+                    gpui::MenuItem::action("Paste", EditPaste),
+                    gpui::MenuItem::action("Select All", EditSelectAll),
                 ],
             },
             gpui::Menu {
@@ -216,6 +242,13 @@ pub struct Ide {
     // code editor
     lines: Vec<String>,
     cursor: (usize, usize), // (row, char-col)
+    /// The other end of the selection: the text between it and `cursor` is
+    /// selected. `None` when nothing is.
+    anchor: Option<(usize, usize)>,
+    /// Undo and redo for the code.
+    history: editor::History,
+    /// A mouse button is down in the editor: dragging extends the selection.
+    selecting: bool,
     editor_focus: FocusHandle,
     /// Focus for the designer, so window-level shortcuts (F7) reach the
     /// IDE while no text field is being edited.
@@ -343,6 +376,9 @@ Print \"Total = \" & CStr(Total)
             workspace,
             lines,
             cursor: (0, 0),
+            anchor: None,
+            history: editor::History::default(),
+            selecting: false,
             editor_focus: cx.focus_handle(),
             designer_focus: cx.focus_handle(),
             editor_scroll: ScrollHandle::new(),
@@ -460,6 +496,7 @@ Print \"Total = \" & CStr(Total)
                         .saturating_sub(1)
                         .min(self.lines.len().saturating_sub(1));
                     self.cursor = (row, 0);
+                    self.anchor = None;
                     self.code_object = None;
                 }
                 self.show_code_window(cx);
@@ -659,6 +696,8 @@ impl Ide {
     }
 }
 
+#[cfg(test)]
+mod editor_tests;
 #[cfg(test)]
 mod multiform_tests;
 #[cfg(test)]
@@ -1071,148 +1110,6 @@ fn default_form() -> FormSpec {
     form.button("Command1", "Click Me", Rect::new(16.0, 48.0, 96.0, 28.0));
     form.text_box("Text1", "", Rect::new(16.0, 88.0, 200.0, 24.0));
     form
-}
-
-/// Editor editing operations.
-impl Ide {
-    fn line_len(&self, row: usize) -> usize {
-        self.lines.get(row).map(|l| l.chars().count()).unwrap_or(0)
-    }
-
-    fn insert_char(&mut self, c: char) {
-        let (row, col) = self.cursor;
-        let mut chars: Vec<char> = self.lines[row].chars().collect();
-        chars.insert(col, c);
-        self.lines[row] = chars.into_iter().collect();
-        self.cursor.1 += 1;
-    }
-
-    fn backspace(&mut self) {
-        let (row, col) = self.cursor;
-        if col > 0 {
-            let mut chars: Vec<char> = self.lines[row].chars().collect();
-            chars.remove(col - 1);
-            self.lines[row] = chars.into_iter().collect();
-            self.cursor.1 -= 1;
-        } else if row > 0 {
-            let cur = self.lines.remove(row);
-            let prev_len = self.lines[row - 1].chars().count();
-            self.lines[row - 1].push_str(&cur);
-            self.cursor = (row - 1, prev_len);
-        }
-    }
-
-    fn newline(&mut self) {
-        let (row, col) = self.cursor;
-        let chars: Vec<char> = self.lines[row].chars().collect();
-        let indent: String = self.lines[row].chars().take_while(|c| *c == ' ').collect();
-        // auto-indent one level after block openers
-        let extra = if self.lines[row].trim_end().ends_with("Then")
-            || self.lines[row].trim_end().ends_with("Do")
-        {
-            "  "
-        } else {
-            ""
-        };
-        let rest: String = chars[col..].iter().collect();
-        self.lines[row] = chars[..col].iter().collect();
-        self.lines
-            .insert(row + 1, format!("{}{}{}", indent, extra, rest));
-        self.cursor = (row + 1, indent.chars().count() + extra.chars().count());
-    }
-
-    fn editor_key(&mut self, ev: &KeyDownEvent) {
-        if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.control {
-            return;
-        }
-        let key = ev.keystroke.key.as_str();
-        match key {
-            "enter" => self.newline(),
-            "backspace" => self.backspace(),
-            "delete" => {
-                let (row, col) = self.cursor;
-                if col < self.line_len(row) {
-                    self.cursor.1 += 1;
-                    self.backspace();
-                } else if row + 1 < self.lines.len() {
-                    let next = self.lines.remove(row + 1);
-                    self.lines[row].push_str(&next);
-                }
-            }
-            "left" => {
-                if self.cursor.1 > 0 {
-                    self.cursor.1 -= 1;
-                } else if self.cursor.0 > 0 {
-                    self.cursor.0 -= 1;
-                    self.cursor.1 = self.line_len(self.cursor.0);
-                }
-            }
-            "right" => {
-                if self.cursor.1 < self.line_len(self.cursor.0) {
-                    self.cursor.1 += 1;
-                } else if self.cursor.0 + 1 < self.lines.len() {
-                    self.cursor.0 += 1;
-                    self.cursor.1 = 0;
-                }
-            }
-            "up" => {
-                if self.cursor.0 > 0 {
-                    self.cursor.0 -= 1;
-                    self.cursor.1 = self.cursor.1.min(self.line_len(self.cursor.0));
-                }
-            }
-            "down" => {
-                if self.cursor.0 + 1 < self.lines.len() {
-                    self.cursor.0 += 1;
-                    self.cursor.1 = self.cursor.1.min(self.line_len(self.cursor.0));
-                }
-            }
-            "home" => self.cursor.1 = 0,
-            "end" => self.cursor.1 = self.line_len(self.cursor.0),
-            "tab" => {
-                self.insert_char(' ');
-                self.insert_char(' ');
-            }
-            "space" => self.insert_char(' '),
-            _ => {
-                if let Some(s) = typed_text(ev) {
-                    for c in s.chars() {
-                        self.insert_char(c);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Put the caret at the character under `pos` (window coordinates),
-    /// measuring the line in the editor's monospaced font.
-    fn place_cursor_at(&mut self, pos: gpui::Point<gpui::Pixels>, win: &mut Window) {
-        let bounds = self.editor_scroll.bounds();
-        let offset = self.editor_scroll.offset();
-        let y = f32::from(pos.y - bounds.origin.y - offset.y);
-        let x = f32::from(pos.x - bounds.origin.x - offset.x) - CODE_X;
-        if y < 0.0 || self.lines.is_empty() {
-            return;
-        }
-        let row = ((y / ROW_H) as usize).min(self.lines.len() - 1);
-        let ts = win.text_system();
-        let font_id = ts.resolve_font(&gpui::font("Menlo"));
-        let size = win.text_style().font_size.to_pixels(win.rem_size());
-        let mut acc = 0.0;
-        let mut col = 0;
-        for ch in self.lines[row].chars() {
-            let w = ts
-                .advance(font_id, size, ch)
-                .map(|s| f32::from(s.width))
-                .unwrap_or(8.0);
-            if acc + w / 2.0 > x {
-                break;
-            }
-            acc += w;
-            col += 1;
-        }
-        self.cursor = (row, col);
-    }
 }
 
 /// Layout & rendering.
@@ -1742,6 +1639,7 @@ impl Ide {
     }
 
     fn render_editor(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let selection = self.selection();
         let bps = self.breakpoints.lock().unwrap().clone();
         let paused_line = self.paused.as_ref().map(|p| p.line);
         // Retain the width of the longest source line so horizontal scrolling
@@ -1792,27 +1690,10 @@ impl Ide {
             if is_paused {
                 code = code.bg(rgb(SEL_BG));
             }
-            if is_cursor {
-                let col = self.cursor.1;
-                let chars: Vec<char> = line.chars().collect();
-                let before: String = chars[..col.min(chars.len())].iter().collect();
-                let at: String = chars
-                    .get(col)
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| " ".into());
-                let after: String = chars[(col + 1).min(chars.len())..].iter().collect();
-                code = code
-                    .child(render_spans(&highlight::tokenize_line(&before)))
-                    .child(
-                        div()
-                            .bg(rgb(0xDDDDDD))
-                            .text_color(rgb(BG))
-                            .child(SharedString::from(at)),
-                    )
-                    .child(render_spans(&highlight::tokenize_line(&after)));
-            } else {
-                code = code.child(render_spans(&highlight::tokenize_line(&line)));
-            }
+            let len = line.chars().count();
+            let selected = selection.and_then(|r| r.columns_on(idx, len));
+            let caret = is_cursor.then_some(self.cursor.1);
+            code = code.child(render_code_line(&line, selected, caret));
 
             list = list.child(
                 div()
@@ -1837,7 +1718,12 @@ impl Ide {
             .track_scroll(&self.editor_scroll)
             .track_focus(&self.editor_focus)
             .on_key_down(cx.listener(|this: &mut Ide, ev: &KeyDownEvent, _win, cx| {
-                this.editor_key(ev);
+                if this.editor_key(ev, cx) {
+                    // keep the caret in view, and stop the key reaching the
+                    // window's own shortcuts
+                    this.reveal_cursor = true;
+                    cx.stop_propagation();
+                }
                 this.code_object = None;
                 cx.notify();
             }))
@@ -1845,12 +1731,23 @@ impl Ide {
                 gpui::MouseButton::Left,
                 cx.listener(|this: &mut Ide, ev: &MouseDownEvent, win, cx| {
                     // click-to-type: focus the editor and put the caret
-                    // under the pointer
+                    // under the pointer (or select a word or a line)
                     win.focus(&this.editor_focus);
                     this.code_menu = None;
                     this.code_object = None;
-                    this.place_cursor_at(ev.position, win);
+                    this.editor_mouse_down(ev, win);
                     cx.notify();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this: &mut Ide, ev: &MouseMoveEvent, win, cx| {
+                if this.editor_mouse_drag(ev, win) {
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this: &mut Ide, _ev: &gpui::MouseUpEvent, _win, _cx| {
+                    this.selecting = false;
                 }),
             )
             .child(list)
@@ -1858,9 +1755,21 @@ impl Ide {
     }
 }
 
-fn render_spans(toks: &[(String, highlight::Tok)]) -> gpui::Div {
-    let mut row = div().flex();
-    for (text, kind) in toks {
+/// The selection's tint behind code.
+const SELECTION_BG: u32 = 0xB4D7FF;
+
+/// One line of code with its syntax colours, the selected columns
+/// (`(from, to)`; `to` is `None` when the selection runs on into the next
+/// line) tinted, and the caret drawn as a thin bar before column `caret`.
+fn render_code_line(
+    line: &str,
+    selected: Option<(usize, Option<usize>)>,
+    caret: Option<usize>,
+) -> gpui::Div {
+    // colour each character by its token, then cut the line wherever the
+    // selection or the caret starts or ends
+    let mut colors: Vec<(char, u32)> = Vec::new();
+    for (text, kind) in highlight::tokenize_line(line) {
         let color = match kind {
             highlight::Tok::Keyword => C_KEYWORD,
             highlight::Tok::Str => C_STRING,
@@ -1869,11 +1778,46 @@ fn render_spans(toks: &[(String, highlight::Tok)]) -> gpui::Div {
             highlight::Tok::Ident => C_IDENT,
             highlight::Tok::Punct => C_PUNCT,
         };
-        row = row.child(
-            div()
-                .text_color(rgb(color))
-                .child(SharedString::from(text.clone())),
-        );
+        colors.extend(text.chars().map(|c| (c, color)));
+    }
+    let len = colors.len();
+    let (sel_from, sel_to) = match selected {
+        Some((a, b)) => (a, b.unwrap_or(len)),
+        None => (len + 1, len + 1),
+    };
+    let caret_bar = || div().flex_none().w(px(1.5)).h(px(15.0)).bg(rgb(ACCENT));
+    let mut row = div().flex().items_center();
+    let mut i = 0;
+    while i < len {
+        if caret == Some(i) {
+            row = row.child(caret_bar());
+        }
+        let in_sel = i >= sel_from && i < sel_to;
+        let color = colors[i].1;
+        // a run of characters with the same colour and selection, up to
+        // the caret
+        let mut j = i + 1;
+        while j < len
+            && colors[j].1 == color
+            && (j >= sel_from && j < sel_to) == in_sel
+            && caret != Some(j)
+        {
+            j += 1;
+        }
+        let text: String = colors[i..j].iter().map(|(c, _)| c).collect();
+        let mut span = div().text_color(rgb(color)).child(SharedString::from(text));
+        if in_sel {
+            span = span.bg(rgb(SELECTION_BG));
+        }
+        row = row.child(span);
+        i = j;
+    }
+    // the line break is selected: show it as a little space after the text
+    if selected.is_some_and(|(_, to)| to.is_none()) {
+        row = row.child(div().w(px(6.0)).h(px(15.0)).bg(rgb(SELECTION_BG)));
+    }
+    if caret.is_some_and(|c| c >= len) {
+        row = row.child(caret_bar());
     }
     row
 }
@@ -2784,6 +2728,13 @@ impl Ide {
             code_model::rename_control(&mut self.lines, &old, &new, &events)
         };
         self.cursor.1 = self.cursor.1.min(self.line_len(self.cursor.0));
+        // the rename changed the form too, so it isn't undone from the code
+        // editor (that would split the two); undo history from before it
+        // would restore the old names, so it is dropped
+        if n > 0 {
+            self.anchor = None;
+            self.history.clear();
+        }
         self.status = if n == 0 {
             format!("renamed {} to {}", old, new)
         } else {
