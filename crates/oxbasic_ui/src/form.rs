@@ -126,6 +126,17 @@ pub struct ControlSpec {
     /// `Font`.
     #[serde(default)]
     pub font: FontSpec,
+    /// `TabIndex`: where the control is in the form's tab order. `None`
+    /// until the order is first set: the order controls were added in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_index: Option<i32>,
+    /// `TabStop`: Tab stops on the control (a click still focuses it).
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub tab_stop: bool,
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 /// A control's `Font`: `Name` ("" = the system font), `Size` in points,
@@ -244,6 +255,8 @@ impl ControlSpec {
             value: 0,
             fore_color: None,
             font: FontSpec::default(),
+            tab_index: None,
+            tab_stop: true,
         }
     }
 }
@@ -334,6 +347,48 @@ impl FormSpec {
     /// Load a `.oxform` JSON layout specification (spec §6).
     pub fn from_oxform(json: &str) -> Result<FormSpec, String> {
         serde_json::from_str(json).map_err(|e| format!("invalid .oxform: {}", e))
+    }
+
+    /// The controls in tab order (VB's `TabIndex`): by their `tab_index`,
+    /// the ones never numbered after the numbered, in the order added.
+    pub fn tab_order(&self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.controls.len()).collect();
+        order.sort_by_key(|&i| (self.controls[i].tab_index.unwrap_or(i32::MAX), i));
+        order
+    }
+
+    /// Control `i`'s `TabIndex`: its place in the tab order. Every control
+    /// has one (VB numbers labels and frames too).
+    pub fn tab_index_of(&self, i: usize) -> i32 {
+        self.tab_order()
+            .iter()
+            .position(|&c| c == i)
+            .map_or(0, |p| p as i32)
+    }
+
+    /// Set control `i`'s `TabIndex`, as VB does: it takes that place and
+    /// the controls from there on move down one. Out-of-range numbers
+    /// clamp to the ends. The whole order is then numbered explicitly.
+    pub fn set_tab_index(&mut self, i: usize, n: i32) {
+        let mut order = self.tab_order();
+        order.retain(|&c| c != i);
+        let at = (n.max(0) as usize).min(order.len());
+        order.insert(at, i);
+        for (place, &c) in order.iter().enumerate() {
+            self.controls[c].tab_index = Some(place as i32);
+        }
+    }
+
+    /// The controls Tab stops on, in tab order: they take the focus, are
+    /// enabled and visible, and have `TabStop`.
+    pub fn tab_stops(&self) -> Vec<usize> {
+        self.tab_order()
+            .into_iter()
+            .filter(|&i| {
+                let c = &self.controls[i];
+                c.kind.can_focus() && c.enabled && c.visible && c.tab_stop
+            })
+            .collect()
     }
 
     /// Serialize to `.oxform` JSON (pretty).
@@ -561,6 +616,41 @@ mod tests {
     #[cfg(test)]
     mod key_preview_tests {
         use super::*;
+
+        #[test]
+        fn tab_order_follows_tab_index_and_defaults_to_the_order_added() {
+            let mut f = FormSpec::new("Form1", "F", 100.0, 100.0);
+            let r = Rect::new(0.0, 0.0, 10.0, 10.0);
+            f.label("L", "", r);
+            f.text_box("A", "", r);
+            f.text_box("B", "", r);
+            f.button("C", "", r);
+            // never numbered: the order added; every control has a TabIndex
+            assert_eq!(f.tab_order(), [0, 1, 2, 3]);
+            assert_eq!(f.tab_index_of(2), 2);
+            assert_eq!(f.tab_stops(), [1, 2, 3], "the label takes no focus");
+            // C to the front: the others move down one, as in VB
+            f.set_tab_index(3, 0);
+            assert_eq!(f.tab_order(), [3, 0, 1, 2]);
+            assert_eq!((f.tab_index_of(3), f.tab_index_of(0)), (0, 1));
+            assert_eq!(f.tab_stops(), [3, 1, 2]);
+            // out of range clamps to the end
+            f.set_tab_index(3, 99);
+            assert_eq!(f.tab_order(), [0, 1, 2, 3]);
+            // TabStop off and disabled controls are skipped
+            f.controls[1].tab_stop = false;
+            f.controls[2].enabled = false;
+            assert_eq!(f.tab_stops(), [3]);
+            // the numbering is saved only once it was set
+            let json = f.to_oxform();
+            assert!(json.contains("tabIndex") && json.contains("tabStop"));
+            assert!(!FormSpec::new("F", "F", 1.0, 1.0)
+                .to_oxform()
+                .contains("tabIndex"));
+            let back = FormSpec::from_oxform(&json).unwrap();
+            assert_eq!(back.tab_order(), f.tab_order());
+            assert!(!back.controls[1].tab_stop);
+        }
 
         #[test]
         fn key_preview_round_trips_and_older_files_default_to_off() {

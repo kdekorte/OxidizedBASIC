@@ -220,36 +220,44 @@ fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppCont
         "fontitalic",
         "fontunderline",
     ];
-    let with = |first: &[&'static str], shows_text: bool| -> Vec<&'static str> {
+    let with = |first: &[&'static str], shows_text: bool, focus: bool| -> Vec<&'static str> {
         let mut v: Vec<&'static str> = first.iter().copied().chain(geometry).collect();
-        v.extend(["enabled", "index", "backcolor"]);
+        v.extend(["enabled", "index", "tabindex"]);
+        if focus {
+            v.push("tabstop");
+        }
+        v.push("backcolor");
         if shows_text {
             v.extend(font);
         }
         v
     };
     let expect: [(ControlKind, Vec<&str>); 10] = [
-        (ControlKind::Label, with(&["name", "caption"], true)),
-        (ControlKind::TextBox, with(&["name", "text"], true)),
-        (ControlKind::CommandButton, with(&["name", "caption"], true)),
-        (ControlKind::Frame, with(&["name", "caption"], true)),
-        (ControlKind::ListBox, with(&["name", "items"], true)),
+        (ControlKind::Label, with(&["name", "caption"], true, false)),
+        (ControlKind::TextBox, with(&["name", "text"], true, true)),
+        (
+            ControlKind::CommandButton,
+            with(&["name", "caption"], true, true),
+        ),
+        (ControlKind::Frame, with(&["name", "caption"], true, false)),
+        (ControlKind::ListBox, with(&["name", "items"], true, true)),
         (
             ControlKind::ComboBox,
-            with(&["name", "text", "items", "style"], true),
+            with(&["name", "text", "items", "style"], true, true),
         ),
-        (ControlKind::PictureBox, with(&["name"], false)),
+        // a PictureBox takes the focus; a Timer isn't on the tab order
+        (ControlKind::PictureBox, with(&["name"], false, true)),
         (
             ControlKind::Timer,
             vec!["name", "interval", "enabled", "index"],
         ),
         (
             ControlKind::CheckBox,
-            with(&["name", "caption", "value"], true),
+            with(&["name", "caption", "value"], true, true),
         ),
         (
             ControlKind::OptionButton,
-            with(&["name", "caption", "value"], true),
+            with(&["name", "caption", "value"], true, true),
         ),
     ];
 
@@ -810,4 +818,51 @@ fn timers_fire_in_the_live_window_and_obey_enabled(cx: &mut gpui::TestAppContext
     settle(&ide, &rx, &mut win, cx);
     assert_eq!(label(&win), "tick2");
     session.send(DebugCommand::Stop);
+}
+
+#[gpui::test]
+fn the_inspector_edits_tab_index_tab_stop_and_key_preview(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    ide.update(cx, |ide, cx| {
+        ide.add_control(ControlKind::TextBox); // 0: Text1
+        ide.add_control(ControlKind::CommandButton); // 1: Command1
+        ide.add_control(ControlKind::Label); // 2: Label1
+        ide.select(Some(1));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    // type a new TabIndex for the button: it goes first
+    let field = cx.debug_bounds("prop-tabindex").expect("TabIndex field");
+    cx.simulate_click(field.center(), gpui::Modifiers::none());
+    cx.simulate_keystrokes("backspace backspace");
+    cx.simulate_input("0");
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.form.tab_order(), [1, 0, 2]);
+        assert_eq!(ide.prop_value(0, "tabindex"), "1");
+    });
+    // TabStop off
+    let field = cx.debug_bounds("prop-tabstop").expect("TabStop field");
+    cx.simulate_click(field.center(), gpui::Modifiers::none());
+    cx.simulate_keystrokes("backspace backspace backspace backspace");
+    cx.simulate_input("False");
+    ide.read_with(cx, |ide, _| {
+        assert!(!ide.form.controls[1].tab_stop);
+        assert_eq!(ide.form.tab_stops(), [0], "the button is skipped");
+    });
+    // the form's own KeyPreview
+    ide.update(cx, |ide, cx| {
+        ide.select(None);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let field = cx.debug_bounds("prop-keypreview").expect("KeyPreview");
+    cx.simulate_click(field.center(), gpui::Modifiers::none());
+    cx.simulate_keystrokes("backspace backspace backspace backspace backspace");
+    cx.simulate_input("True");
+    ide.read_with(cx, |ide, _| assert!(ide.form.key_preview));
+    // nothing but a Timer lacks a TabIndex; a label has no TabStop row
+    ide.update(cx, |ide, _| {
+        assert!(!ide.inspector_rows(2).iter().any(|(k, _)| *k == "tabstop"));
+        assert!(ide.inspector_rows(2).iter().any(|(k, _)| *k == "tabindex"));
+    });
 }

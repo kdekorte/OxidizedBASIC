@@ -389,6 +389,8 @@ impl FormHost {
             "width" => Variant::Single(c.rect.width),
             "height" => Variant::Single(c.rect.height),
             "visible" => Variant::Boolean(c.visible),
+            "tabindex" => Variant::Integer(self.form.tab_index_of(i) as i16),
+            "tabstop" => Variant::Boolean(c.tab_stop),
             "enabled" => Variant::Boolean(c.enabled),
             "interval" if c.kind == ControlKind::Timer => Variant::Long(c.interval_ms as i32),
             "style" if c.kind == ControlKind::ComboBox => Variant::Integer(c.style as i16),
@@ -473,6 +475,7 @@ impl FormHost {
     fn set_form(&mut self, p: &str, value: &Variant) -> ExecResult<()> {
         match p {
             "caption" => self.form.caption = value.as_string()?,
+            "keypreview" => self.form.key_preview = value.as_bool()?,
             "width" | "height" => {
                 let v = coord(value)?;
                 if v <= 0.0 {
@@ -518,6 +521,14 @@ impl FormHost {
                 }
             }
             "visible" => self.form.controls[i].visible = value.as_bool()?,
+            "tabindex" => {
+                let n = value.as_i64()?;
+                if n < 0 || n >= self.form.controls.len() as i64 {
+                    return err(380, "Invalid property value");
+                }
+                self.form.set_tab_index(i, n as i32);
+            }
+            "tabstop" => self.form.controls[i].tab_stop = value.as_bool()?,
             "enabled" => self.form.controls[i].enabled = value.as_bool()?,
             "interval" if kind == ControlKind::Timer => {
                 let n = value.as_i64()?;
@@ -663,6 +674,7 @@ impl ObjectHost for FormHost {
                 "name" => Ok(Variant::String(self.form.name.clone())),
                 "width" => Ok(Variant::Single(self.form.width)),
                 "height" => Ok(Variant::Single(self.form.height)),
+                "keypreview" => Ok(Variant::Boolean(self.form.key_preview)),
                 _ => unsupported(),
             },
             Target::Control(i) => self.get_control(i, &p, args),
@@ -1248,6 +1260,30 @@ mod tests {
         // Text1 already says "start", List1 has no row, Check1 is 0;
         // choosing Option2 clears Option1 without clicking it
         assert_eq!(run(&src, &h).unwrap(), "Option1_Click\nOption2_Click\n");
+    }
+
+    #[test]
+    fn tab_index_tab_stop_and_key_preview_read_and_write_from_code() {
+        let h = host();
+        let out = run(
+            "Print Text1.TabIndex; Combo1.TabIndex\n\
+             Combo1.TabIndex = 0\n\
+             Print Combo1.TabIndex; Label1.TabIndex; Text1.TabIndex\n\
+             Text1.TabStop = False\n\
+             Print Text1.TabStop; Combo1.TabStop\n\
+             Print Me.KeyPreview\nMe.KeyPreview = True\nPrint Me.KeyPreview\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, " 1  3 \n 0  1  2 \nFalseTrue\nFalse\nTrue\n");
+        // the program's copy of the form has it all
+        let b = h.borrow();
+        assert!(b.spec().key_preview);
+        assert_eq!(b.spec().tab_stops()[0], 3, "Combo1 first, Text1 skipped");
+        drop(b);
+        for bad in ["Text1.TabIndex = -1", "Text1.TabIndex = 99"] {
+            assert!(run(bad, &h).unwrap_err().contains("380"), "{}", bad);
+        }
     }
 
     #[test]

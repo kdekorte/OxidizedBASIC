@@ -425,21 +425,48 @@ fn the_window_raises_resize_activate_and_deactivate(cx: &mut gpui::TestAppContex
         "Sub Form_Resize()\n  Log \"resize \" & Me.Width\nEnd Sub\n".to_string(),
         plain_handler("Form", "Activate", "activate"),
         plain_handler("Form", "Deactivate", "deactivate"),
+        plain_handler("Form", "Paint", "paint"),
+        plain_handler("Picture1", "Paint", "ppaint"),
     ]
     .concat();
     let mut run = Run::start(event_form(), &src, cx);
     run.win.simulate_resize(size(px(450.0), px(320.0)));
     run.settle();
-    assert_eq!(run.log(), "resize 450;", "the program reads the new Width");
+    assert_eq!(
+        run.log(),
+        "resize 450;paint;ppaint;",
+        "the program reads the new Width, then the form and picture paint"
+    );
     run.clear();
-    // the window becomes the active one, then another window is
+    // the window becomes the active one, then another window is: coming
+    // to the front, it may have been covered, so it paints again
     run.handle
         .update(&mut run.win, |_, win, _| win.activate_window())
         .unwrap();
     run.settle();
     run.win.deactivate_window();
     run.settle();
-    assert_eq!(run.log(), "activate;deactivate;");
+    assert_eq!(run.log(), "activate;paint;ppaint;deactivate;");
+    run.stop();
+}
+
+#[gpui::test]
+fn click_bursts_count_in_pairs_as_windows_does(cx: &mut gpui::TestAppContext) {
+    let src = [
+        plain_handler("Picture1", "Click", "click"),
+        plain_handler("Picture1", "DblClick", "dbl"),
+    ]
+    .concat();
+    let mut run = Run::start(event_form(), &src, cx);
+    let c = at(run.bounds("run-Picture1"), 10.0, 10.0);
+    // four quick clicks are two double clicks: single, double, single,
+    // double (the third click starts a new pair)
+    for n in 1..=4 {
+        run.down(c, gpui::MouseButton::Left, n);
+        run.up(c, gpui::MouseButton::Left);
+    }
+    run.settle();
+    assert_eq!(run.log(), "click;dbl;click;dbl;");
     run.stop();
 }
 
@@ -470,5 +497,42 @@ fn only_handled_events_are_sent_to_the_program(cx: &mut gpui::TestAppContext) {
             assert!(!r.handles(None, "MouseMove"));
         })
         .unwrap();
+    run.stop();
+}
+
+#[gpui::test]
+fn the_program_sets_tab_order_tab_stop_and_key_preview_at_run_time(cx: &mut gpui::TestAppContext) {
+    // Command1 jumps to the front of the tab order, Text2 is skipped, and
+    // the form starts previewing keys, all from code
+    let src = [
+        "Sub Form_Load()\n  Command1.TabIndex = 0\n  Text2.TabStop = False\n  Me.KeyPreview = True\nEnd Sub\n"
+            .to_string(),
+        plain_handler("Text1", "GotFocus", "got1"),
+        plain_handler("Command1", "GotFocus", "gotC"),
+        plain_handler("Picture1", "GotFocus", "gotP"),
+        plain_handler("Text2", "GotFocus", "got2"),
+        key_handler("Form", "KeyDown", "fdown", ""),
+    ]
+    .concat();
+    let mut run = Run::start(event_form(), &src, cx);
+    // the order is now Command1, Label1, Text1, Text2, Picture1; Tab stops
+    // on Command1, Text1, Picture1 (Text2 is skipped) and wraps
+    let t = run.bounds("run-Text1");
+    run.win.simulate_click(t.center(), gpui::Modifiers::none());
+    run.settle();
+    for _ in 0..2 {
+        run.win.simulate_keystrokes("tab");
+        run.settle();
+    }
+    assert_eq!(
+        run.log(),
+        "got1;gotP;gotC;",
+        "Text1, then Picture1 (Text2 skipped), then wrapping to Command1"
+    );
+    // KeyPreview came from Form_Load: the form sees a key meant for a control
+    run.clear();
+    run.win.simulate_keystrokes("a");
+    run.settle();
+    assert_eq!(run.log(), "fdown 65 0;");
     run.stop();
 }

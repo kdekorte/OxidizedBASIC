@@ -4,7 +4,7 @@ Every control the form designer offers, its properties, methods and events,
 and whether BASIC code can **read only (R)** or **read/write (R/W)** each
 one while the program runs.
 
-This reflects the code as of commit `2d18558` (`crates/oxbasic_ui/src/host.rs`
+This reflects the code as of the event-routing work after commit `2d18558` (`crates/oxbasic_ui/src/host.rs`
 for run-time access, `crates/oxbasic_ui/src/lib.rs` for events,
 `crates/oxbasic_ide/src/ide/mod.rs` for what the Properties window edits).
 
@@ -49,6 +49,8 @@ everything except Timer. "Focus" means `SetFocus` works.
 | `Height` | Single | R/W | R/W | Must be above 0 (else 380). |
 | `Enabled` | Boolean | R/W | R/W | A disabled control is greyed and can't take focus. |
 | `Visible` | Boolean | R/W | — | Not in the Properties window. A Timer is always invisible. |
+| `TabIndex` | Integer | R/W | R/W | Place in the tab order, from 0; every control but a Timer has one. Setting it moves the control there and the ones after it down one, as in VB. Out of range raises 380. |
+| `TabStop` | Boolean | R/W | R/W | Tab skips the control when False (a click still focuses it). Only controls that take the focus. |
 
 ## Properties of the text-showing controls
 
@@ -161,10 +163,10 @@ Reached as `Me` or by its own name (`Form1.Caption`).
 | `Caption` | String | R/W | R/W |
 | `Width` | Single | R/W | R/W |
 | `Height` | Single | R/W | R/W |
+| `KeyPreview` | Boolean | R/W | R/W |
 
-`KeyPreview` (`"keyPreview": true` in the `.oxform` file) makes the form's
-key handlers run before the focused control's. It isn't in the Properties
-window or readable from code yet.
+`KeyPreview` makes the form's key handlers run before the focused control's
+(see *Keys* below); it is also saved in the `.oxform` file.
 
 ## Events
 
@@ -200,8 +202,9 @@ reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
 - **Click order.** `GotFocus` (if the control takes the focus), `MouseDown`,
   then on release `Click` and `MouseUp`. `Click` only comes from the left
   button, released over the control it was pressed on. A double click is
-  `MouseDown`, `Click`, `MouseUp`, `DblClick`, `MouseUp`. A list row is
-  picked, and its `Click` raised, on the press.
+  `MouseDown`, `Click`, `MouseUp`, `DblClick`, `MouseUp`. Clicks in a quick
+  burst count in pairs, as in Windows: click, double, click, double. A list
+  row is picked, and its `Click` raised, on the press.
 - **Keys.** `KeyDown` (`KeyCode` is VB's key code, `vbKeyA` = 65 whatever
   the case), `KeyPress` for keys that type a character (`KeyAscii`: `a` is
   97, Enter 13), the control's `Change`, then `KeyUp` on release. Setting
@@ -210,12 +213,15 @@ reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
   arrow, Delete) and skips the handlers after it. With the form's
   `KeyPreview` set, the form's handler runs before the control's for each.
 - **Focus.** `LostFocus` of the control losing it, then `GotFocus` of the
-  new one: on a click, on `SetFocus`, and on Tab / Shift-Tab, which move in
-  the order the controls were added (VB's `TabIndex`). Labels, frames and
-  timers take no focus.
+  new one: on a click, on `SetFocus`, and on Tab / Shift-Tab, which move
+  through the controls in `TabIndex` order (the order they were added until
+  it is changed), skipping those with `TabStop` False, disabled or
+  invisible ones. Labels, frames and timers take no focus.
 - **Window.** `Activate` / `Deactivate` when the form's window becomes or
   stops being the active one; `Resize` and `Paint` when it opens and when
-  it is resized (the program reads the new `Width` and `Height`). Closing
+  it is resized (the program reads the new `Width` and `Height`), and
+  `Paint` again each time the window is activated, which is how a window
+  that was covered comes back to the front. Closing
   the window raises `QueryUnload(Cancel, UnloadMode)` with `UnloadMode` 0,
   then `Unload(Cancel)`; either can set `Cancel` to keep the window. The
   `Unload` statement raises the same pair with `UnloadMode` 1.
@@ -251,7 +257,6 @@ which aren't supported, so the event box doesn't list them.
 
 System colours, `Picture`, `Move`, `ZOrder`, `Container` (option buttons
 are one group per form), `Load`/`Unload` of array elements at run time,
-`TabIndex`/`TabStop` (Tab follows the order controls were added),
-`KeyPreview` in the Properties window, `ToolTipText`, `MousePointer`, `Locked`, `MaxLength`,
+`ToolTipText`, `MousePointer`, `Locked`, `MaxLength`,
 `MultiLine`, `ScrollBars`, `Selected()`/`MultiSelect`, `SelStart`/`SelText`.
 

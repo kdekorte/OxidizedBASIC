@@ -2448,6 +2448,7 @@ impl Ide {
                 "caption" => f.caption.clone(),
                 "width" => format!("{}", f.width),
                 "height" => format!("{}", f.height),
+                "keypreview" => if f.key_preview { "True" } else { "False" }.to_string(),
                 _ => String::new(),
             };
         }
@@ -2455,6 +2456,8 @@ impl Ide {
             return String::new();
         };
         match key {
+            "tabindex" => format!("{}", self.form.tab_index_of(idx)),
+            "tabstop" => if c.tab_stop { "True" } else { "False" }.to_string(),
             "name" => c.name.clone(),
             "caption" => c.caption.clone(),
             "text" => c.text.clone().unwrap_or_default(),
@@ -2525,7 +2528,21 @@ impl Ide {
                 "caption" => self.form.caption = val.to_string(),
                 "width" => self.form.width = num.unwrap_or(self.form.width),
                 "height" => self.form.height = num.unwrap_or(self.form.height),
+                "keypreview" => {
+                    if let Some(b) = Self::parse_bool(val) {
+                        self.form.key_preview = b;
+                    }
+                }
                 _ => {}
+            }
+            return;
+        }
+        // TabIndex moves the control within the order, so it needs the form
+        if key == "tabindex" {
+            if let Ok(n) = val.trim().parse::<i32>() {
+                if n >= 0 && (n as usize) < self.form.controls.len() {
+                    self.form.set_tab_index(idx, n);
+                }
             }
             return;
         }
@@ -2583,6 +2600,11 @@ impl Ide {
             "enabled" => {
                 if let Some(b) = Self::parse_bool(val) {
                     c.enabled = b;
+                }
+            }
+            "tabstop" => {
+                if let Some(b) = Self::parse_bool(val) {
+                    c.tab_stop = b;
                 }
             }
             "backcolor" => {
@@ -2937,6 +2959,7 @@ impl Ide {
                 ("caption", "Caption"),
                 ("width", "Width"),
                 ("height", "Height"),
+                ("keypreview", "KeyPreview"),
             ]);
             return rows;
         }
@@ -2968,6 +2991,12 @@ impl Ide {
         }
         rows.push(("enabled", "Enabled"));
         rows.push(("index", "Index"));
+        if k != ControlKind::Timer {
+            rows.push(("tabindex", "TabIndex"));
+        }
+        if k.can_focus() {
+            rows.push(("tabstop", "TabStop"));
+        }
         if k != ControlKind::Timer {
             rows.push(("backcolor", "BackColor"));
         }

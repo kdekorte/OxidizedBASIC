@@ -117,15 +117,9 @@ impl FormRunner {
             .filter(|&i| self.form.controls[i].enabled)
     }
 
-    /// The controls that take the focus, in tab order.
+    /// The controls Tab stops on, in the form's `TabIndex` order.
     fn focusable(&self) -> Vec<usize> {
-        self.form
-            .controls
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.kind.can_focus() && c.enabled && c.visible)
-            .map(|(i, _)| i)
-            .collect()
+        self.form.tab_stops()
     }
 
     /// Move the keyboard focus to `to` (`None`: the form itself), raising
@@ -169,8 +163,11 @@ impl FormRunner {
         let button = button_of(ev.button);
         let (x, y) = self.local(target, ev.position);
         // VB's double click: MouseDown, MouseUp, Click — then DblClick and
-        // MouseUp for the second press, which clicks no more
-        let double = ev.click_count >= 2 && button == ev::LEFT_BUTTON;
+        // MouseUp for the second press, which clicks no more. Windows sends
+        // a double click only for the second click of a burst (the third
+        // starts a single again, the fourth is a double), while the count
+        // here keeps rising: so the even counts are the doubles.
+        let double = ev.click_count >= 2 && ev.click_count % 2 == 0 && button == ev::LEFT_BUTTON;
         let args = ev::mouse_args(button, shift_of(&ev.modifiers), x, y);
         for e in ev::press(target, old_focus, new_focus, args, double) {
             self.send(e);
@@ -358,16 +355,33 @@ impl FormRunner {
         self.active = active;
         let name = if active { "Activate" } else { "Deactivate" };
         self.send(Event::on(None, name, vec![]));
+        // a window brought to the front may have been covered: GPUI says
+        // nothing of that, but raising a window activates it, so it is
+        // painted again then
+        if active {
+            self.paint_all();
+        }
+    }
+
+    /// `Form_Paint`, then each visible PictureBox's `Paint`: the window's
+    /// contents are to be drawn again.
+    fn paint_all(&self) {
+        self.send(Event::on(None, "Paint", vec![]));
+        for (i, c) in self.form.controls.iter().enumerate() {
+            if c.kind == ControlKind::PictureBox && c.visible {
+                self.send(Event::on(Some(i), "Paint", vec![]));
+            }
+        }
     }
 
     /// The window's inside is `size`: when it changed, the form's `Width`
     /// and `Height` follow (the program reads them), then `Form_Resize`
-    /// and `Form_Paint` run, as VB raises them.
+    /// and the `Paint` events run, as VB raises them (also as the form
+    /// first shows).
     pub(super) fn window_resized(&mut self, size: (f32, f32)) {
         if self.last_size == Some(size) {
             return;
         }
-        let first = self.last_size.is_none();
         self.last_size = Some(size);
         self.session.send(DebugCommand::Edit(
             self.form_index,
@@ -376,16 +390,8 @@ impl FormRunner {
                 height: size.1,
             },
         ));
-        // VB raises Resize and Paint as the form first shows, too
         self.send(Event::on(None, "Resize", vec![]));
-        self.send(Event::on(None, "Paint", vec![]));
-        if first {
-            for (i, c) in self.form.controls.iter().enumerate() {
-                if c.kind == ControlKind::PictureBox && c.visible {
-                    self.send(Event::on(Some(i), "Paint", vec![]));
-                }
-            }
-        }
+        self.paint_all();
     }
 }
 
