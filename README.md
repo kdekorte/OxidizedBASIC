@@ -142,18 +142,31 @@ xcodebuild -downloadComponent MetalToolchain
 ## Known limitations
 
 - **Control properties from BASIC** work when the program runs from the
-  IDE: `Label1.Caption = "x"`, `Text1.Text`, `Me.Caption`, `Visible`,
-  `Enabled`, `Left/Top/Width/Height`, and for list and combo boxes
-  `AddItem [, index]`, `RemoveItem`, `Clear`, `List(i)`, `ListCount`,
-  `ListIndex`. They read what the user typed or picked, and changes show
-  in the live window. Unsupported members raise VB error 438 and a
-  missing object raises 35/424 as before. `oxbasic gui` and `oxbasic run`
-  don't bind a form yet, so there these still fail. Not yet: `SetFocus`,
-  `Value`, `Font`/colour properties, control arrays, and `Timer.Enabled`
-  taking effect on a running timer.
+  IDE (`oxbasic gui` and `oxbasic run` don't bind a form yet, so there
+  these still fail). The program reads and writes the live form, and sees
+  what the user typed, picked or clicked:
+  - every control: `Caption`, `Text`, `Visible`, `Enabled`,
+    `Left/Top/Width/Height`, `BackColor`, `ForeColor`, `Font.Name`,
+    `Font.Size`, `Font.Bold/Italic/Underline/Strikethrough` (also
+    `FontBold` etc.), `SetFocus`; the form: `Caption`, `Width`, `Height`
+    through `Me` or its name;
+  - `CheckBox.Value` (`vbUnchecked`/`vbChecked`/`vbGrayed`) and
+    `OptionButton.Value` (True clears the form's other option buttons);
+  - list and combo boxes: `AddItem [, index]`, `RemoveItem`, `Clear`,
+    `List(i)`, `ListCount`, `ListIndex`;
+  - timers: `Interval` and `Enabled` take effect on the running timer;
+  - control arrays: give controls the same name and distinct `Index`
+    values (Properties window); the program says `Cmd(2).Caption = "x"`
+    and handlers take `Index As Integer`;
+  - colours are VB `Long`s: `RGB(r, g, b)`, `vbRed`... Errors are VB's:
+    438 unsupported member, 380 bad value, 381 bad list index, 340/343
+    control-array element missing / not an array.
+  Not yet: system colours, `Picture`, `ZOrder`, `Move`, `Container`
+  (option buttons are one group per form), `Load`/`Unload` of array
+  elements at run time.
 - Run opens the form in its own OS window (closing it or Stop ends the
-  program). `Click`, `Change` (typing, picking) and `DropDown` reach the
-  program; Timers don't fire in the IDE's window yet (use `oxbasic gui`).
+  program). `Click`, `Change` (typing, picking), `DropDown` and `Timer`
+  events reach the program; mouse, key and focus events do not yet.
 - Property-inspector editing and toolbox adding were reworked (per-field
   focus, redraw on add) but have only been checked by build/tests, not
   yet by hand.

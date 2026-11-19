@@ -44,8 +44,21 @@ impl Ide {
     /// The object list: `(General)`, `Form`, then every control by name.
     pub(super) fn code_objects(&self) -> Vec<String> {
         let mut objects = vec![GENERAL.to_string(), "Form".to_string()];
-        objects.extend(self.form.controls.iter().map(|c| c.name.clone()));
+        // a control array is one object, whatever its number of elements
+        for c in &self.form.controls {
+            if !objects.iter().any(|o| o.eq_ignore_ascii_case(&c.name)) {
+                objects.push(c.name.clone());
+            }
+        }
         objects
+    }
+
+    /// Whether `object` names a control array (its controls have an Index).
+    pub(super) fn is_control_array(&self, object: &str) -> bool {
+        self.form
+            .controls
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(object) && c.index.is_some())
     }
 
     /// The control kind behind an object list entry (`Form` for the form).
@@ -181,8 +194,14 @@ impl Ide {
             .find(|o| o.eq_ignore_ascii_case(object))
             .unwrap_or_else(|| object.to_string());
         let params = event_params(kind, event).unwrap_or("");
+        // a control array's handlers are told which element raised them
+        let params = match (self.is_control_array(&object), params) {
+            (false, p) => p.to_string(),
+            (true, "") => "Index As Integer".to_string(),
+            (true, p) => format!("Index As Integer, {}", p),
+        };
         let handler = format!("{}_{}", object, event);
-        let (row, col, inserted) = code_model::ensure_handler(&mut self.lines, &handler, params);
+        let (row, col, inserted) = code_model::ensure_handler(&mut self.lines, &handler, &params);
         self.cursor = (row, col);
         if inserted {
             self.status = format!("added {} placeholder", handler);

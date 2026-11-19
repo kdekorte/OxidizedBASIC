@@ -83,6 +83,7 @@ pub(crate) fn is_builtin(name: &str) -> bool {
             | "beep"
             | "doevents"
             | "iif"
+            | "rgb"
     )
 }
 
@@ -307,6 +308,21 @@ impl<'out> Interpreter<'out> {
                 } else {
                     arg(args, 2)?.clone()
                 })
+            }
+            // RGB(r, g, b) = r + g*256 + b*65536; each part is 0..255
+            "rgb" => {
+                let part = |i: usize| -> ExecResult<i32> {
+                    let n = want_i64(args, i)?;
+                    if !(0..=255).contains(&n) {
+                        return Err(VbError {
+                            number: 5,
+                            description: "invalid procedure call or argument".into(),
+                        });
+                    }
+                    Ok(n as i32)
+                };
+                let (r, g, b) = (part(0)?, part(1)?, part(2)?);
+                Ok(Variant::Long(r | (g << 8) | (b << 16)))
             }
 
             // -- conversions ------------------------------------------------

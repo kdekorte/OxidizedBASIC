@@ -142,6 +142,7 @@ impl Render for FormWindow {
                     .focus
                     .get(&idx)
                     .is_some_and(|f| f.contains_focused(window, cx)),
+                value: self.state[idx].value,
             };
             let mut hook = |part: Part,
                             el: gpui::Stateful<gpui::Div>,

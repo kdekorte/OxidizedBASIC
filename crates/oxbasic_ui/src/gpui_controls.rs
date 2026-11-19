@@ -13,12 +13,13 @@
 //! | `PictureBox` | a plain bordered canvas |
 //! | `Timer` | invisible at run time; a small ◷ icon in the designer |
 
-use crate::{ControlKind, ControlSpec, FormSpec};
+use crate::{ControlKind, ControlSpec, FormSpec, DEFAULT_FONT_SIZE};
 use gpui::{
-    deferred, div, prelude::*, px, rgb, AnyElement, Context, Div, Keystroke, SharedString, Stateful,
+    deferred, div, prelude::*, px, rgb, AnyElement, Context, Div, FontWeight, Keystroke,
+    SharedString, Stateful,
 };
 
-pub const FORM_BACK: u32 = 0xF1F0F5;
+pub use crate::FORM_BACK;
 const TEXT: u32 = 0x1D1D1F;
 const DIM: u32 = 0x8E8E93;
 const ACCENT: u32 = 0x007AFF;
@@ -62,6 +63,8 @@ pub struct ControlLook {
     pub dropped: bool,
     /// The control has the keyboard focus.
     pub focused: bool,
+    /// `Value` of a CheckBox (0, 1, 2) or OptionButton (0, 1).
+    pub value: i32,
 }
 
 impl ControlLook {
@@ -70,6 +73,7 @@ impl ControlLook {
         ControlLook {
             design: true,
             text: c.text().to_string(),
+            value: c.value,
             ..Default::default()
         }
     }
@@ -194,26 +198,62 @@ pub fn paint_control<V: 'static>(
     hook: &mut dyn FnMut(Part, Stateful<Div>, &mut Context<V>) -> Stateful<Div>,
     cx: &mut Context<V>,
 ) -> AnyElement {
-    let id = SharedString::from(format!("control-{}", c.name));
+    let id = SharedString::from(match c.index {
+        Some(n) => format!("control-{}-{}", c.name, n),
+        None => format!("control-{}", c.name),
+    });
     let (w, h) = if c.kind == ControlKind::Timer {
         (28.0, 28.0)
     } else {
         (c.rect.width.max(4.0), c.rect.height.max(4.0))
     };
-    let base = div()
+    let font = &c.font;
+    let mut base = div()
         .id(id.clone())
         .absolute()
         .left(px(c.rect.left))
         .top(px(c.rect.top))
         .w(px(w))
         .h(px(h))
-        .text_color(rgb(if c.enabled { TEXT } else { DIM }));
+        .text_color(rgb(if !c.enabled {
+            DIM
+        } else {
+            c.fore_color.unwrap_or(TEXT)
+        }));
+    // `Font`: points to pixels at 96 dpi (VB's 8.25 pt MS Sans Serif is
+    // 11 px); an unset size keeps the size controls are drawn at
+    if c.kind.has_font() {
+        if font.size != DEFAULT_FONT_SIZE && font.size > 0.0 {
+            base = base.text_size(px(font.size * 96.0 / 72.0));
+        }
+        if !font.name.is_empty() {
+            base = base.font_family(SharedString::from(font.name.clone()));
+        }
+        if font.bold {
+            base = base.font_weight(FontWeight::BOLD);
+        }
+        if font.italic {
+            base = base.italic();
+        }
+        if font.underline {
+            base = base.underline();
+        }
+        if font.strikethrough {
+            base = base.line_through();
+        }
+    }
+    // `BackColor`, where the control has a background of its own
+    let back = |usual: u32| rgb(c.color.unwrap_or(usual));
     let el = match c.kind {
-        // VB6 Label: BorderStyle 0 (None), so it is just text.
+        // VB6 Label: BorderStyle 0 (None), so it is just text — on the
+        // form's background unless it has a BackColor.
         ControlKind::Label => {
-            let body = base
+            let mut body = base
                 .overflow_hidden()
                 .child(SharedString::from(c.caption.clone()));
+            if let Some(bg) = c.color {
+                body = body.bg(rgb(bg));
+            }
             hook(Part::Body, body, cx)
         }
         ControlKind::CommandButton => {
@@ -225,7 +265,7 @@ pub fn paint_control<V: 'static>(
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .rounded_md()
-                .bg(rgb(BUTTON_FACE))
+                .bg(back(BUTTON_FACE))
                 .border_1()
                 .border_color(rgb(BUTTON_BORDER))
                 .child(SharedString::from(c.caption.clone()));
@@ -235,9 +275,16 @@ pub fn paint_control<V: 'static>(
                     .hover(|s| s.bg(rgb(BUTTON_HOVER)))
                     .active(|s| s.bg(rgb(BUTTON_ACTIVE)));
             }
+            if look.focused {
+                body = body.border_color(rgb(ACCENT));
+            }
             hook(Part::Body, body, cx)
         }
-        ControlKind::TextBox => hook(Part::Body, text_field(base, &look.text, look.focused), cx),
+        ControlKind::TextBox => hook(
+            Part::Body,
+            text_field(base, &look.text, look.focused).bg(back(0xFFFFFF)),
+            cx,
+        ),
         // VB6 Frame: a group box. The caption interrupts the top border.
         ControlKind::Frame => {
             let outline = div()
@@ -278,7 +325,7 @@ pub fn paint_control<V: 'static>(
             )
             .size_full();
             let body = base
-                .bg(rgb(0xFFFFFF))
+                .bg(back(0xFFFFFF))
                 .border_1()
                 .border_color(rgb(if look.focused { ACCENT } else { FIELD_BORDER }))
                 .overflow_hidden()
@@ -288,9 +335,54 @@ pub fn paint_control<V: 'static>(
         ControlKind::ComboBox => paint_combo(c, look, base, hook, cx),
         ControlKind::PictureBox => {
             let body = base
-                .bg(rgb(c.color.unwrap_or(0xFFFFFF)))
+                .bg(back(0xFFFFFF))
                 .border_1()
                 .border_color(rgb(FIELD_BORDER));
+            hook(Part::Body, body, cx)
+        }
+        // VB6 CheckBox / OptionButton: a box (☑) or circle (◉) and the
+        // caption beside it; `Value` decides the mark.
+        ControlKind::CheckBox | ControlKind::OptionButton => {
+            let radio = c.kind == ControlKind::OptionButton;
+            let mark = match (radio, look.value) {
+                (true, 0) => "",
+                (true, _) => "●",
+                (false, 1) => "✓",
+                (false, 2) => "■",
+                (false, _) => "",
+            };
+            let indicator = div()
+                .flex_none()
+                .size(px(14.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(10.0))
+                .bg(rgb(0xFFFFFF))
+                .border_1()
+                .border_color(rgb(if look.focused { ACCENT } else { FIELD_BORDER }))
+                .text_color(rgb(if c.kind == ControlKind::CheckBox && look.value == 2 {
+                    DIM
+                } else {
+                    ACCENT
+                }))
+                .when(radio, |s| s.rounded_full())
+                .when(!radio, |s| s.rounded_sm())
+                .child(mark);
+            let mut body = base
+                .flex()
+                .items_center()
+                .gap_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(indicator)
+                .child(SharedString::from(c.caption.clone()));
+            if let Some(bg) = c.color {
+                body = body.bg(rgb(bg));
+            }
+            if !look.design && c.enabled {
+                body = body.cursor_pointer();
+            }
             hook(Part::Body, body, cx)
         }
         // Invisible at run time; the designer shows an icon to grab.

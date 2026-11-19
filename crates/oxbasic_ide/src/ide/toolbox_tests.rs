@@ -209,24 +209,51 @@ fn the_forms_own_handles_resize_the_form(cx: &mut gpui::TestAppContext) {
 
 #[gpui::test]
 fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppContext) {
-    let (ide, cx) = ide_window(cx);
     let geometry = ["left", "top", "width", "height"];
-    let with = |first: &[&'static str]| -> Vec<&'static str> {
-        first.iter().copied().chain(geometry).collect()
+    // every control has Enabled and Index; all but a Timer BackColor;
+    // those that show text, ForeColor and Font
+    let font = [
+        "forecolor",
+        "fontname",
+        "fontsize",
+        "fontbold",
+        "fontitalic",
+        "fontunderline",
+    ];
+    let with = |first: &[&'static str], shows_text: bool| -> Vec<&'static str> {
+        let mut v: Vec<&'static str> = first.iter().copied().chain(geometry).collect();
+        v.extend(["enabled", "index", "backcolor"]);
+        if shows_text {
+            v.extend(font);
+        }
+        v
     };
-    let expect: [(ControlKind, Vec<&str>); 8] = [
-        (ControlKind::Label, with(&["name", "caption"])),
-        (ControlKind::TextBox, with(&["name", "text"])),
-        (ControlKind::CommandButton, with(&["name", "caption"])),
-        (ControlKind::Frame, with(&["name", "caption"])),
-        (ControlKind::ListBox, with(&["name", "items"])),
+    let expect: [(ControlKind, Vec<&str>); 10] = [
+        (ControlKind::Label, with(&["name", "caption"], true)),
+        (ControlKind::TextBox, with(&["name", "text"], true)),
+        (ControlKind::CommandButton, with(&["name", "caption"], true)),
+        (ControlKind::Frame, with(&["name", "caption"], true)),
+        (ControlKind::ListBox, with(&["name", "items"], true)),
         (
             ControlKind::ComboBox,
-            with(&["name", "text", "items", "style"]),
+            with(&["name", "text", "items", "style"], true),
         ),
-        (ControlKind::PictureBox, with(&["name"])),
-        (ControlKind::Timer, vec!["name", "interval"]),
+        (ControlKind::PictureBox, with(&["name"], false)),
+        (
+            ControlKind::Timer,
+            vec!["name", "interval", "enabled", "index"],
+        ),
+        (
+            ControlKind::CheckBox,
+            with(&["name", "caption", "value"], true),
+        ),
+        (
+            ControlKind::OptionButton,
+            with(&["name", "caption", "value"], true),
+        ),
     ];
+
+    let (ide, cx) = ide_window(cx);
     for (kind, props) in expect {
         ide.update(cx, |ide, _| {
             ide.add_control(kind);
@@ -257,19 +284,15 @@ fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppCont
 #[test]
 fn style_round_trips_through_oxform_and_old_files_default_to_zero() {
     let mut f = FormSpec::new("Form1", "F", 100.0, 100.0);
-    f.control(ControlSpec {
-        name: "Combo1".into(),
-        kind: ControlKind::ComboBox,
-        rect: Rect::new(0.0, 0.0, 100.0, 24.0),
-        caption: String::new(),
-        text: Some("a".into()),
-        items: vec!["a".into(), "b".into()],
-        enabled: true,
-        visible: true,
-        interval_ms: 0,
-        color: None,
-        style: 2,
-    });
+    let mut combo = ControlSpec::new(
+        "Combo1",
+        ControlKind::ComboBox,
+        Rect::new(0.0, 0.0, 100.0, 24.0),
+    );
+    combo.text = Some("a".into());
+    combo.items = vec!["a".into(), "b".into()];
+    combo.style = 2;
+    f.control(combo);
     let back = FormSpec::from_oxform(&f.to_oxform()).unwrap();
     assert_eq!(back.controls[0].style, 2);
     // a pre-Style file has no "style" key
@@ -306,23 +329,12 @@ fn sample_form() -> FormSpec {
     let mut f = FormSpec::new("Form1", "Sample", 400.0, 500.0);
     let spec = |name: &str, kind: ControlKind, top: f32| {
         let (w, h) = kind.default_size();
-        ControlSpec {
-            name: name.into(),
-            kind,
-            rect: Rect::new(16.0, top, w, h),
-            caption: if kind.has_caption() {
-                name.into()
-            } else {
-                String::new()
-            },
-            text: kind.has_text().then(String::new),
-            items: vec![],
-            enabled: true,
-            visible: true,
-            interval_ms: 0,
-            color: None,
-            style: 0,
+        let mut c = ControlSpec::new(name, kind, Rect::new(16.0, top, w, h));
+        if kind.has_caption() {
+            c.caption = name.into();
         }
+        c.text = kind.has_text().then(String::new);
+        c
     };
     f.control(spec("Label1", ControlKind::Label, 16.0));
     f.control(spec("Text1", ControlKind::TextBox, 44.0));
@@ -605,5 +617,195 @@ fn program_changes_reach_the_live_window(cx: &mut gpui::TestAppContext) {
             assert_eq!(r.state[1].text, "hi", "the typed text stays");
         })
         .unwrap();
+    session.send(DebugCommand::Stop);
+}
+
+/// A form with a Label, CheckBox, two OptionButtons, a Timer, a two-button
+/// array and a TextBox, and a program that reacts to each.
+fn interactive_session() -> (
+    FormSpec,
+    DebugSession,
+    std::sync::mpsc::Receiver<DebugEvent>,
+) {
+    let mut f = FormSpec::new("Form1", "Interactive", 400.0, 300.0);
+    f.label("Label1", "start", Rect::new(16.0, 8.0, 200.0, 20.0));
+    f.control(ControlSpec::new(
+        "Check1",
+        ControlKind::CheckBox,
+        Rect::new(16.0, 40.0, 110.0, 22.0),
+    ));
+    for n in 1..=2 {
+        f.control(ControlSpec::new(
+            &format!("Option{}", n),
+            ControlKind::OptionButton,
+            Rect::new(16.0, 40.0 + 24.0 * n as f32, 110.0, 22.0),
+        ));
+    }
+    let mut timer = ControlSpec::new("Timer1", ControlKind::Timer, Rect::new(0.0, 0.0, 0.0, 0.0));
+    timer.interval_ms = 100;
+    timer.visible = false;
+    f.control(timer);
+    for i in 0..2 {
+        let mut b = ControlSpec::new(
+            "Cmd",
+            ControlKind::CommandButton,
+            Rect::new(150.0, 40.0 + 34.0 * i as f32, 90.0, 28.0),
+        );
+        b.index = Some(i);
+        f.control(b);
+    }
+    f.text_box("Text1", "", Rect::new(16.0, 150.0, 120.0, 24.0));
+
+    let src = "Dim Ticks As Long\n\
+        Sub Check1_Click()\n Label1.Caption = \"check=\" & Check1.Value\nEnd Sub\n\
+        Sub Option2_Click()\n Label1.Caption = \"opt2=\" & Option2.Value & Option1.Value\nEnd Sub\n\
+        Sub Cmd_Click(Index As Integer)\n Label1.Caption = \"cmd\" & Index\n Text1.SetFocus\nEnd Sub\n\
+        Sub Timer1_Timer()\n Ticks = Ticks + 1\n Label1.Caption = \"tick\" & Ticks\n \
+        If Ticks = 2 Then Timer1.Enabled = False\nEnd Sub\n";
+    let (tx, rx) = channel();
+    let session = DebugSession::start_with_form(
+        src.into(),
+        Some(f.clone()),
+        Arc::new(Mutex::new(HashSet::new())),
+        tx,
+    );
+    session.send(DebugCommand::Run);
+    (f, session, rx)
+}
+
+/// Open the IDE's live window for `form` and `session`.
+fn open_live_window(
+    ide: &Entity<Ide>,
+    form: FormSpec,
+    session: &DebugSession,
+    cx: &mut gpui::VisualTestContext,
+) -> (WindowHandle<FormRunner>, gpui::VisualTestContext) {
+    ide.update(cx, |ide, cx| {
+        ide.form = form;
+        ide.session = Some(session.clone());
+        cx.notify();
+    });
+    ide.update(cx, |ide, cx| ide.on_debug_event(DebugEvent::Live, cx));
+    cx.run_until_parked();
+    let handle = ide
+        .read_with(cx, |ide, _| ide.form_window)
+        .expect("the form window is open");
+    let mut win = gpui::VisualTestContext::from_window(handle.into(), cx);
+    win.simulate_resize(size(px(500.0), px(400.0)));
+    win.run_until_parked();
+    (handle, win)
+}
+
+#[gpui::test]
+fn checkbox_option_and_control_array_events(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let (form, session, rx) = interactive_session();
+    let (handle, mut win) = open_live_window(&ide, form, &session, cx);
+    let click = |win: &mut gpui::VisualTestContext, sel: &'static str| {
+        let b = win.debug_bounds(sel).unwrap_or_else(|| panic!("{}", sel));
+        win.simulate_click(b.center(), gpui::Modifiers::none());
+    };
+    let label = |win: &gpui::VisualTestContext| -> String {
+        handle
+            .read_with(win, |r, _| r.form.controls[0].caption.clone())
+            .unwrap()
+    };
+
+    // a click checks the box, and the handler reads Value = 1
+    click(&mut win, "run-Check1");
+    pump_until_form(&ide, &rx, cx);
+    win.run_until_parked();
+    assert_eq!(label(&win), "check=1");
+    handle
+        .read_with(&win, |r, _| assert_eq!(r.state[1].value, 1))
+        .unwrap();
+    // a second click unchecks it
+    click(&mut win, "run-Check1");
+    pump_until_form(&ide, &rx, cx);
+    win.run_until_parked();
+    assert_eq!(label(&win), "check=0");
+
+    // choosing Option1 then Option2 leaves only Option2 chosen
+    click(&mut win, "run-Option1");
+    click(&mut win, "run-Option2");
+    pump_until_form(&ide, &rx, cx);
+    win.run_until_parked();
+    assert_eq!(label(&win), "opt2=TrueFalse");
+    handle
+        .read_with(&win, |r, _| {
+            assert_eq!((r.state[2].value, r.state[3].value), (0, 1));
+        })
+        .unwrap();
+
+    // the second element of the array raises Cmd_Click with Index = 1, and
+    // its handler moves the focus to Text1
+    click(&mut win, "run-Cmd(1)");
+    pump_until_form(&ide, &rx, cx);
+    win.run_until_parked();
+    assert_eq!(label(&win), "cmd1");
+    // Cmd_Click called Text1.SetFocus: the text box now has the keyboard
+    let runner = handle.entity(&win).expect("the runner");
+    let focused = runner.update_in(&mut win, |r, window, _| r.focus[&7].is_focused(window));
+    assert!(focused, "SetFocus gave Text1 the focus");
+    // the first element is told it is element 0
+    click(&mut win, "run-Cmd(0)");
+    pump_until_form(&ide, &rx, cx);
+    win.run_until_parked();
+    assert_eq!(label(&win), "cmd0");
+    session.send(DebugCommand::Stop);
+}
+
+/// Let the program run what the window asked of it, and show the result.
+fn settle(
+    ide: &Entity<Ide>,
+    rx: &std::sync::mpsc::Receiver<DebugEvent>,
+    win: &mut gpui::VisualTestContext,
+    cx: &mut gpui::VisualTestContext,
+) {
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    while let Ok(ev) = rx.try_recv() {
+        ide.update(cx, |ide, cx| ide.on_debug_event(ev, cx));
+    }
+    cx.run_until_parked();
+    win.run_until_parked();
+}
+
+#[gpui::test]
+fn timers_fire_in_the_live_window_and_obey_enabled(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let (form, session, rx) = interactive_session();
+    let (handle, mut win) = open_live_window(&ide, form, &session, cx);
+    let label = |win: &gpui::VisualTestContext| -> String {
+        handle
+            .read_with(win, |r, _| r.form.controls[0].caption.clone())
+            .unwrap()
+    };
+    handle
+        .read_with(&win, |r, _| assert_eq!(r.timers.len(), 1, "Timer1 runs"))
+        .unwrap();
+
+    // one interval: Timer1_Timer runs once
+    win.executor()
+        .advance_clock(std::time::Duration::from_millis(100));
+    settle(&ide, &rx, &mut win, cx);
+    assert_eq!(label(&win), "tick1");
+
+    // the second tick sets Timer1.Enabled = False, which stops the timer
+    win.executor()
+        .advance_clock(std::time::Duration::from_millis(100));
+    settle(&ide, &rx, &mut win, cx);
+    assert_eq!(label(&win), "tick2");
+    handle
+        .read_with(&win, |r, _| {
+            assert!(!r.form.controls[4].enabled);
+            assert!(r.timers.is_empty(), "a disabled timer is stopped");
+        })
+        .unwrap();
+
+    // more time brings no more ticks
+    win.executor()
+        .advance_clock(std::time::Duration::from_millis(500));
+    settle(&ide, &rx, &mut win, cx);
+    assert_eq!(label(&win), "tick2");
     session.send(DebugCommand::Stop);
 }

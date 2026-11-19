@@ -26,8 +26,10 @@ pub enum DebugCommand {
     /// Abort the program.
     Stop,
     /// Invoke a BASIC event handler (e.g. `Command1_Click`) on the live
-    /// program.
-    Call(String),
+    /// program, with its whole-number arguments (a control array element's
+    /// `Index`). The interpreter's values can't cross threads, so they are
+    /// made on the program's side.
+    Call(String, Vec<i32>),
     /// The user typed into or picked from a control: the program's
     /// `Text1.Text` / `List1.ListIndex` must show it. Sent before the
     /// event it causes, so the handler already sees the new value.
@@ -84,6 +86,7 @@ impl DebugSession {
     /// Spawn the interpreter thread with no form (a console program).
     /// Events flow to `evt_tx`; commands come back through the returned
     /// handle.
+    #[cfg(test)]
     pub fn start(
         src: String,
         breakpoints: Arc<Mutex<HashSet<usize>>>,
@@ -153,7 +156,7 @@ impl DebugSession {
                             // typing while paused still reaches the form
                             Ok(DebugCommand::Edit(e)) => apply_edit(&host, e),
                             // events arriving while paused are dropped
-                            Ok(DebugCommand::Call(_)) => continue,
+                            Ok(DebugCommand::Call(..)) => continue,
                         }
                     }
                 }));
@@ -181,7 +184,7 @@ impl DebugSession {
                 return;
             }
             let _ = evt_tx.send(DebugEvent::Live);
-            let call = |rt: &mut Interpreter, name: &str| -> bool {
+            let call = |rt: &mut Interpreter, name: &str, args: &[i32]| -> bool {
                 // UI handlers are optional. Leave the control's normal action
                 // alone when no handler exists, but do not suppress errors
                 // raised while executing a handler that *is* defined.
@@ -191,7 +194,12 @@ impl DebugSession {
                 {
                     return true;
                 }
-                let alive = match rt.evaluate_sub(name, &[]) {
+                // an event's `Index As Integer`
+                let args: Vec<oxbasic_runtime::Variant> = args
+                    .iter()
+                    .map(|&n| oxbasic_runtime::Variant::Integer(n as i16))
+                    .collect();
+                let alive = match rt.evaluate_sub(name, &args) {
                     Ok(_) => true,
                     Err(e) if e.number == oxbasic_runtime::DEBUG_ABORT => false,
                     Err(e) => {
@@ -206,11 +214,11 @@ impl DebugSession {
             };
             let mut alive = true;
             if names.iter().any(|n| n == "form_load") {
-                alive = call(&mut rt, "Form_Load");
+                alive = call(&mut rt, "Form_Load", &[]);
             }
             while alive {
                 match cmd_rx.recv() {
-                    Ok(DebugCommand::Call(name)) => alive = call(&mut rt, &name),
+                    Ok(DebugCommand::Call(name, args)) => alive = call(&mut rt, &name, &args),
                     Ok(DebugCommand::Edit(e)) => apply_edit(&host, e),
                     Ok(DebugCommand::Stop) | Err(_) => alive = false,
                     Ok(_) => {}
@@ -262,8 +270,8 @@ mod tests {
             }
         }
         // two clicks mutate persistent module state
-        session.send(DebugCommand::Call("Command1_Click".into()));
-        session.send(DebugCommand::Call("Command1_Click".into()));
+        session.send(DebugCommand::Call("Command1_Click".into(), vec![]));
+        session.send(DebugCommand::Call("Command1_Click".into(), vec![]));
         while !out.contains("clicks=2") {
             if let DebugEvent::Output(s) = recv() {
                 out.push_str(&s);
@@ -299,12 +307,12 @@ mod tests {
         // No Form_Load, Text1_Click, Label2_Click, or Timer1_Timer is defined.
         // Generated events must not emit errors or terminate the session.
         for name in ["Form_Load", "Text1_Click", "Label2_Click", "Timer1_Timer"] {
-            session.send(DebugCommand::Call(name.into()));
+            session.send(DebugCommand::Call(name.into(), vec![]));
         }
         // Handler lookup remains case-insensitive. An undefined ordinary call
         // *inside* a defined handler must still report runtime error 35.
-        session.send(DebugCommand::Call("cOmMaNd1_cLiCk".into()));
-        session.send(DebugCommand::Call("COMMAND2_CLICK".into()));
+        session.send(DebugCommand::Call("cOmMaNd1_cLiCk".into(), vec![]));
+        session.send(DebugCommand::Call("COMMAND2_CLICK".into(), vec![]));
         session.send(DebugCommand::Stop);
 
         let mut output = String::new();
@@ -450,7 +458,7 @@ mod tests {
             control: 1,
             text: "abc".into(),
         }));
-        session.send(DebugCommand::Call("Command1_Click".into()));
+        session.send(DebugCommand::Call("Command1_Click".into(), vec![]));
         let snap = next_form(&evt_rx, &mut out);
         assert_eq!(snap.form.controls[0].caption, "Clicks: 1 abc");
         assert!(snap.touched[0], "Label1 was written");
@@ -475,10 +483,10 @@ mod tests {
         );
         session.send(DebugCommand::Run);
         let mut out = String::new();
-        session.send(DebugCommand::Call("Command1_Click".into()));
+        session.send(DebugCommand::Call("Command1_Click".into(), vec![]));
         // the write before the error is still shown
         assert_eq!(next_form(&evt_rx, &mut out).form.controls[0].caption, "ok");
-        session.send(DebugCommand::Call("Command2_Click".into()));
+        session.send(DebugCommand::Call("Command2_Click".into(), vec![]));
         assert_eq!(
             next_form(&evt_rx, &mut out).form.controls[0].caption,
             "still alive"

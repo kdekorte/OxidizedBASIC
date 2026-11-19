@@ -204,27 +204,36 @@ impl Frame {
     }
 }
 
+/// A host object as the program names it: `Label1`, or one element of a
+/// control array, `Command1(2)`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObjectRef {
+    pub name: String,
+    pub index: Option<i32>,
+}
+
 /// Objects the program can reach by name — a form's controls, so
 /// `Label1.Caption = "x"`, `n = List1.ListCount` and `List1.AddItem "a"`
 /// read and change the live form. The interpreter asks the host first
 /// for every `Name.Member` whose `Name` is not a variable, and keeps its
-/// own errors for the names the host doesn't know.
+/// own errors for the names the host doesn't know. A sub-object's member
+/// arrives as a dotted property: `Label1.Font.Bold` is `Font.Bold`.
 pub trait ObjectHost {
     /// Whether `name` (case-insensitive) is an object of this host.
     fn has_object(&self, name: &str) -> bool;
     /// Read `object.property`; `args` are a parameterised property's
     /// indexes (`List1.List(0)`).
-    fn get(&mut self, object: &str, property: &str, args: &[Variant]) -> ExecResult<Variant>;
+    fn get(&mut self, object: &ObjectRef, property: &str, args: &[Variant]) -> ExecResult<Variant>;
     /// Write `object.property = value`.
     fn set(
         &mut self,
-        object: &str,
+        object: &ObjectRef,
         property: &str,
         args: &[Variant],
         value: Variant,
     ) -> ExecResult<()>;
     /// Call `object.method args` (`List1.AddItem "a"`, `Text1.SetFocus`).
-    fn call(&mut self, object: &str, method: &str, args: &[Variant]) -> ExecResult<Variant>;
+    fn call(&mut self, object: &ObjectRef, method: &str, args: &[Variant]) -> ExecResult<Variant>;
 }
 
 /// The OxidizedBASIC interpreter.
@@ -621,6 +630,19 @@ fn builtin_constants() -> HashMap<String, Variant> {
     ins("vbcritical", Variant::Long(16));
     ins("vbtrue", Variant::Boolean(true));
     ins("vbfalse", Variant::Boolean(false));
+    // CheckBox.Value
+    ins("vbunchecked", Variant::Long(0));
+    ins("vbchecked", Variant::Long(1));
+    ins("vbgrayed", Variant::Long(2));
+    // colours, as RGB() makes them (&H00BBGGRR)
+    ins("vbblack", Variant::Long(0x000000));
+    ins("vbred", Variant::Long(0x0000FF));
+    ins("vbgreen", Variant::Long(0x00FF00));
+    ins("vbyellow", Variant::Long(0x00FFFF));
+    ins("vbblue", Variant::Long(0xFF0000));
+    ins("vbmagenta", Variant::Long(0xFF00FF));
+    ins("vbcyan", Variant::Long(0xFFFF00));
+    ins("vbwhite", Variant::Long(0xFFFFFF));
     c
 }
 
@@ -1014,23 +1036,25 @@ impl<'out> Interpreter<'out> {
                     err(13, "type mismatch: not an array")
                 }
             }
-            Expr::Member { obj, name } => match self.object_name(obj, f) {
-                Some(object) => {
-                    let host = self.objects.clone().expect("object_name needs a host");
-                    let result = host.borrow_mut().set(&object, name, &[], v);
+            Expr::Member { obj, name } => match self.object_ref(obj, f)? {
+                Some((object, prefix)) => {
+                    let host = self.objects.clone().expect("object_ref needs a host");
+                    let property = format!("{}{}", prefix, name);
+                    let result = host.borrow_mut().set(&object, &property, &[], v);
                     result
                 }
                 None => err(13, "type mismatch: cannot assign to this expression"),
             },
             // `List1.List(0) = "x"`: a parameterised property
-            Expr::MethodCall { obj, name, args } => match self.object_name(obj, f) {
-                Some(object) => {
+            Expr::MethodCall { obj, name, args } => match self.object_ref(obj, f)? {
+                Some((object, prefix)) => {
                     let mut idx = Vec::with_capacity(args.len());
                     for a in args {
                         idx.push(self.eval(a, f)?);
                     }
-                    let host = self.objects.clone().expect("object_name needs a host");
-                    let result = host.borrow_mut().set(&object, name, &idx, v);
+                    let host = self.objects.clone().expect("object_ref needs a host");
+                    let property = format!("{}{}", prefix, name);
+                    let result = host.borrow_mut().set(&object, &property, &idx, v);
                     result
                 }
                 None => err(13, "type mismatch: cannot assign to this expression"),
@@ -1039,15 +1063,48 @@ impl<'out> Interpreter<'out> {
         }
     }
 
-    /// The name of `obj` when it is a host object the program can reach
-    /// (a bare identifier that is not a variable, e.g. `Label1`).
-    fn object_name(&self, obj: &Expr, f: &Frame) -> Option<String> {
-        let Expr::Var(base) = obj else { return None };
-        let host = self.objects.as_ref()?;
-        if self.lookup_rc(f, base).is_some() {
-            return None;
+    /// Whether `name` is a host object the program can reach: the host
+    /// knows it, and no variable of that name hides it.
+    fn is_host_object(&self, name: &str, f: &Frame) -> bool {
+        match &self.objects {
+            Some(host) => self.lookup_rc(f, name).is_none() && host.borrow().has_object(name),
+            None => false,
         }
-        host.borrow().has_object(base).then(|| base.clone())
+    }
+
+    /// Resolve `obj`, the part before a `.Member`, to a host object and the
+    /// property prefix of a sub-object: `Label1` -> (`Label1`, ""),
+    /// `Command1(i)` -> (`Command1` element `i`, ""), `Label1.Font` ->
+    /// (`Label1`, "Font."). `None` when `obj` is not a host object.
+    fn object_ref(&mut self, obj: &Expr, f: &mut Frame) -> ExecResult<Option<(ObjectRef, String)>> {
+        match obj {
+            Expr::Var(base) if self.is_host_object(base, f) => Ok(Some((
+                ObjectRef {
+                    name: base.clone(),
+                    index: None,
+                },
+                String::new(),
+            ))),
+            // a control array element (a procedure of that name wins)
+            Expr::Call { name, args }
+                if args.len() == 1
+                    && !self.proc_index.contains_key(&name.to_lowercase())
+                    && self.is_host_object(name, f) =>
+            {
+                let index = to_i32(&self.eval(&args[0], f)?)?;
+                Ok(Some((
+                    ObjectRef {
+                        name: name.clone(),
+                        index: Some(index),
+                    },
+                    String::new(),
+                )))
+            }
+            Expr::Member { obj: inner, name } => Ok(self
+                .object_ref(inner, f)?
+                .map(|(object, prefix)| (object, format!("{}{}.", prefix, name)))),
+            _ => Ok(None),
+        }
     }
 
     fn exec_print(
@@ -1102,15 +1159,16 @@ impl<'out> Interpreter<'out> {
         args: &[Expr],
         f: &mut Frame,
     ) -> ExecResult<Variant> {
-        if let Some(object) = self.object_name(obj, f) {
+        if let Some((object, prefix)) = self.object_ref(obj, f)? {
             let mut values = Vec::with_capacity(args.len());
             for a in args {
                 values.push(self.eval(a, f)?);
             }
-            let host = self.objects.clone().expect("object_name needs a host");
+            let host = self.objects.clone().expect("object_ref needs a host");
             // a method (`AddItem`, `SetFocus`) or a parameterised property
             // (`List(0)`) — the host decides which
-            let result = host.borrow_mut().call(&object, name, &values);
+            let method = format!("{}{}", prefix, name);
+            let result = host.borrow_mut().call(&object, &method, &values);
             return result;
         }
         if let Expr::Var(base) = obj {
@@ -1306,9 +1364,10 @@ impl<'out> Interpreter<'out> {
             }
             Expr::Member { obj, name } => {
                 // a host object's property read (`x = Label1.Caption`)
-                if let Some(object) = self.object_name(obj, f) {
-                    let host = self.objects.clone().expect("object_name needs a host");
-                    let result = host.borrow_mut().get(&object, name, &[]);
+                if let Some((object, prefix)) = self.object_ref(obj, f)? {
+                    let host = self.objects.clone().expect("object_ref needs a host");
+                    let property = format!("{}{}", prefix, name);
+                    let result = host.borrow_mut().get(&object, &property, &[]);
                     return result;
                 }
                 self.call_member(obj, name, &[], f)

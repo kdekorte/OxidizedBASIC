@@ -17,6 +17,8 @@ pub enum ControlKind {
     ComboBox,
     PictureBox,
     Timer,
+    CheckBox,
+    OptionButton,
 }
 
 impl ControlKind {
@@ -31,6 +33,8 @@ impl ControlKind {
             ControlKind::ComboBox => "ComboBox",
             ControlKind::PictureBox => "PictureBox",
             ControlKind::Timer => "Timer",
+            ControlKind::CheckBox => "CheckBox",
+            ControlKind::OptionButton => "OptionButton",
         }
     }
 
@@ -45,6 +49,8 @@ impl ControlKind {
             "combobox" | "combo" => ControlKind::ComboBox,
             "picturebox" | "picture" | "image" => ControlKind::PictureBox,
             "timer" => ControlKind::Timer,
+            "checkbox" | "check" => ControlKind::CheckBox,
+            "optionbutton" | "option" | "radio" => ControlKind::OptionButton,
             _ => return None,
         })
     }
@@ -96,7 +102,8 @@ pub struct ControlSpec {
     /// Timer interval in milliseconds (Timer only).
     #[serde(default)]
     pub interval_ms: u64,
-    /// Fill color for PictureBox, as 0xRRGGBB.
+    /// `BackColor`, as 0xRRGGBB (`None`: the control's usual background).
+    /// Named `color` in `.oxform` files, from when it was PictureBox-only.
     #[serde(default)]
     pub color: Option<u32>,
     /// `Style` (ComboBox): 0 = Dropdown Combo (editable text + drop-down
@@ -104,6 +111,54 @@ pub struct ControlSpec {
     /// 2 = Dropdown List (pick only). Other kinds ignore it.
     #[serde(default)]
     pub style: u8,
+    /// `Index` in a control array: controls sharing a `name` each have a
+    /// distinct index, and their events receive it (`Index As Integer`).
+    /// `None` for a control that is not in an array.
+    #[serde(default)]
+    pub index: Option<i32>,
+    /// `Value`: a CheckBox's 0 unchecked / 1 checked / 2 grayed; an
+    /// OptionButton's 0 / 1 (`False` / `True`).
+    #[serde(default)]
+    pub value: i32,
+    /// `ForeColor`, as 0xRRGGBB (`None`: the usual text colour).
+    #[serde(default)]
+    pub fore_color: Option<u32>,
+    /// `Font`.
+    #[serde(default)]
+    pub font: FontSpec,
+}
+
+/// A control's `Font`: `Name` ("" = the system font), `Size` in points,
+/// and the style flags.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FontSpec {
+    pub name: String,
+    pub size: f32,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+}
+
+/// The size a font has unless set: 10.5 pt, drawn 14 px high, the size the
+/// controls have always been drawn at.
+pub const DEFAULT_FONT_SIZE: f32 = 10.5;
+
+/// The form's background colour, `0xRRGGBB`.
+pub const FORM_BACK: u32 = 0xF1F0F5;
+
+impl Default for FontSpec {
+    fn default() -> FontSpec {
+        FontSpec {
+            name: String::new(),
+            size: DEFAULT_FONT_SIZE,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -123,6 +178,7 @@ impl ControlKind {
             ControlKind::ComboBox => (120.0, 24.0),
             ControlKind::PictureBox => (100.0, 100.0),
             ControlKind::Timer => (0.0, 0.0),
+            ControlKind::CheckBox | ControlKind::OptionButton => (110.0, 22.0),
         }
     }
 
@@ -130,13 +186,64 @@ impl ControlKind {
     pub fn has_caption(&self) -> bool {
         matches!(
             self,
-            ControlKind::CommandButton | ControlKind::Label | ControlKind::Frame
+            ControlKind::CommandButton
+                | ControlKind::Label
+                | ControlKind::Frame
+                | ControlKind::CheckBox
+                | ControlKind::OptionButton
         )
     }
 
     /// Whether the control has an editable `Text` property in VB6.
     pub fn has_text(&self) -> bool {
         matches!(self, ControlKind::TextBox | ControlKind::ComboBox)
+    }
+
+    /// Whether the control has a `Value` property (CheckBox, OptionButton).
+    pub fn has_value(&self) -> bool {
+        matches!(self, ControlKind::CheckBox | ControlKind::OptionButton)
+    }
+
+    /// Whether the control shows text, so `Font` and `ForeColor` apply.
+    pub fn has_font(&self) -> bool {
+        !matches!(self, ControlKind::PictureBox | ControlKind::Timer)
+    }
+
+    /// Whether the control can take the keyboard focus (`SetFocus`).
+    pub fn can_focus(&self) -> bool {
+        matches!(
+            self,
+            ControlKind::CommandButton
+                | ControlKind::TextBox
+                | ControlKind::ListBox
+                | ControlKind::ComboBox
+                | ControlKind::CheckBox
+                | ControlKind::OptionButton
+        )
+    }
+}
+
+impl ControlSpec {
+    /// A control with VB6's defaults for everything but its name, kind and
+    /// place: enabled, visible, no caption or text, no items.
+    pub fn new(name: &str, kind: ControlKind, rect: Rect) -> ControlSpec {
+        ControlSpec {
+            name: name.to_string(),
+            kind,
+            rect,
+            caption: String::new(),
+            text: None,
+            items: vec![],
+            enabled: true,
+            visible: true,
+            interval_ms: 0,
+            color: None,
+            style: 0,
+            index: None,
+            value: 0,
+            fore_color: None,
+            font: FontSpec::default(),
+        }
     }
 }
 
@@ -184,70 +291,31 @@ impl FormSpec {
 
     /// Builder shortcut for a command button.
     pub fn button(&mut self, name: &str, caption: &str, rect: Rect) -> &mut Self {
-        self.control(ControlSpec {
-            name: name.to_string(),
-            kind: ControlKind::CommandButton,
-            rect,
-            caption: caption.to_string(),
-            text: None,
-            items: vec![],
-            enabled: true,
-            visible: true,
-            interval_ms: 0,
-            color: None,
-            style: 0,
-        })
+        let mut c = ControlSpec::new(name, ControlKind::CommandButton, rect);
+        c.caption = caption.to_string();
+        self.control(c)
     }
 
     /// Builder shortcut for a label.
     pub fn label(&mut self, name: &str, caption: &str, rect: Rect) -> &mut Self {
-        self.control(ControlSpec {
-            name: name.to_string(),
-            kind: ControlKind::Label,
-            rect,
-            caption: caption.to_string(),
-            text: None,
-            items: vec![],
-            enabled: true,
-            visible: true,
-            interval_ms: 0,
-            color: None,
-            style: 0,
-        })
+        let mut c = ControlSpec::new(name, ControlKind::Label, rect);
+        c.caption = caption.to_string();
+        self.control(c)
     }
 
     /// Builder shortcut for a text box.
     pub fn text_box(&mut self, name: &str, text: &str, rect: Rect) -> &mut Self {
-        self.control(ControlSpec {
-            name: name.to_string(),
-            kind: ControlKind::TextBox,
-            rect,
-            caption: String::new(),
-            text: Some(text.to_string()),
-            items: vec![],
-            enabled: true,
-            visible: true,
-            interval_ms: 0,
-            color: None,
-            style: 0,
-        })
+        let mut c = ControlSpec::new(name, ControlKind::TextBox, rect);
+        c.text = Some(text.to_string());
+        self.control(c)
     }
 
     /// Builder shortcut for a timer.
     pub fn timer(&mut self, name: &str, interval_ms: u64) -> &mut Self {
-        self.control(ControlSpec {
-            name: name.to_string(),
-            kind: ControlKind::Timer,
-            rect: Rect::new(0.0, 0.0, 0.0, 0.0),
-            caption: String::new(),
-            text: None,
-            items: vec![],
-            enabled: true,
-            visible: false,
-            interval_ms,
-            color: None,
-            style: 0,
-        })
+        let mut c = ControlSpec::new(name, ControlKind::Timer, Rect::new(0.0, 0.0, 0.0, 0.0));
+        c.visible = false;
+        c.interval_ms = interval_ms;
+        self.control(c)
     }
 
     /// Look up a control by BASIC name (case-insensitive).

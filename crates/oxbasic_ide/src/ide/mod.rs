@@ -18,7 +18,7 @@ use oxbasic_runtime::PausedInfo;
 use oxbasic_ui::gpui_controls::{
     edit_text, paint_control, typed_text as ks_text, ControlLook, ControlState, Part, FORM_BACK,
 };
-use oxbasic_ui::host::{FormSnapshot, UserEdit};
+use oxbasic_ui::host::{set_value, FormSnapshot, UserEdit};
 use oxbasic_ui::{
     default_event, event_params, event_signatures, events_for_control, ControlKind, ControlSpec,
     FormSpec, Rect,
@@ -411,7 +411,7 @@ Print \"Total = \" & CStr(Total)
         self.live_form = Some((snap.form.clone(), snap.state.clone()));
         if let Some(handle) = self.form_window {
             let _ = handle.update(cx, |runner, win, cx| {
-                runner.show(&snap, win);
+                runner.show(&snap, win, cx);
                 cx.notify();
             });
         }
@@ -587,6 +587,8 @@ impl Ide {
             ControlKind::ComboBox => "Combo",
             ControlKind::PictureBox => "Picture",
             ControlKind::Timer => "Timer",
+            ControlKind::CheckBox => "Check",
+            ControlKind::OptionButton => "Option",
         };
         // The first free `<Prefix><n>` — renamed controls can leave gaps or
         // already hold the next number.
@@ -627,31 +629,22 @@ impl Ide {
         }
         // As in VB6, a new Label, CommandButton or Frame is captioned with
         // its name, and a new TextBox or ComboBox shows its name as text.
-        let spec = ControlSpec {
-            name: name.clone(),
-            kind,
-            rect: if kind == ControlKind::Timer {
-                Rect::new(0.0, 0.0, 0.0, 0.0)
-            } else {
-                Rect::new(16.0, top, w, h)
-            },
-            caption: if kind.has_caption() {
-                name.clone()
-            } else {
-                String::new()
-            },
-            text: if kind.has_text() {
-                Some(name.clone())
-            } else {
-                None
-            },
-            items: vec![],
-            enabled: true,
-            visible: kind != ControlKind::Timer,
-            interval_ms: if kind == ControlKind::Timer { 1000 } else { 0 },
-            color: None,
-            style: 0,
+        let rect = if kind == ControlKind::Timer {
+            Rect::new(0.0, 0.0, 0.0, 0.0)
+        } else {
+            Rect::new(16.0, top, w, h)
         };
+        let mut spec = ControlSpec::new(&name, kind, rect);
+        if kind.has_caption() {
+            spec.caption = name.clone();
+        }
+        if kind.has_text() {
+            spec.text = Some(name.clone());
+        }
+        if kind == ControlKind::Timer {
+            spec.visible = false;
+            spec.interval_ms = 1000;
+        }
         self.form.controls.push(spec);
         self.select(Some(self.form.controls.len() - 1));
     }
@@ -1459,6 +1452,8 @@ impl Ide {
                     .child(self.toolbox_button("≡ ListBox", ControlKind::ListBox, cx))
                     .child(self.toolbox_button("⌄ ComboBox", ControlKind::ComboBox, cx))
                     .child(self.toolbox_button("▧ PictureBox", ControlKind::PictureBox, cx))
+                    .child(self.toolbox_button("☑ CheckBox", ControlKind::CheckBox, cx))
+                    .child(self.toolbox_button("◉ OptionButton", ControlKind::OptionButton, cx))
                     .child(self.toolbox_button("◷ Timer", ControlKind::Timer, cx)),
             )
     }
@@ -2167,10 +2162,15 @@ const MIN_FORM: f32 = 60.0;
 struct FormRunner {
     form: FormSpec,
     session: DebugSession,
-    /// Run-time state (text, selection, open list) per control.
+    /// Run-time state (text, selection, open list, value) per control.
     state: Vec<ControlState>,
-    /// Keyboard focus handles for the controls that take typing.
+    /// Keyboard focus handles for the controls that take the keyboard.
     focus: HashMap<usize, FocusHandle>,
+    /// The running timers, by control: `(interval in ms, serial)`. A timer
+    /// whose interval or `Enabled` the program changed is restarted under a
+    /// new serial; the task of the old one sees that and ends.
+    timers: HashMap<usize, (u64, u64)>,
+    timer_serial: u64,
 }
 
 impl FormRunner {
@@ -2178,26 +2178,73 @@ impl FormRunner {
         let state = form.controls.iter().map(ControlState::new).collect();
         let mut focus = HashMap::new();
         for (i, c) in form.controls.iter().enumerate() {
-            if matches!(
-                c.kind,
-                ControlKind::TextBox | ControlKind::ComboBox | ControlKind::ListBox
-            ) {
+            if c.kind.can_focus() {
                 focus.insert(i, cx.focus_handle());
             }
         }
-        FormRunner {
+        let mut runner = FormRunner {
             form,
             session,
             state,
             focus,
+            timers: HashMap::new(),
+            timer_serial: 0,
+        };
+        runner.sync_timers(cx);
+        runner
+    }
+
+    /// Start, stop or restart each Timer so it matches the form: it runs
+    /// while `Enabled` and its `Interval` is above 0, and fires
+    /// `<Timer>_Timer` (with its `Index`, in a control array) every
+    /// interval — as the program sets `Timer1.Enabled` / `Timer1.Interval`.
+    fn sync_timers(&mut self, cx: &mut Context<Self>) {
+        let wanted: Vec<(usize, Option<u64>)> = self
+            .form
+            .controls
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.kind == ControlKind::Timer)
+            .map(|(i, c)| (i, (c.enabled && c.interval_ms > 0).then_some(c.interval_ms)))
+            .collect();
+        for (i, want) in wanted {
+            if want == self.timers.get(&i).map(|t| t.0) {
+                continue;
+            }
+            self.timers.remove(&i);
+            let Some(ms) = want else { continue };
+            self.timer_serial += 1;
+            let serial = self.timer_serial;
+            self.timers.insert(i, (ms, serial));
+            cx.spawn(async move |this, cx| loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(ms))
+                    .await;
+                let again = this.update(cx, |this, cx| {
+                    if this.timers.get(&i).map(|t| t.1) != Some(serial) {
+                        return false; // stopped or restarted
+                    }
+                    this.fire(i, "Timer");
+                    cx.notify();
+                    true
+                });
+                if !matches!(again, Ok(true)) {
+                    break; // window closed, or this timer was replaced
+                }
+            })
+            .detach();
         }
     }
 
     /// Fire `<control>_<event>` in the running program (a missing handler
-    /// is a no-op there).
-    fn fire(&self, control: &str, event: &str) {
-        self.session
-            .send(DebugCommand::Call(format!("{}_{}", control, event)));
+    /// is a no-op there). A control array element's handler also gets its
+    /// `Index`.
+    fn fire(&self, idx: usize, event: &str) {
+        let c = &self.form.controls[idx];
+        self.session.send(DebugCommand::Call(
+            format!("{}_{}", c.name, event),
+            c.index.into_iter().collect(),
+        ));
     }
 
     /// Tell the program what the user did, before the event it causes, so
@@ -2206,11 +2253,17 @@ impl FormRunner {
         self.session.send(DebugCommand::Edit(edit));
     }
 
-    /// Show the form as the program has changed it: its properties, and the
-    /// text and selection of the controls it touched.
-    fn show(&mut self, snap: &FormSnapshot, win: &mut Window) {
+    /// Show the form as the program has changed it: its properties, the
+    /// state of the controls it touched, the timers it started or stopped,
+    /// and the control it gave the focus to.
+    fn show(&mut self, snap: &FormSnapshot, win: &mut Window, cx: &mut Context<Self>) {
         snap.apply_to(&mut self.form, &mut self.state);
         win.set_window_title(&self.form.caption);
+        self.sync_timers(cx);
+        // `SetFocus`
+        if let Some(handle) = snap.focus.and_then(|i| self.focus.get(&i)) {
+            win.focus(handle);
+        }
     }
 
     fn close_lists(&mut self, keep: Option<usize>) {
@@ -2233,7 +2286,7 @@ impl FormRunner {
                     self.close_lists(Some(idx));
                     self.state[idx].dropped = open;
                     if open {
-                        self.fire(&spec.name, "DropDown");
+                        self.fire(idx, "DropDown");
                     }
                 } else {
                     self.close_lists(None);
@@ -2248,13 +2301,34 @@ impl FormRunner {
                     index: i,
                 });
                 if spec.kind == ControlKind::ComboBox && self.state[idx].text != was {
-                    self.fire(&spec.name, "Change");
+                    self.fire(idx, "Change");
                 }
-                self.fire(&spec.name, "Click");
+                self.fire(idx, "Click");
+            }
+            _ if spec.kind.has_value() && spec.enabled => {
+                // A click toggles a CheckBox (0 <-> 1; a grayed one is
+                // checked) and selects an OptionButton, clearing the others.
+                self.close_lists(None);
+                let value = match spec.kind {
+                    ControlKind::CheckBox => {
+                        if self.state[idx].value == 1 {
+                            0
+                        } else {
+                            1
+                        }
+                    }
+                    _ => 1,
+                };
+                set_value(&self.form, &mut self.state, idx, value);
+                self.tell(UserEdit::Value {
+                    control: idx,
+                    value,
+                });
+                self.fire(idx, "Click");
             }
             _ => {
                 self.close_lists(None);
-                self.fire(&spec.name, "Click");
+                self.fire(idx, "Click");
             }
         }
     }
@@ -2271,12 +2345,11 @@ impl FormRunner {
             return false;
         }
         self.state[idx].list_index = None;
-        let name = spec.name.clone();
         self.tell(UserEdit::Text {
             control: idx,
             text: self.state[idx].text.clone(),
         });
-        self.fire(&name, "Change");
+        self.fire(idx, "Change");
         true
     }
 }
@@ -2311,12 +2384,16 @@ impl Render for FormRunner {
                 list_index: self.state[idx].list_index,
                 dropped: self.state[idx].dropped,
                 focused: focus.as_ref().is_some_and(|f| f.contains_focused(win, cx)),
+                value: self.state[idx].value,
             };
             let mut hook = |part: Part,
                             el: gpui::Stateful<gpui::Div>,
                             cx: &mut Context<FormRunner>|
              -> gpui::Stateful<gpui::Div> {
-                let name = c.name.clone();
+                let name = match c.index {
+                    Some(n) => format!("{}({})", c.name, n),
+                    None => c.name.clone(),
+                };
                 let mut el = el.debug_selector(move || match part {
                     Part::Body => format!("run-{}", name),
                     Part::Field => format!("run-{}-field", name),
@@ -2391,7 +2468,50 @@ impl Ide {
             "height" => format!("{}", c.rect.height),
             "interval" => format!("{}", c.interval_ms),
             "style" => format!("{}", c.style),
+            "value" => format!("{}", c.value),
+            "index" => c.index.map(|i| i.to_string()).unwrap_or_default(),
+            "enabled" => if c.enabled { "True" } else { "False" }.to_string(),
+            "backcolor" => c.color.map(|v| format!("#{:06X}", v)).unwrap_or_default(),
+            "forecolor" => c
+                .fore_color
+                .map(|v| format!("#{:06X}", v))
+                .unwrap_or_default(),
+            "fontname" => c.font.name.clone(),
+            "fontsize" => format!("{}", c.font.size),
+            "fontbold" => if c.font.bold { "True" } else { "False" }.to_string(),
+            "fontitalic" => if c.font.italic { "True" } else { "False" }.to_string(),
+            "fontunderline" => if c.font.underline { "True" } else { "False" }.to_string(),
             _ => String::new(),
+        }
+    }
+
+    /// A colour typed in the inspector: `#RRGGBB`, `&HBBGGRR` (VB's order)
+    /// or blank for "the control's usual colour".
+    fn parse_color(val: &str) -> Option<Option<u32>> {
+        let v = val.trim();
+        if v.is_empty() {
+            return Some(None);
+        }
+        if let Some(hex) = v.strip_prefix('#') {
+            return u32::from_str_radix(hex, 16)
+                .ok()
+                .filter(|n| *n <= 0xFF_FFFF)
+                .map(Some);
+        }
+        let hex = v
+            .strip_prefix("&H")
+            .or_else(|| v.strip_prefix("&h"))
+            .map(|h| h.trim_end_matches('&'))?;
+        let vb = i64::from_str_radix(hex, 16).ok()?;
+        oxbasic_ui::host::from_vb_color(vb).ok().map(Some)
+    }
+
+    /// `True`/`False` (or 1/0) typed in the inspector.
+    fn parse_bool(val: &str) -> Option<bool> {
+        match val.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "-1" => Some(true),
+            "false" | "0" => Some(false),
+            _ => None,
         }
     }
 
@@ -2440,6 +2560,55 @@ impl Ide {
                     }
                 }
             }
+            // CheckBox 0/1/2; an OptionButton is 0 or 1
+            "value" => {
+                let max = if c.kind == ControlKind::CheckBox {
+                    2
+                } else {
+                    1
+                };
+                if let Ok(v) = val.trim().parse::<i32>() {
+                    if (0..=max).contains(&v) {
+                        c.value = v;
+                    }
+                }
+            }
+            // the array's Index: blank leaves the array
+            "index" => {
+                if val.trim().is_empty() {
+                    c.index = None;
+                } else if let Ok(n) = val.trim().parse::<i32>() {
+                    if n >= 0 {
+                        c.index = Some(n);
+                    }
+                }
+            }
+            "enabled" => {
+                if let Some(b) = Self::parse_bool(val) {
+                    c.enabled = b;
+                }
+            }
+            "backcolor" => {
+                if let Some(col) = Self::parse_color(val) {
+                    c.color = col;
+                }
+            }
+            "forecolor" => {
+                if let Some(col) = Self::parse_color(val) {
+                    c.fore_color = col;
+                }
+            }
+            "fontname" => c.font.name = val.trim().to_string(),
+            "fontsize" => {
+                if let Ok(s) = val.trim().parse::<f32>() {
+                    if (1.0..=2048.0).contains(&s) {
+                        c.font.size = s;
+                    }
+                }
+            }
+            "fontbold" => c.font.bold = Self::parse_bool(val).unwrap_or(c.font.bold),
+            "fontitalic" => c.font.italic = Self::parse_bool(val).unwrap_or(c.font.italic),
+            "fontunderline" => c.font.underline = Self::parse_bool(val).unwrap_or(c.font.underline),
             _ => {}
         }
     }
@@ -2467,13 +2636,16 @@ impl Ide {
         if idx != FORM_IDX && new.eq_ignore_ascii_case("Form") {
             return Some("\"Form\" names the form's own events".into());
         }
-        let taken = self
-            .form
-            .controls
-            .iter()
-            .enumerate()
-            .any(|(i, c)| i != idx && c.name.eq_ignore_ascii_case(new))
-            || (idx != FORM_IDX && self.form.name.eq_ignore_ascii_case(new));
+        // A name another control already has is a control array (both in
+        // it, with distinct indexes, and the same kind); otherwise taken.
+        let me = self.form.controls.get(idx);
+        let taken = self.form.controls.iter().enumerate().any(|(i, c)| {
+            i != idx
+                && c.name.eq_ignore_ascii_case(new)
+                && !me.is_some_and(|m| {
+                    m.kind == c.kind && m.index.is_some() && c.index.is_some() && m.index != c.index
+                })
+        }) || (idx != FORM_IDX && self.form.name.eq_ignore_ascii_case(new));
         taken.then(|| format!("\"{}\" is already used on this form", new))
     }
 
@@ -2509,8 +2681,26 @@ impl Ide {
         }
         let kind = self.form.controls[idx].kind;
         self.form.controls[idx].name = new.clone();
-        let events = events_for_control(kind.basic_name());
-        let n = code_model::rename_control(&mut self.lines, &old, &new, &events);
+        // The code follows the name unless other controls still carry the
+        // old one (this control just left a control array, or joined one
+        // whose handlers already exist).
+        let old_still_used = self
+            .form
+            .controls
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(&old));
+        let new_shared = self
+            .form
+            .controls
+            .iter()
+            .enumerate()
+            .any(|(i, c)| i != idx && c.name.eq_ignore_ascii_case(&new));
+        let n = if old_still_used || new_shared {
+            0
+        } else {
+            let events = events_for_control(kind.basic_name());
+            code_model::rename_control(&mut self.lines, &old, &new, &events)
+        };
         self.cursor.1 = self.cursor.1.min(self.line_len(self.cursor.0));
         self.status = if n == 0 {
             format!("renamed {} to {}", old, new)
@@ -2741,6 +2931,9 @@ impl Ide {
         if k == ControlKind::ComboBox {
             rows.push(("style", "Style"));
         }
+        if k.has_value() {
+            rows.push(("value", "Value"));
+        }
         if k == ControlKind::Timer {
             rows.push(("interval", "Interval"));
         } else {
@@ -2749,6 +2942,21 @@ impl Ide {
                 ("top", "Top"),
                 ("width", "Width"),
                 ("height", "Height"),
+            ]);
+        }
+        rows.push(("enabled", "Enabled"));
+        rows.push(("index", "Index"));
+        if k != ControlKind::Timer {
+            rows.push(("backcolor", "BackColor"));
+        }
+        if k.has_font() {
+            rows.extend([
+                ("forecolor", "ForeColor"),
+                ("fontname", "Font.Name"),
+                ("fontsize", "Font.Size"),
+                ("fontbold", "Font.Bold"),
+                ("fontitalic", "Font.Italic"),
+                ("fontunderline", "Font.Underline"),
             ]);
         }
         rows

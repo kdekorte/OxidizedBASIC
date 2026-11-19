@@ -513,10 +513,15 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             let mut children = pair.into_inner();
             let first = children.next().unwrap();
             let mut path = vec![first.as_str().to_string()];
+            let mut element = None;
             let mut args = Vec::new();
             for child in children {
                 match child.as_rule() {
                     Rule::Ident => path.push(child.as_str().to_string()),
+                    // `Command1(2).Caption`: an element of a control array
+                    Rule::ElementIndex => {
+                        element = Some(expr(child.into_inner().next().unwrap())?);
+                    }
                     // `.Member` segments sit inside MemberTail
                     Rule::MemberTail => path.extend(
                         child
@@ -528,12 +533,17 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                     _ => {}
                 }
             }
-            let target = path[1..]
-                .iter()
-                .fold(Expr::Var(path[0].clone()), |acc, seg| Expr::Member {
-                    obj: Box::new(acc),
-                    name: seg.clone(),
-                });
+            let head = match element {
+                Some(index) => Expr::Call {
+                    name: path[0].clone(),
+                    args: vec![index],
+                },
+                None => Expr::Var(path[0].clone()),
+            };
+            let target = path[1..].iter().fold(head, |acc, seg| Expr::Member {
+                obj: Box::new(acc),
+                name: seg.clone(),
+            });
             Ok(Stmt::Call {
                 target,
                 args,
@@ -855,6 +865,42 @@ mod tests {
     #[test]
     fn parses_error_handling() {
         parse("On Error GoTo Handler\nOn Error Resume Next\nOn Error GoTo 0\nResume Next\nResume\nResume Handler\nHandler:\n").unwrap();
+    }
+
+    #[test]
+    fn parses_member_calls_on_control_array_elements() {
+        // the calls, without the debugger's line markers
+        let calls = |src: &str| -> Vec<(Expr, Vec<Expr>)> {
+            parse(src)
+                .unwrap()
+                .items
+                .into_iter()
+                .filter_map(|i| match i {
+                    Item::Stmt(Stmt::Call { target, args, .. }) => Some((target, args)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let c = calls("List1(i + 1).AddItem \"x\", 0\nCommand1(2).SetFocus\n");
+        assert_eq!(c.len(), 2);
+        match &c[0].0 {
+            Expr::Member { obj, name } => {
+                assert_eq!(name, "AddItem");
+                assert!(
+                    matches!(&**obj, Expr::Call { name, args } if name == "List1" && args.len() == 1)
+                );
+            }
+            other => panic!("unexpected target {:?}", other),
+        }
+        assert_eq!(c[0].1.len(), 2);
+        // a plain call with a parenthesised first argument is unchanged
+        for (target, _) in calls("DoIt (1)\nDoIt (1), 2\n") {
+            assert!(
+                matches!(&target, Expr::Var(n) if n == "DoIt"),
+                "{:?}",
+                target
+            );
+        }
     }
 
     #[test]

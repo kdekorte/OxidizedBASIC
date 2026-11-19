@@ -222,6 +222,8 @@ PSep = { ";" | "," }
 
 LetStmt = { PostfixExpr ~ "=" ~ Expr }
 CallStmt = { kw_call ~ PostfixExpr }
-ExprCallStmt = { !ReservedKw ~ Ident ~ MemberTail ~ BareArgs? }
+ExprCallStmt = { !ReservedKw ~ Ident ~ ElementIndex? ~ MemberTail ~ BareArgs? }
+// `Command1(2).SetFocus`: a control array element, before its members
+ElementIndex = { "(" ~ Expr ~ ")" ~ &"." }
 MemberTail = { ("." ~ Ident)* }
 BareArgs = _{ Expr ~ ("," ~ Expr)* }

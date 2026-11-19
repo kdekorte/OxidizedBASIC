@@ -88,6 +88,16 @@ pub fn mappings() -> Vec<ControlMapping> {
             gpui_component: "gpui::Context::spawn / Async Timer",
             description: "Non-blocking async loop timer thread",
         },
+        ControlMapping {
+            basic_control: "CheckBox",
+            gpui_component: "div() + check mark",
+            description: "Tri-state toggle: unchecked, checked, grayed",
+        },
+        ControlMapping {
+            basic_control: "OptionButton",
+            gpui_component: "div() + radio mark",
+            description: "Exclusive choice within the form's option group",
+        },
     ]
 }
 
@@ -192,6 +202,17 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
             ("Resize", ""),
         ],
         "timer" => &[("Timer", "")],
+        "checkbox" | "optionbutton" => &[
+            ("Click", ""),
+            ("GotFocus", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+        ],
         "form" => &[
             ("Activate", ""),
             ("Click", ""),
@@ -231,7 +252,8 @@ pub fn event_params(control: &str, event: &str) -> Option<&'static str> {
 /// (`Command1` → `Click`, `Text1` → `Change`, `Form` → `Load`, …).
 pub fn default_event(control: &str) -> Option<&'static str> {
     Some(match control.to_ascii_lowercase().as_str() {
-        "commandbutton" | "label" | "frame" | "listbox" | "picturebox" => "Click",
+        "commandbutton" | "label" | "frame" | "listbox" | "picturebox" | "checkbox"
+        | "optionbutton" => "Click",
         "textbox" | "combobox" => "Change",
         "timer" => "Timer",
         "form" => "Load",
@@ -300,7 +322,7 @@ mod tests {
 
     #[test]
     fn mapping_table_matches_spec() {
-        assert_eq!(mappings().len(), 9);
+        assert_eq!(mappings().len(), 11);
         assert_eq!(
             map_control("CommandButton"),
             Some("gpui_kit::component::button::Button")
@@ -342,6 +364,8 @@ mod tests {
             "ComboBox",
             "PictureBox",
             "Timer",
+            "CheckBox",
+            "OptionButton",
             "Form",
         ] {
             let events = events_for_control(kind);
