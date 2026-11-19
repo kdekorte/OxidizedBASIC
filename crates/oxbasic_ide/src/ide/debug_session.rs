@@ -142,8 +142,9 @@ pub struct DebugSession {
     cmd_tx: Sender<DebugCommand>,
 }
 impl DebugSession {
-    /// A program with one form (or none): the old entry point, kept for
-    /// callers that only have a layout and its code.
+    /// A program with one form (or none), whose handlers are named bare
+    /// (`Command1_Click`): the shape the tests use.
+    #[cfg(test)]
     pub fn start_with_form(
         src: String,
         form: Option<FormSpec>,

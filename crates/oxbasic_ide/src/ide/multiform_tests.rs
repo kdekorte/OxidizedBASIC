@@ -4,7 +4,9 @@
 
 use super::debug_session::*;
 use super::program::combine;
+use super::toolbox_tests::ide_window;
 use super::workspace::{to_lines, Doc};
+use super::*;
 use oxbasic_ui::{ControlKind, ControlSpec, FormSpec, Rect};
 use std::collections::HashSet;
 use std::sync::mpsc::{channel, Receiver};
@@ -267,4 +269,121 @@ fn a_module_function_is_shared_and_each_forms_variables_stay_its_own() {
     assert_eq!(caption(0), "2", "Form1's Count is 1");
     assert_eq!(caption(0), "4", "and 2");
     session.send(DebugCommand::Stop);
+}
+
+/// Build a two-form project in the IDE: Form1 has a button that shows
+/// Form2, and Form2 has a label and a button that closes it.
+fn two_form_ide(ide: &Entity<Ide>, cx: &mut gpui::VisualTestContext) {
+    ide.update(cx, |ide, cx| {
+        // Form1: a button
+        ide.form.controls.clear();
+        let mut b = ControlSpec::new(
+            "Command1",
+            ControlKind::CommandButton,
+            Rect::new(16.0, 16.0, 120.0, 28.0),
+        );
+        b.caption = "Open".into();
+        ide.form.controls.push(b);
+        ide.lines = vec![
+            "Sub Command1_Click()".into(),
+            "  Form2.Show".into(),
+            "End Sub".into(),
+        ];
+        // Form2: a label and a Close button
+        ide.add_form(cx);
+        ide.form.controls.clear();
+        ide.form.controls.push(ControlSpec::new(
+            "Label1",
+            ControlKind::Label,
+            Rect::new(16.0, 16.0, 200.0, 20.0),
+        ));
+        let mut c = ControlSpec::new(
+            "Command1",
+            ControlKind::CommandButton,
+            Rect::new(16.0, 48.0, 120.0, 28.0),
+        );
+        c.caption = "Close".into();
+        ide.form.controls.push(c);
+        ide.lines = vec![
+            "Sub Form_Load()".into(),
+            "  Label1.Caption = \"second form\"".into(),
+            "End Sub".into(),
+            "Sub Command1_Click()".into(),
+            "  Unload Me".into(),
+            "End Sub".into(),
+        ];
+        ide.switch_to(0);
+    });
+}
+
+/// The IDE's live windows: `(form index, window)` for each open one.
+fn live_windows(ide: &Entity<Ide>, cx: &mut gpui::VisualTestContext) -> Vec<usize> {
+    ide.read_with(cx, |ide, _| {
+        let mut v: Vec<usize> = ide.form_windows.keys().copied().collect();
+        v.sort();
+        v
+    })
+}
+
+/// Feed the program's events to the IDE for a moment.
+fn pump_for(
+    ide: &Entity<Ide>,
+    cx: &mut gpui::VisualTestContext,
+    until: impl Fn(&Entity<Ide>, &mut gpui::VisualTestContext) -> bool,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let rx = ide.read_with(cx, |ide, _| ide.evt_rx.clone());
+        loop {
+            let ev = rx.lock().unwrap().try_recv();
+            let Ok(ev) = ev else { break };
+            ide.update(cx, |ide, cx| ide.on_debug_event(ev, cx));
+        }
+        cx.run_until_parked();
+        if until(ide, cx) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[gpui::test]
+fn running_a_two_form_project_opens_a_window_per_shown_form(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    two_form_ide(&ide, cx);
+    ide.update(cx, |ide, _| ide.launch(false));
+    pump_for(&ide, cx, |ide, cx| live_windows(ide, cx) == [0]);
+    assert_eq!(live_windows(&ide, cx), [0], "only the startup form opens");
+
+    // clicking Form1's button runs Form1's handler, which shows Form2
+    let handle = ide.read_with(cx, |ide, _| ide.form_windows[&0]);
+    let mut win1 = gpui::VisualTestContext::from_window(handle.into(), cx);
+    win1.simulate_resize(size(px(500.0), px(400.0)));
+    win1.run_until_parked();
+    let open = win1.debug_bounds("run-Command1").expect("Form1's button");
+    win1.simulate_click(open.center(), gpui::Modifiers::none());
+    pump_for(&ide, cx, |ide, cx| live_windows(ide, cx) == [0, 1]);
+    assert_eq!(live_windows(&ide, cx), [0, 1], "Form2 opened");
+
+    // Form2 was loaded first: its Form_Load set its own label
+    let handle2 = ide.read_with(cx, |ide, _| ide.form_windows[&1]);
+    handle2
+        .read_with(cx, |r, _| {
+            assert_eq!(r.form_index, 1);
+            assert_eq!(r.form.controls[0].caption, "second form");
+        })
+        .unwrap();
+
+    // Form2's own Close button unloads it; Form1 stays
+    let mut win2 = gpui::VisualTestContext::from_window(handle2.into(), cx);
+    win2.simulate_resize(size(px(500.0), px(400.0)));
+    win2.run_until_parked();
+    let close = win2.debug_bounds("run-Command1").expect("Form2's button");
+    win2.simulate_click(close.center(), gpui::Modifiers::none());
+    pump_for(&ide, cx, |ide, cx| live_windows(ide, cx) == [0]);
+    assert_eq!(live_windows(&ide, cx), [0], "Form2 closed, Form1 remains");
+    ide.read_with(cx, |ide, _| {
+        assert!(ide.live, "the program is still running")
+    });
+    ide.update(cx, |ide, cx| ide.stop_program(cx));
 }

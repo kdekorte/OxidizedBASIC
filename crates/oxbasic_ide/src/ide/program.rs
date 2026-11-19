@@ -9,7 +9,7 @@
 
 use super::highlight::{tokenize_line, Tok};
 use super::workspace::{Doc, DocKind};
-use oxbasic_ui::project_host::{handler_for, FORM_SEP};
+use oxbasic_ui::project_host::handler_for;
 use std::collections::HashSet;
 
 /// Where a line of the combined program came from.
@@ -184,7 +184,7 @@ fn prefix_identifiers(lines: &[String], form: &str, names: &HashSet<String>) -> 
 /// form's procedures and module-level variables apart.
 pub fn combine(docs: &[Doc]) -> Program {
     let mut program = Program::default();
-    let mut push = |program: &mut Program, text: String, origin: Option<Origin>| {
+    let push = |program: &mut Program, text: String, origin: Option<Origin>| {
         program.origins.push(origin);
         program.source.push_str(&text);
         program.source.push('\n');

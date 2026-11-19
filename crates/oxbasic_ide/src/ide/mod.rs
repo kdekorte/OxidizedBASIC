@@ -409,7 +409,20 @@ Print \"Total = \" & CStr(Total)
 
     fn on_debug_event(&mut self, ev: DebugEvent, cx: &mut Context<Self>) {
         match ev {
-            DebugEvent::Paused(info) => {
+            DebugEvent::Paused(mut info) => {
+                // The program's line numbers are the combined program's:
+                // find the document and line the user wrote, and show them.
+                if let Some(origin) = self.origin_of(info.line) {
+                    info.line = origin.line;
+                    if origin.doc != self.workspace.active {
+                        self.switch_to(origin.doc);
+                    }
+                }
+                // a form's handlers are `Form2__Command1_Click` in the
+                // combined program; show the name the user wrote
+                if let Some((_, handler)) = oxbasic_ui::project_host::split_handler(&info.proc) {
+                    info.proc = handler.to_string();
+                }
                 self.status = format!(
                     "Paused at line {} in {}",
                     info.line,
@@ -467,6 +480,7 @@ Print \"Total = \" & CStr(Total)
         }
     }
 
+    #[cfg(test)]
     fn source(&self) -> String {
         self.lines.join("\n")
     }
