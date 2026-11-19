@@ -25,6 +25,7 @@ mod showcase_flow_tests;
 mod showcase_form_tests;
 #[cfg(test)]
 mod showcase_run;
+pub mod toolbar;
 pub mod workspace;
 
 use debug_session::{DebugCommand, DebugEvent, DebugSession};
@@ -42,6 +43,7 @@ use oxbasic_ui::{
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use toolbar::file_name;
 use workspace::DocKind;
 
 use gpui::{
@@ -209,7 +211,9 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(gpui::TitlebarOptions {
                     title: Some(SharedString::from("OxidizedBASIC IDE")),
-                    ..Default::default()
+                    // the toolbar is the title bar (toolbar.rs)
+                    appears_transparent: true,
+                    traffic_light_position: Some(toolbar::traffic_lights()),
                 }),
                 ..Default::default()
             },
@@ -629,7 +633,7 @@ impl Ide {
         match std::fs::write(&path, doc.form.to_oxform()) {
             Ok(()) => {
                 doc.mark_form_saved();
-                self.status = format!("saved {}", path.display());
+                self.status = format!("Saved {}", file_name(&path));
             }
             Err(e) => self.status = format!("save failed: {}", e),
         }
@@ -726,6 +730,8 @@ mod member_tests;
 mod multiform_tests;
 #[cfg(test)]
 mod project_tests;
+#[cfg(test)]
+mod toolbar_tests;
 #[cfg(test)]
 mod toolbox_tests;
 #[cfg(test)]
@@ -1140,11 +1146,7 @@ fn default_form() -> FormSpec {
 impl Render for Ide {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // the window shows the project, with `*` while anything is unsaved
-        let dirty = if self.working_copy_changed() || self.workspace.is_dirty() {
-            " *"
-        } else {
-            ""
-        };
+        let dirty = if self.has_unsaved_work() { " *" } else { "" };
         window.set_window_title(&format!("{}{} — OxidizedBASIC", self.workspace.name, dirty));
         if !self.scrollbars_initialized {
             self.scrollbars_initialized = true;
@@ -1464,70 +1466,6 @@ impl Ide {
                 action(this, cx);
                 cx.notify();
             }))
-    }
-
-    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let running = self.session.is_some();
-        div()
-            .flex()
-            .items_center()
-            .h_11()
-            .px_2()
-            .bg(rgb(TOOLBAR))
-            .border_b_1()
-            .border_color(rgb(BORDER))
-            .child(self.action_button(
-                "toolbar-save-code",
-                "Save Code",
-                |this, _cx| this.save_code(),
-                cx,
-            ))
-            .child(self.action_button(
-                "toolbar-save-form",
-                "Save Form",
-                |this, _cx| this.save_form(),
-                cx,
-            ))
-            .child(div().w_px().h_7().mx_1().bg(rgb(BORDER)))
-            .child(self.action_button(
-                "toolbar-view-code",
-                "View Code",
-                |this, cx| this.view_code(cx),
-                cx,
-            ))
-            .child(self.action_button(
-                "toolbar-view-object",
-                "View Object",
-                |this, cx| this.hide_code_window(cx),
-                cx,
-            ))
-            .child(div().w_px().h_7().mx_1().bg(rgb(BORDER)))
-            .child(if self.paused.is_some() {
-                self.action_button(
-                    "toolbar-run",
-                    "▶ Continue",
-                    |this, _cx| this.run_program(),
-                    cx,
-                )
-            } else if running {
-                self.action_button("toolbar-live", "● Live", |_this, _cx| {}, cx)
-            } else {
-                self.action_button("toolbar-run", "▶ Run", |this, _cx| this.run_program(), cx)
-            })
-            .child(self.action_button("toolbar-step", "Step", |this, _cx| this.step_program(), cx))
-            .child(self.action_button(
-                "toolbar-stop",
-                "■ Stop",
-                |this, cx| this.stop_program(cx),
-                cx,
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .ml_2()
-                    .text_color(rgb(DIM))
-                    .child(SharedString::from(self.status.clone())),
-            )
     }
 }
 

@@ -280,7 +280,9 @@ impl Ide {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(gpui::TitlebarOptions {
                         title: Some(SharedString::from("Code")),
-                        ..Default::default()
+                        // its header is the title bar, as in the main window
+                        appears_transparent: true,
+                        traffic_light_position: Some(super::toolbar::traffic_lights()),
                     }),
                     window_min_size: Some(size(px(560.), px(260.))),
                     ..Default::default()
@@ -349,14 +351,24 @@ impl Ide {
 
         let header = div()
             .flex_none()
-            .h_11()
-            .px_2()
+            .h(px(super::toolbar::TOOLBAR_H))
+            // room for the traffic lights
+            .pl(px(84.0))
+            .pr_3()
             .flex()
             .items_center()
             .gap_2()
             .bg(rgb(TOOLBAR))
             .border_b_1()
             .border_color(rgb(BORDER))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                |ev: &MouseDownEvent, win: &mut Window, _cx| {
+                    if ev.click_count == 2 {
+                        win.titlebar_double_click();
+                    }
+                },
+            )
             .child(self.select_box("code-object", CodeMenu::Object, object.clone(), cx))
             .child(self.select_box(
                 "code-event",

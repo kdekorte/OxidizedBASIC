@@ -83,7 +83,7 @@ impl Ide {
             return Err("the project has no file yet: use Save Project As".into());
         };
         self.workspace.save_all(&file)?;
-        self.status = format!("saved {}", file.display());
+        self.status = format!("Saved {}", file_name(&file));
         Ok(())
     }
 
@@ -112,7 +112,7 @@ impl Ide {
             }
         }
         self.workspace.save_all(&file)?;
-        self.status = format!("saved {}", file.display());
+        self.status = format!("Saved {}", file_name(&file));
         Ok(())
     }
 
@@ -126,7 +126,7 @@ impl Ide {
         let dir = file.parent().map(PathBuf::from).unwrap_or_default();
         self.workspace.ensure_files(i, &dir);
         self.workspace.save_doc_code(i)?;
-        self.status = format!("saved {}", self.workspace.active_doc().name);
+        self.status = format!("Saved {}", self.workspace.active_doc().name);
         Ok(())
     }
 
