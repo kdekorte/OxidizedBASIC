@@ -141,12 +141,19 @@ xcodebuild -downloadComponent MetalToolchain
 
 ## Known limitations
 
-- GUI control *properties* (e.g. `Label1.Caption = "x"` from BASIC) are
-  not yet writable from program code — edit them in the IDE's property
-  inspector; runtime property binding is a follow-up.
+- **Control properties from BASIC** work when the program runs from the
+  IDE: `Label1.Caption = "x"`, `Text1.Text`, `Me.Caption`, `Visible`,
+  `Enabled`, `Left/Top/Width/Height`, and for list and combo boxes
+  `AddItem [, index]`, `RemoveItem`, `Clear`, `List(i)`, `ListCount`,
+  `ListIndex`. They read what the user typed or picked, and changes show
+  in the live window. Unsupported members raise VB error 438 and a
+  missing object raises 35/424 as before. `oxbasic gui` and `oxbasic run`
+  don't bind a form yet, so there these still fail. Not yet: `SetFocus`,
+  `Value`, `Font`/colour properties, control arrays, and `Timer.Enabled`
+  taking effect on a running timer.
 - Run opens the form in its own OS window (closing it or Stop ends the
-  program). Only `Click` events are routed from that window so far;
-  TextBox typing, ListBox selection and Timers still need `oxbasic gui`.
+  program). `Click`, `Change` (typing, picking) and `DropDown` reach the
+  program; Timers don't fire in the IDE's window yet (use `oxbasic gui`).
 - Property-inspector editing and toolbox adding were reworked (per-field
   focus, redraw on add) but have only been checked by build/tests, not
   yet by hand.

@@ -24,6 +24,7 @@ pub mod gpui_backend;
 #[cfg(feature = "gpui")]
 pub mod gpui_controls;
 
+pub mod host;
 pub use form::*;
 
 use std::collections::HashMap;

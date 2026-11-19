@@ -519,3 +519,91 @@ fn dropped_list_closes_when_clicking_elsewhere(cx: &mut gpui::TestAppContext) {
     cx.simulate_click(button.center(), gpui::Modifiers::none());
     runner.read_with(cx, |r, _| assert!(!r.state[4].dropped));
 }
+
+/// A live program that writes to the form: loading retitles it, and a
+/// click shows the typed text in `Label1` and adds it to `List1`.
+fn writing_session(form: FormSpec) -> (DebugSession, std::sync::mpsc::Receiver<DebugEvent>) {
+    let src = "Dim Clicks As Long\n\
+               Sub Form_Load()\n Me.Caption = \"Ready\"\nEnd Sub\n\
+               Sub Command1_Click()\n Clicks = Clicks + 1\n \
+               Label1.Caption = CStr(Clicks) & \":\" & Text1.Text\n \
+               List1.AddItem Text1.Text\nEnd Sub\n";
+    let (tx, rx) = channel();
+    let session = DebugSession::start_with_form(
+        src.into(),
+        Some(form),
+        Arc::new(Mutex::new(HashSet::new())),
+        tx,
+    );
+    session.send(DebugCommand::Run);
+    (session, rx)
+}
+
+/// Feed the session's events to the IDE (as its poll task does) until a
+/// form change has arrived.
+fn pump_until_form(
+    ide: &Entity<Ide>,
+    rx: &std::sync::mpsc::Receiver<DebugEvent>,
+    cx: &mut gpui::VisualTestContext,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut forms = 0;
+    while forms == 0 && std::time::Instant::now() < deadline {
+        while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            if matches!(ev, DebugEvent::Form(_)) {
+                forms += 1;
+            }
+            ide.update(cx, |ide, cx| ide.on_debug_event(ev, cx));
+        }
+    }
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn program_changes_reach_the_live_window(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let form = sample_form();
+    let (session, rx) = writing_session(form.clone());
+    ide.update(cx, |ide, cx| {
+        ide.form = form;
+        ide.session = Some(session.clone());
+        cx.notify();
+    });
+
+    // Form_Load retitled the form; going live opens the window with it
+    pump_until_form(&ide, &rx, cx);
+    ide.update(cx, |ide, cx| ide.on_debug_event(DebugEvent::Live, cx));
+    cx.run_until_parked();
+    let handle = ide
+        .read_with(cx, |ide, _| ide.form_window)
+        .expect("the form window is open");
+    let mut win = gpui::VisualTestContext::from_window(handle.into(), cx);
+    win.simulate_resize(size(px(500.0), px(560.0)));
+    win.run_until_parked();
+    handle
+        .read_with(&win, |r, _| assert_eq!(r.form.caption, "Ready"))
+        .unwrap();
+
+    // the user types in Text1 and clicks the button
+    let text = win.debug_bounds("run-Text1").expect("Text1");
+    win.simulate_click(text.center(), gpui::Modifiers::none());
+    win.simulate_input("hi");
+    let button = win.debug_bounds("run-Command1").expect("Command1");
+    win.simulate_click(button.center(), gpui::Modifiers::none());
+    pump_until_form(&ide, &rx, cx);
+    win.run_until_parked();
+
+    // the program saw the typed text and wrote to Label1 and List1; the
+    // window shows it, and still holds what the user typed
+    handle
+        .read_with(&win, |r, _| {
+            assert_eq!(r.form.controls[0].caption, "1:hi");
+            assert_eq!(
+                r.form.controls[3].items,
+                ["Apple", "Banana", "Cherry", "hi"]
+            );
+            assert_eq!(r.state[1].text, "hi", "the typed text stays");
+        })
+        .unwrap();
+    session.send(DebugCommand::Stop);
+}

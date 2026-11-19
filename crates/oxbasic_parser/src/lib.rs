@@ -517,6 +517,13 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             for child in children {
                 match child.as_rule() {
                     Rule::Ident => path.push(child.as_str().to_string()),
+                    // `.Member` segments sit inside MemberTail
+                    Rule::MemberTail => path.extend(
+                        child
+                            .into_inner()
+                            .filter(|c| c.as_rule() == Rule::Ident)
+                            .map(|c| c.as_str().to_string()),
+                    ),
                     Rule::Expr => args.push(expr(child)?),
                     _ => {}
                 }

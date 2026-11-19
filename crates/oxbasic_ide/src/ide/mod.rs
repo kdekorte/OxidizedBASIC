@@ -18,6 +18,7 @@ use oxbasic_runtime::PausedInfo;
 use oxbasic_ui::gpui_controls::{
     edit_text, paint_control, typed_text as ks_text, ControlLook, ControlState, Part, FORM_BACK,
 };
+use oxbasic_ui::host::{FormSnapshot, UserEdit};
 use oxbasic_ui::{
     default_event, event_params, event_signatures, events_for_control, ControlKind, ControlSpec,
     FormSpec, Rect,
@@ -211,6 +212,10 @@ pub struct Ide {
     /// The live form's own OS window — in classic VB the form *is* the
     /// application window, not a pane inside the IDE.
     form_window: Option<WindowHandle<FormRunner>>,
+    /// The running program's form as the program has changed it
+    /// (`Label1.Caption = "x"`), kept so a window that opens later (or
+    /// reopens) starts from it.
+    live_form: Option<(FormSpec, Vec<ControlState>)>,
     status: String,
     evt_rx: Arc<Mutex<Receiver<DebugEvent>>>,
     evt_tx: Sender<DebugEvent>,
@@ -279,6 +284,7 @@ Print \"Total = \" & CStr(Total)
             paused: None,
             live: false,
             form_window: None,
+            live_form: None,
             status: "Ready".into(),
             evt_rx,
             evt_tx,
@@ -367,6 +373,7 @@ Print \"Total = \" & CStr(Total)
                     self.status = "Running".into();
                 }
             }
+            DebugEvent::Form(snap) => self.on_form_changed(snap, cx),
             DebugEvent::Live => {
                 self.live = true;
                 self.paused = None;
@@ -397,6 +404,19 @@ Print \"Total = \" & CStr(Total)
         self.lines.join("\n")
     }
 
+    /// The program changed the form (`Label1.Caption = "x"`, `AddItem`...):
+    /// keep the latest, and show it in the live window if there is one.
+    fn on_form_changed(&mut self, snap: FormSnapshot, cx: &mut Context<Self>) {
+        // the program's copy is authoritative: it has the user's edits too
+        self.live_form = Some((snap.form.clone(), snap.state.clone()));
+        if let Some(handle) = self.form_window {
+            let _ = handle.update(cx, |runner, win, cx| {
+                runner.show(&snap, win);
+                cx.notify();
+            });
+        }
+    }
+
     /// Open the running program's form in its own OS window — in classic
     /// VB the form *is* the application window the generated app shows,
     /// not a pane inside the IDE.
@@ -407,7 +427,12 @@ Print \"Total = \" & CStr(Total)
         let Some(session) = self.session.clone() else {
             return;
         };
-        let form = self.form.clone();
+        // what the program has made of the form so far, else the designer's
+        let (form, state) = self.live_form.clone().unwrap_or_else(|| {
+            let form = self.form.clone();
+            let state = form.controls.iter().map(ControlState::new).collect();
+            (form, state)
+        });
         let ide = cx.entity().downgrade();
         let bounds = Bounds::centered(
             None,
@@ -425,7 +450,11 @@ Print \"Total = \" & CStr(Total)
                 ..Default::default()
             },
             move |win, cx| {
-                let runner = cx.new(|cx| FormRunner::new(form.clone(), session.clone(), cx));
+                let runner = cx.new(|cx| {
+                    let mut runner = FormRunner::new(form.clone(), session.clone(), cx);
+                    runner.state = state.clone();
+                    runner
+                });
                 // Closing the form window stops the program, like closing
                 // a VB app's main form ends the app.
                 let weak = ide.clone();
@@ -452,6 +481,7 @@ Print \"Total = \" & CStr(Total)
     /// Take down the live form's OS window (program finished, failed, or
     /// was stopped).
     fn close_form_window(&mut self, cx: &mut Context<Self>) {
+        self.live_form = None;
         if let Some(handle) = self.form_window.take() {
             let _ = handle.update(cx, |_, win, _| win.remove_window());
         }
@@ -467,8 +497,12 @@ impl Ide {
         }
         self.output.clear();
         self.output.push_str("--- run ---\n");
-        let session =
-            DebugSession::start(self.source(), self.breakpoints.clone(), self.evt_tx.clone());
+        let session = DebugSession::start_with_form(
+            self.source(),
+            Some(self.form.clone()),
+            self.breakpoints.clone(),
+            self.evt_tx.clone(),
+        );
         session.send(DebugCommand::Run);
         self.session = Some(session);
         self.paused = None;
@@ -482,8 +516,12 @@ impl Ide {
         }
         self.output.clear();
         self.output.push_str("--- step ---\n");
-        let session =
-            DebugSession::start(self.source(), self.breakpoints.clone(), self.evt_tx.clone());
+        let session = DebugSession::start_with_form(
+            self.source(),
+            Some(self.form.clone()),
+            self.breakpoints.clone(),
+            self.evt_tx.clone(),
+        );
         session.send(DebugCommand::Step);
         self.session = Some(session);
         self.status = "Stepping".into();
@@ -2162,6 +2200,19 @@ impl FormRunner {
             .send(DebugCommand::Call(format!("{}_{}", control, event)));
     }
 
+    /// Tell the program what the user did, before the event it causes, so
+    /// the handler reads the new `Text` / `ListIndex`.
+    fn tell(&self, edit: UserEdit) {
+        self.session.send(DebugCommand::Edit(edit));
+    }
+
+    /// Show the form as the program has changed it: its properties, and the
+    /// text and selection of the controls it touched.
+    fn show(&mut self, snap: &FormSnapshot, win: &mut Window) {
+        snap.apply_to(&mut self.form, &mut self.state);
+        win.set_window_title(&self.form.caption);
+    }
+
     fn close_lists(&mut self, keep: Option<usize>) {
         for (i, s) in self.state.iter_mut().enumerate() {
             if Some(i) != keep {
@@ -2192,6 +2243,10 @@ impl FormRunner {
                 let was = self.state[idx].text.clone();
                 self.state[idx].pick(&spec, i);
                 self.close_lists(None);
+                self.tell(UserEdit::Pick {
+                    control: idx,
+                    index: i,
+                });
                 if spec.kind == ControlKind::ComboBox && self.state[idx].text != was {
                     self.fire(&spec.name, "Change");
                 }
@@ -2217,6 +2272,10 @@ impl FormRunner {
         }
         self.state[idx].list_index = None;
         let name = spec.name.clone();
+        self.tell(UserEdit::Text {
+            control: idx,
+            text: self.state[idx].text.clone(),
+        });
         self.fire(&name, "Change");
         true
     }

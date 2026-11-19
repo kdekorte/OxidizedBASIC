@@ -75,37 +75,7 @@ impl ControlLook {
     }
 }
 
-/// A control's run-time state.
-#[derive(Clone, Debug, Default)]
-pub struct ControlState {
-    pub text: String,
-    pub list_index: Option<usize>,
-    pub dropped: bool,
-}
-
-impl ControlState {
-    pub fn new(c: &ControlSpec) -> ControlState {
-        ControlState {
-            text: match c.kind {
-                ControlKind::TextBox | ControlKind::ComboBox => c.text().to_string(),
-                _ => String::new(),
-            },
-            list_index: None,
-            dropped: false,
-        }
-    }
-
-    /// The user picked item `i` of the control's list.
-    pub fn pick(&mut self, c: &ControlSpec, i: usize) {
-        self.list_index = Some(i);
-        self.dropped = false;
-        if c.kind == ControlKind::ComboBox {
-            if let Some(item) = c.items.get(i) {
-                self.text = item.clone();
-            }
-        }
-    }
-}
+pub use crate::host::ControlState;
 
 /// The text a keystroke types, if any: the platform's `key_char` (so
 /// shift-' types `"` and shift-9 `(`), never a control character.

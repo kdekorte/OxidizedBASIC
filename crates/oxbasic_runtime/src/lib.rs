@@ -41,6 +41,28 @@ pub struct VbArray {
     pub data: Vec<Variant>,
 }
 
+impl Variant {
+    /// The value as VB's `CStr` would give it.
+    pub fn as_string(&self) -> ExecResult<String> {
+        to_string(self)
+    }
+
+    /// The value as a number (`CDbl`).
+    pub fn as_f64(&self) -> ExecResult<f64> {
+        to_f64(self)
+    }
+
+    /// The value as a whole number (`CLng`, rounded).
+    pub fn as_i64(&self) -> ExecResult<i64> {
+        to_i64(self)
+    }
+
+    /// The value as a Boolean (`CBool`).
+    pub fn as_bool(&self) -> ExecResult<bool> {
+        to_bool(self)
+    }
+}
+
 impl VbArray {
     fn flat_index(&self, idxs: &[i64]) -> ExecResult<usize> {
         if self.dims.is_empty() {
@@ -182,6 +204,29 @@ impl Frame {
     }
 }
 
+/// Objects the program can reach by name — a form's controls, so
+/// `Label1.Caption = "x"`, `n = List1.ListCount` and `List1.AddItem "a"`
+/// read and change the live form. The interpreter asks the host first
+/// for every `Name.Member` whose `Name` is not a variable, and keeps its
+/// own errors for the names the host doesn't know.
+pub trait ObjectHost {
+    /// Whether `name` (case-insensitive) is an object of this host.
+    fn has_object(&self, name: &str) -> bool;
+    /// Read `object.property`; `args` are a parameterised property's
+    /// indexes (`List1.List(0)`).
+    fn get(&mut self, object: &str, property: &str, args: &[Variant]) -> ExecResult<Variant>;
+    /// Write `object.property = value`.
+    fn set(
+        &mut self,
+        object: &str,
+        property: &str,
+        args: &[Variant],
+        value: Variant,
+    ) -> ExecResult<()>;
+    /// Call `object.method args` (`List1.AddItem "a"`, `Text1.SetFocus`).
+    fn call(&mut self, object: &str, method: &str, args: &[Variant]) -> ExecResult<Variant>;
+}
+
 /// The OxidizedBASIC interpreter.
 pub struct Interpreter<'out> {
     pub(crate) decls: Vec<Rc<ProcDecl>>,
@@ -200,6 +245,8 @@ pub struct Interpreter<'out> {
     step_depth: Option<usize>,
     /// Debugger: called when a breakpoint or step lands.
     debug_hook: Option<Box<dyn FnMut(&PausedInfo) -> DebugAction>>,
+    /// The objects `Name.Member` resolves against (a form's controls).
+    objects: Option<Rc<RefCell<dyn ObjectHost>>>,
 }
 
 /// Debugger pause notification: where execution stopped and what the
@@ -276,9 +323,17 @@ impl<'out> Interpreter<'out> {
             breakpoints: None,
             step_depth: None,
             debug_hook: None,
+            objects: None,
         };
         it.add_program(prog);
         it
+    }
+
+    /// Install the host whose objects (a form's controls) the program's
+    /// `Name.Member` reads, writes and calls go to. The caller keeps its
+    /// own `Rc` to see what the program changed.
+    pub fn set_object_host(&mut self, host: Rc<RefCell<dyn ObjectHost>>) {
+        self.objects = Some(host);
     }
 
     /// Register declarations (also used by the REPL).
@@ -959,8 +1014,40 @@ impl<'out> Interpreter<'out> {
                     err(13, "type mismatch: not an array")
                 }
             }
+            Expr::Member { obj, name } => match self.object_name(obj, f) {
+                Some(object) => {
+                    let host = self.objects.clone().expect("object_name needs a host");
+                    let result = host.borrow_mut().set(&object, name, &[], v);
+                    result
+                }
+                None => err(13, "type mismatch: cannot assign to this expression"),
+            },
+            // `List1.List(0) = "x"`: a parameterised property
+            Expr::MethodCall { obj, name, args } => match self.object_name(obj, f) {
+                Some(object) => {
+                    let mut idx = Vec::with_capacity(args.len());
+                    for a in args {
+                        idx.push(self.eval(a, f)?);
+                    }
+                    let host = self.objects.clone().expect("object_name needs a host");
+                    let result = host.borrow_mut().set(&object, name, &idx, v);
+                    result
+                }
+                None => err(13, "type mismatch: cannot assign to this expression"),
+            },
             _ => err(13, "type mismatch: cannot assign to this expression"),
         }
+    }
+
+    /// The name of `obj` when it is a host object the program can reach
+    /// (a bare identifier that is not a variable, e.g. `Label1`).
+    fn object_name(&self, obj: &Expr, f: &Frame) -> Option<String> {
+        let Expr::Var(base) = obj else { return None };
+        let host = self.objects.as_ref()?;
+        if self.lookup_rc(f, base).is_some() {
+            return None;
+        }
+        host.borrow().has_object(base).then(|| base.clone())
     }
 
     fn exec_print(
@@ -1005,8 +1092,9 @@ impl<'out> Interpreter<'out> {
         Ok(())
     }
 
-    /// `obj.Member` / `obj.Method(args)` — currently supports the `Err`
-    /// object (`Err.Number`, `Err.Description`, `Err.Clear`, `Err.Raise`).
+    /// `obj.Member` / `obj.Method(args)`: a host object's property or
+    /// method (a form control), or the `Err` object (`Err.Number`,
+    /// `Err.Description`, `Err.Clear`, `Err.Raise`).
     fn call_member(
         &mut self,
         obj: &Expr,
@@ -1014,6 +1102,17 @@ impl<'out> Interpreter<'out> {
         args: &[Expr],
         f: &mut Frame,
     ) -> ExecResult<Variant> {
+        if let Some(object) = self.object_name(obj, f) {
+            let mut values = Vec::with_capacity(args.len());
+            for a in args {
+                values.push(self.eval(a, f)?);
+            }
+            let host = self.objects.clone().expect("object_name needs a host");
+            // a method (`AddItem`, `SetFocus`) or a parameterised property
+            // (`List(0)`) — the host decides which
+            let result = host.borrow_mut().call(&object, name, &values);
+            return result;
+        }
         if let Expr::Var(base) = obj {
             if base.eq_ignore_ascii_case("err") {
                 match name.to_ascii_lowercase().as_str() {
@@ -1205,7 +1304,15 @@ impl<'out> Interpreter<'out> {
                 }
                 self.call_proc(name, args, f)
             }
-            Expr::Member { obj, name } => self.call_member(obj, name, &[], f),
+            Expr::Member { obj, name } => {
+                // a host object's property read (`x = Label1.Caption`)
+                if let Some(object) = self.object_name(obj, f) {
+                    let host = self.objects.clone().expect("object_name needs a host");
+                    let result = host.borrow_mut().get(&object, name, &[]);
+                    return result;
+                }
+                self.call_member(obj, name, &[], f)
+            }
             Expr::MethodCall { obj, name, args } => self.call_member(obj, name, args, f),
             Expr::Unary { op, expr } => {
                 let v = self.eval(expr, f)?;
