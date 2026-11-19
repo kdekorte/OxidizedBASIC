@@ -394,7 +394,9 @@ fn run_program(
     } else {
         spec.forms.clone()
     };
-    let host: Option<Host> = Some(Rc::new(RefCell::new(ProjectHost::new(forms))));
+    let mut project = ProjectHost::new(forms);
+    project.set_base_dir(spec.base_dir.clone());
+    let host: Option<Host> = Some(Rc::new(RefCell::new(project)));
     if let Some(h) = &host {
         rt.set_object_host(h.clone());
     }

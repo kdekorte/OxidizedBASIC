@@ -27,6 +27,8 @@ pub struct ControlState {
     pub anchor: Option<usize>,
     /// The rows a MultiSelect ListBox has selected (`Selected(i)`).
     pub selected: Vec<usize>,
+    /// What the program drew on a PictureBox (`Line`, `Circle`...).
+    pub canvas: crate::canvas::Canvas,
 }
 
 impl ControlState {
@@ -43,6 +45,7 @@ impl ControlState {
             value: c.value,
             anchor: None,
             selected: Vec::new(),
+            canvas: Default::default(),
         }
     }
 
@@ -294,6 +297,7 @@ impl FormSnapshot {
                 state[i].caret = mine.caret;
                 state[i].anchor = mine.anchor;
                 state[i].selected = mine.selected.clone();
+                state[i].canvas = mine.canvas.clone();
             }
         }
     }
@@ -365,7 +369,7 @@ pub fn set_value(form: &FormSpec, state: &mut [ControlState], i: usize, value: i
 
 /// Where a `Name.Member` points.
 #[derive(Clone, Copy)]
-enum Target {
+pub(crate) enum Target {
     Form,
     Control(usize),
 }
@@ -397,6 +401,9 @@ pub struct FormHost {
     /// The controls the form had at design time, by name and index: their
     /// array elements can't be unloaded.
     pub(crate) designed: Vec<(String, Option<i32>)>,
+    /// The project's folder, which a picture's file name is relative to
+    /// (needed to read its size for `AutoSize`).
+    pub base_dir: Option<std::path::PathBuf>,
 }
 
 impl FormHost {
@@ -416,6 +423,7 @@ impl FormHost {
             focus: None,
             raised: Vec::new(),
             designed,
+            base_dir: None,
         }
     }
 
@@ -608,7 +616,7 @@ impl FormHost {
         object.eq_ignore_ascii_case("me") || object.eq_ignore_ascii_case(&self.form.name)
     }
 
-    fn target(&self, object: &ObjectRef) -> ExecResult<Target> {
+    pub(crate) fn target(&self, object: &ObjectRef) -> ExecResult<Target> {
         if object.index.is_none() && self.is_form(&object.name) {
             return Ok(Target::Form);
         }
@@ -660,7 +668,11 @@ impl FormHost {
                 Some(name) => Variant::String(name.clone()),
                 None => Variant::String(self.form.name.clone()),
             },
-            "picture" if c.kind == ControlKind::PictureBox => Variant::String(c.picture.clone()),
+            "currentx" if c.kind == ControlKind::PictureBox => Variant::Single(s.canvas.current.0),
+            "currenty" if c.kind == ControlKind::PictureBox => Variant::Single(s.canvas.current.1),
+            "stretch" if c.kind == ControlKind::Image => Variant::Boolean(c.stretch),
+            "autosize" if c.kind == ControlKind::PictureBox => Variant::Boolean(c.auto_size),
+            "picture" if c.kind.has_picture() => Variant::String(c.picture.clone()),
             // the text controls' selection and limits
             "selstart" if c.kind.has_text() => Variant::Long(s.selection().0 as i32),
             "sellength" if c.kind.has_text() => Variant::Long(s.selection().1 as i32),
@@ -882,13 +894,31 @@ impl FormHost {
                     s.selected.retain(|&r| r != n);
                 }
             }
-            "picture" if kind == ControlKind::PictureBox => {
+            "picture" if kind.has_picture() => {
                 let p = value.as_string()?;
                 if p != self.form.controls[i].picture {
                     self.form.controls[i].picture = p;
+                    let base = self.base_dir.clone();
+                    self.auto_size_to_picture(i, base.as_deref());
                     // VB raises a PictureBox's Change when its Picture changes
-                    self.raise(i, "Change");
+                    if kind == ControlKind::PictureBox {
+                        self.raise(i, "Change");
+                    }
                 }
+            }
+            "currentx" if kind == ControlKind::PictureBox => {
+                self.state[i].canvas.current.0 = value.as_f64()? as f32;
+            }
+            "currenty" if kind == ControlKind::PictureBox => {
+                self.state[i].canvas.current.1 = value.as_f64()? as f32;
+            }
+            "stretch" if kind == ControlKind::Image => {
+                self.form.controls[i].stretch = value.as_bool()?;
+            }
+            "autosize" if kind == ControlKind::PictureBox => {
+                self.form.controls[i].auto_size = value.as_bool()?;
+                let base = self.base_dir.clone();
+                self.auto_size_to_picture(i, base.as_deref());
             }
             "container" => return self.set_container(i, value),
             "text" if kind == ControlKind::ListBox => return err(382, "Property is read-only"),
@@ -1180,6 +1210,9 @@ impl ObjectHost for FormHost {
         let target = self.target(object)?;
         if let Target::Control(i) = target {
             match m.as_str() {
+                "cls" if self.form.controls[i].kind == ControlKind::PictureBox => {
+                    return self.cls(i)
+                }
                 "move" => return self.move_control(i, args),
                 "zorder" => return self.zorder(i, args),
                 _ => {}
@@ -1274,6 +1307,18 @@ impl ObjectHost for FormHost {
 
     fn take_raised(&mut self) -> Vec<RaisedEvent> {
         std::mem::take(&mut self.raised)
+    }
+
+    fn draw(
+        &mut self,
+        object: Option<&ObjectRef>,
+        shape: oxbasic_runtime::DrawCmd,
+    ) -> ExecResult<()> {
+        self.draw_on(object, shape)
+    }
+
+    fn current_point(&self, object: Option<&ObjectRef>) -> (f32, f32) {
+        self.current_of(object)
     }
 
     fn unloading_form(&self, object: &ObjectRef) -> Option<String> {
@@ -2041,5 +2086,210 @@ mod text_list_and_container_members {
         f.controls[0].visible = true;
         f.controls[0].enabled = false;
         assert!(!f.usable(1), "and a disabled one disables it");
+    }
+}
+
+#[cfg(test)]
+mod drawing_and_images {
+    use super::*;
+    use crate::project_host::ProjectHost;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Buf(String);
+    impl oxbasic_runtime::Output for Buf {
+        fn write(&mut self, s: &str) {
+            self.0.push_str(s);
+        }
+    }
+
+    /// A form with a PictureBox, an Image and a Label.
+    fn art() -> Rc<RefCell<ProjectHost>> {
+        let mut f = FormSpec::new("Form1", "Art", 400.0, 300.0);
+        f.control(ControlSpec::new(
+            "Picture1",
+            ControlKind::PictureBox,
+            crate::Rect::new(10.0, 10.0, 120.0, 100.0),
+        ));
+        f.control(ControlSpec::new(
+            "Image1",
+            ControlKind::Image,
+            crate::Rect::new(150.0, 10.0, 60.0, 60.0),
+        ));
+        f.label("Label1", "x", crate::Rect::new(0.0, 200.0, 50.0, 20.0));
+        Rc::new(RefCell::new(ProjectHost::new(vec![f])))
+    }
+
+    fn run(src: &str, host: &Rc<RefCell<ProjectHost>>) -> Result<String, String> {
+        run_in(src, host, None)
+    }
+
+    /// `src` run with `base` as the folder relative file names are in.
+    fn run_in(
+        src: &str,
+        host: &Rc<RefCell<ProjectHost>>,
+        base: Option<std::path::PathBuf>,
+    ) -> Result<String, String> {
+        let prog = oxbasic_parser::parse(src)?;
+        let mut out = Buf(String::new());
+        {
+            let mut rt = oxbasic_runtime::Interpreter::new(&prog, &mut out);
+            rt.base_dir = base;
+            rt.set_object_host(host.clone());
+            rt.run().map_err(|e| e.to_string())?;
+        }
+        Ok(out.0)
+    }
+
+    fn shapes(h: &Rc<RefCell<ProjectHost>>) -> Vec<crate::canvas::Shape> {
+        h.borrow().snapshot(0).unwrap().state[0]
+            .canvas
+            .shapes
+            .clone()
+    }
+
+    #[test]
+    fn line_pset_and_circle_draw_on_a_picture_box() {
+        use crate::canvas::Shape;
+        let h = art();
+        let out = run(
+            "Picture1.Line (5, 6)-(50, 60), vbRed\n\
+             Picture1.Line -(70, 60)\n\
+             Picture1.Line (1, 1)-(9, 9), RGB(0, 255, 0), BF\n\
+             Picture1.PSet (3, 4)\n\
+             Picture1.Circle (40, 40), 10\n\
+             Print Picture1.CurrentX; Picture1.CurrentY\n",
+            &h,
+        )
+        .unwrap();
+        let s = shapes(&h);
+        assert_eq!(s.len(), 5);
+        // VB's colours: vbRed is &H0000FF, which is red here
+        assert_eq!(
+            s[0],
+            Shape::Line {
+                from: (5.0, 6.0),
+                to: (50.0, 60.0),
+                color: 0xFF0000
+            }
+        );
+        // `Line -(x, y)` carries on from where the last line ended
+        assert_eq!(
+            s[1],
+            Shape::Line {
+                from: (50.0, 60.0),
+                to: (70.0, 60.0),
+                color: crate::host::DEFAULT_FORE
+            }
+        );
+        assert_eq!(
+            s[2],
+            Shape::Rect {
+                from: (1.0, 1.0),
+                to: (9.0, 9.0),
+                color: 0x00FF00,
+                filled: true
+            }
+        );
+        assert!(matches!(s[3], Shape::Dot { at: (3.0, 4.0), .. }));
+        assert!(matches!(s[4], Shape::Ellipse { radius, .. } if radius == 10.0));
+        assert_eq!(out, " 40  40 \n", "CurrentX/Y is the circle's centre");
+    }
+
+    #[test]
+    fn step_counts_from_the_current_point_and_cls_clears() {
+        let h = art();
+        run(
+            "Picture1.CurrentX = 10\nPicture1.CurrentY = 20\n\
+             Picture1.PSet Step(5, 5)\n\
+             Picture1.Line -Step(10, 0)\n",
+            &h,
+        )
+        .unwrap();
+        let s = shapes(&h);
+        assert!(matches!(
+            s[0],
+            crate::canvas::Shape::Dot {
+                at: (15.0, 25.0),
+                ..
+            }
+        ));
+        assert!(matches!(
+            s[1],
+            crate::canvas::Shape::Line {
+                from: (15.0, 25.0),
+                to: (25.0, 25.0),
+                ..
+            }
+        ));
+        let out = run("Picture1.Cls\nPrint Picture1.CurrentX\n", &h).unwrap();
+        assert_eq!(out, " 0 \n");
+        assert!(shapes(&h).is_empty(), "Cls clears it");
+    }
+
+    #[test]
+    fn drawing_errors_are_vbs() {
+        let h = art();
+        // not a PictureBox, a missing control, a bad colour
+        assert!(run("Label1.Line (0, 0)-(1, 1)\n", &h)
+            .unwrap_err()
+            .contains("438"));
+        assert!(run("Nope.PSet (1, 1)\n", &h).unwrap_err().contains("424"));
+        assert!(run("Picture1.PSet (1, 1), &H7FFFFFFF\n", &h)
+            .unwrap_err()
+            .contains("380"));
+        assert!(shapes(&h).is_empty(), "a bad draw leaves nothing");
+        // a drawing statement doesn't make `Line` a keyword elsewhere
+        let out = run("Dim line As Long\nline = 7\nPrint line\n", &h).unwrap();
+        assert_eq!(out, " 7 \n");
+    }
+
+    #[test]
+    fn image_has_picture_and_stretch_but_no_drawing() {
+        let h = art();
+        let out = run(
+            "Image1.Stretch = True\nImage1.Picture = LoadPicture()\nPrint Image1.Stretch\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, "True\n");
+        // an Image isn't a drawing surface, and Cls is a PictureBox's
+        assert!(run("Image1.Line (0, 0)-(1, 1)\n", &h)
+            .unwrap_err()
+            .contains("438"));
+        assert!(run("Image1.Cls\n", &h).unwrap_err().contains("438"));
+        // a PictureBox has no Stretch, an Image no AutoSize
+        assert!(run("Picture1.Stretch = True\n", &h)
+            .unwrap_err()
+            .contains("438"));
+        assert!(run("Image1.AutoSize = True\n", &h)
+            .unwrap_err()
+            .contains("438"));
+        // an Image takes no focus
+        assert!(run("Image1.SetFocus\n", &h).unwrap_err().contains("438"));
+    }
+
+    #[test]
+    fn auto_size_takes_the_pictures_size_and_a_missing_file_is_53() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase");
+        let (w, h_px) = crate::host_draw::picture_size(&dir.join("logo.png")).expect("logo.png");
+        assert_eq!((w, h_px), (512.0, 512.0));
+        let h = art();
+        h.borrow_mut().set_base_dir(Some(dir.clone()));
+        run_in(
+            "Picture1.AutoSize = True\nPicture1.Picture = LoadPicture(\"logo.png\")\n",
+            &h,
+            Some(dir),
+        )
+        .unwrap();
+        let c = h.borrow().snapshot(0).unwrap().form.controls[0].clone();
+        assert_eq!(
+            (c.rect.width, c.rect.height),
+            (516.0, 516.0),
+            "the picture and its border"
+        );
+        assert!(run("x = LoadPicture(\"missing.png\")\n", &h)
+            .unwrap_err()
+            .contains("53"));
     }
 }

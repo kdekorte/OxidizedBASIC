@@ -74,6 +74,8 @@ pub struct ControlLook {
     pub anchor: Option<usize>,
     /// The rows a MultiSelect ListBox has selected.
     pub selected: Vec<usize>,
+    /// What the program drew on a PictureBox.
+    pub canvas: crate::canvas::Canvas,
     /// The folder a `Picture` file name is relative to.
     pub base_dir: Option<std::path::PathBuf>,
 }
@@ -102,6 +104,7 @@ impl ControlLook {
             caret: state.caret,
             anchor: state.anchor,
             selected: state.selected.clone(),
+            canvas: state.canvas.clone(),
             base_dir: None,
         }
     }
@@ -368,6 +371,81 @@ fn list_rows<V: 'static>(
     list
 }
 
+/// The shapes a program drew on a PictureBox, painted over its background
+/// and picture: lines and ellipses as stroked paths, boxes and dots as
+/// quads. Coordinates are the picture box's own pixels, so the canvas is as
+/// big as the control and sits at its top-left corner.
+fn draw_canvas(canvas: &crate::canvas::Canvas) -> gpui::Canvas<()> {
+    use crate::canvas::{ellipse_points, Shape};
+    let shapes = canvas.shapes.clone();
+    gpui::canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let origin = bounds.origin;
+            let pt = |p: (f32, f32)| gpui::point(origin.x + px(p.0), origin.y + px(p.1));
+            // VB draws `DrawWidth` 1 lines; a half-pixel inset keeps them crisp
+            let stroke = |window: &mut gpui::Window, pts: &[(f32, f32)], color: u32| {
+                let mut path = gpui::PathBuilder::stroke(px(1.0));
+                let mut it = pts.iter();
+                if let Some(first) = it.next() {
+                    path.move_to(pt(*first));
+                    for p in it {
+                        path.line_to(pt(*p));
+                    }
+                }
+                if let Ok(path) = path.build() {
+                    window.paint_path(path, rgb(color));
+                }
+            };
+            for shape in &shapes {
+                match shape {
+                    Shape::Line { from, to, color } => stroke(window, &[*from, *to], *color),
+                    Shape::Dot { at, color } => window.paint_quad(gpui::fill(
+                        gpui::Bounds::new(pt(*at), gpui::size(px(1.0), px(1.0))),
+                        rgb(*color),
+                    )),
+                    Shape::Rect {
+                        from,
+                        to,
+                        color,
+                        filled,
+                    } => {
+                        let (x0, x1) = (from.0.min(to.0), from.0.max(to.0));
+                        let (y0, y1) = (from.1.min(to.1), from.1.max(to.1));
+                        if *filled {
+                            window.paint_quad(gpui::fill(
+                                gpui::Bounds::new(
+                                    pt((x0, y0)),
+                                    gpui::size(px(x1 - x0 + 1.0), px(y1 - y0 + 1.0)),
+                                ),
+                                rgb(*color),
+                            ));
+                        } else {
+                            let ring = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)];
+                            stroke(window, &ring, *color);
+                        }
+                    }
+                    Shape::Ellipse {
+                        center,
+                        radius,
+                        aspect,
+                        color,
+                        arc,
+                        spokes,
+                    } => {
+                        let pts = ellipse_points(*center, *radius, *aspect, *arc, *spokes);
+                        stroke(window, &pts, *color);
+                    }
+                }
+            }
+        },
+    )
+    .absolute()
+    .left_0()
+    .top_0()
+    .size_full()
+}
+
 /// Draw control `c` as VB6 shows it, at its form position. `hook` attaches
 /// the caller's event handlers (and debug selectors) to each [`Part`]; the
 /// designer and the run windows differ only in their hooks.
@@ -500,6 +578,33 @@ pub fn paint_control<V: 'static>(
             }
             hook(Part::Body, body, cx)
         }
+        // VB's Image: just the picture, no border; Stretch scales it to the
+        // control, otherwise it is drawn at its own size
+        ControlKind::Image => {
+            let mut body = base.overflow_hidden();
+            if !c.picture.is_empty() {
+                let path = match &look.base_dir {
+                    Some(dir) => dir.join(&c.picture),
+                    None => std::path::PathBuf::from(&c.picture),
+                };
+                let fit = if c.stretch {
+                    ObjectFit::Fill
+                } else {
+                    ObjectFit::None
+                };
+                let mut pic = img(path)
+                    .debug_selector(|| format!("{}-picture", c.name))
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .object_fit(fit);
+                if c.stretch {
+                    pic = pic.size_full();
+                }
+                body = body.child(pic);
+            }
+            hook(Part::Body, body, cx)
+        }
         ControlKind::ListBox => {
             let rows = list_rows(
                 SharedString::from(format!("{}-list", c.name)),
@@ -540,6 +645,10 @@ pub fn paint_control<V: 'static>(
                         .top_0()
                         .object_fit(ObjectFit::None),
                 );
+            }
+            // what the program drew over it
+            if !look.design && !look.canvas.shapes.is_empty() {
+                body = body.child(draw_canvas(&look.canvas));
             }
             hook(Part::Body, body, cx)
         }

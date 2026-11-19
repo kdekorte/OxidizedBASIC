@@ -19,6 +19,9 @@ pub enum ControlKind {
     Timer,
     CheckBox,
     OptionButton,
+    /// VB's Image: a picture that can stretch to its size (no focus, no
+    /// children).
+    Image,
 }
 
 impl ControlKind {
@@ -35,6 +38,7 @@ impl ControlKind {
             ControlKind::Timer => "Timer",
             ControlKind::CheckBox => "CheckBox",
             ControlKind::OptionButton => "OptionButton",
+            ControlKind::Image => "Image",
         }
     }
 
@@ -47,7 +51,8 @@ impl ControlKind {
             "frame" => ControlKind::Frame,
             "listbox" | "list" => ControlKind::ListBox,
             "combobox" | "combo" => ControlKind::ComboBox,
-            "picturebox" | "picture" | "image" => ControlKind::PictureBox,
+            "picturebox" | "picture" => ControlKind::PictureBox,
+            "image" => ControlKind::Image,
             "timer" => ControlKind::Timer,
             "checkbox" | "check" => ControlKind::CheckBox,
             "optionbutton" | "option" | "radio" => ControlKind::OptionButton,
@@ -169,7 +174,14 @@ pub struct ControlSpec {
     /// control sits in, its `Left`/`Top` relative to it; `None` is the form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
-    /// `Picture` (PictureBox): the image file it shows, as given to
+    /// `Stretch` (Image): the picture is scaled to the control's size; off,
+    /// the control sizes itself to the picture.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stretch: bool,
+    /// `AutoSize` (PictureBox): the control takes the picture's size.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_size: bool,
+    /// `Picture` (PictureBox, Image): the image file it shows, as given to
     /// `LoadPicture` (relative to the project folder).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub picture: String,
@@ -242,6 +254,7 @@ impl ControlKind {
             ControlKind::PictureBox => (100.0, 100.0),
             ControlKind::Timer => (0.0, 0.0),
             ControlKind::CheckBox | ControlKind::OptionButton => (110.0, 22.0),
+            ControlKind::Image => (100.0, 100.0),
         }
     }
 
@@ -269,7 +282,15 @@ impl ControlKind {
 
     /// Whether the control shows text, so `Font` and `ForeColor` apply.
     pub fn has_font(&self) -> bool {
-        !matches!(self, ControlKind::PictureBox | ControlKind::Timer)
+        !matches!(
+            self,
+            ControlKind::PictureBox | ControlKind::Timer | ControlKind::Image
+        )
+    }
+
+    /// Whether the control shows a `Picture`.
+    pub fn has_picture(&self) -> bool {
+        matches!(self, ControlKind::PictureBox | ControlKind::Image)
     }
 
     /// Whether other controls can sit inside it (`Container`).
@@ -325,6 +346,8 @@ impl ControlSpec {
             multi_select: 0,
             container: None,
             picture: String::new(),
+            stretch: false,
+            auto_size: false,
         }
     }
 }

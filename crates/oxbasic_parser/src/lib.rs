@@ -551,8 +551,142 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             })
         }
         Rule::SubDecl | Rule::FuncDecl => err("procedures cannot be nested"),
+        Rule::GraphicsStmt => graphics_stmt(pair),
         r => err(&format!("internal: unexpected statement rule {:?}", r)),
     }
+}
+
+/// `[obj.]Line`, `PSet` or `Circle` with its coordinate pairs.
+fn graphics_stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
+    let mut target = None;
+    let mut shape = None;
+    for child in pair.into_inner() {
+        match child.as_rule() {
+            Rule::GraphicsTarget => target = Some(graphics_target(child)?),
+            Rule::LineCall => {
+                let mut points = Vec::new();
+                let mut color = None;
+                let mut boxed = 0;
+                for p in child.into_inner() {
+                    match p.as_rule() {
+                        Rule::Point => points.push(g_point(p)?),
+                        Rule::GraphicsColor => {
+                            color = p.into_inner().next().map(expr).transpose()?
+                        }
+                        Rule::BoxFlag => {
+                            let flag = p.into_inner().next().unwrap();
+                            boxed = if flag.as_rule() == Rule::BoxFill {
+                                2
+                            } else {
+                                1
+                            };
+                        }
+                        _ => {}
+                    }
+                }
+                let to = points.pop().ok_or("Line needs a point")?;
+                shape = Some(Graphic::Line {
+                    from: points.pop(),
+                    to,
+                    color,
+                    boxed,
+                });
+            }
+            Rule::PSetCall => {
+                let mut at = None;
+                let mut color = None;
+                for p in child.into_inner() {
+                    match p.as_rule() {
+                        Rule::Point => at = Some(g_point(p)?),
+                        Rule::GraphicsColor => {
+                            color = p.into_inner().next().map(expr).transpose()?
+                        }
+                        _ => {}
+                    }
+                }
+                shape = Some(Graphic::PSet {
+                    at: at.ok_or("PSet needs a point")?,
+                    color,
+                });
+            }
+            Rule::CircleCall => {
+                let mut inner = child
+                    .into_inner()
+                    .filter(|p| p.as_rule() != Rule::kw_circle);
+                let center = g_point(inner.next().unwrap())?;
+                let radius = expr(inner.next().unwrap())?;
+                // `, color, start, end, aspect`: each may be left out
+                let mut rest: Vec<Option<Expr>> = Vec::new();
+                for arg in inner {
+                    rest.push(arg.into_inner().next().map(expr).transpose()?);
+                }
+                if rest.len() > 4 {
+                    return err("Circle takes at most color, start, end and aspect");
+                }
+                rest.resize_with(4, || None);
+                let mut rest = rest.into_iter();
+                shape = Some(Graphic::Circle {
+                    center,
+                    radius,
+                    color: rest.next().flatten(),
+                    start: rest.next().flatten(),
+                    end: rest.next().flatten(),
+                    aspect: rest.next().flatten(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(Stmt::Graphics {
+        target,
+        shape: shape.ok_or("graphics statement")?,
+    })
+}
+
+/// A graphics `Point`: `[Step](x, y)`.
+fn g_point(pair: Pair<Rule>) -> Result<GPoint, String> {
+    let mut step = false;
+    let mut coords = Vec::new();
+    for p in pair.into_inner() {
+        match p.as_rule() {
+            Rule::StepKw => step = true,
+            Rule::Expr => coords.push(expr(p)?),
+            _ => {}
+        }
+    }
+    let y = coords.pop().ok_or("a point needs x and y")?;
+    let x = coords.pop().ok_or("a point needs x and y")?;
+    Ok(GPoint { step, x, y })
+}
+
+/// What a graphics statement draws on: `Picture1`, `Pic(2)`,
+/// `Form2.Picture1`, as the expression the interpreter resolves.
+fn graphics_target(pair: Pair<Rule>) -> Result<Expr, String> {
+    let mut head: Option<Expr> = None;
+    let mut segments = Vec::new();
+    for p in pair.into_inner() {
+        match p.as_rule() {
+            Rule::Ident if head.is_none() => head = Some(Expr::Var(p.as_str().to_string())),
+            Rule::Ident => segments.push(p.as_str().to_string()),
+            Rule::ElementIndex => {
+                let name = match &head {
+                    Some(Expr::Var(n)) => n.clone(),
+                    _ => return err("an element index needs a name"),
+                };
+                let index = expr(p.into_inner().next().unwrap())?;
+                head = Some(Expr::Call {
+                    name,
+                    args: vec![index],
+                });
+            }
+            _ => {}
+        }
+    }
+    let head = head.ok_or("graphics target")?;
+    Ok(segments.into_iter().fold(head, |acc, seg| Expr::Member {
+        obj: Box::new(acc),
+        name: seg,
+    }))
 }
 
 /// A `DoCond` pair: returns the condition expression and whether it is
@@ -939,5 +1073,114 @@ mod tests {
     fn rejects_garbage() {
         assert!(parse("If Then\n").is_err());
         assert!(parse("For i = 1\n").is_err());
+    }
+
+    /// The one statement of `src` (its line markers left out).
+    fn only(src: &str) -> Stmt {
+        let prog = parse(src).unwrap_or_else(|e| panic!("{}: {}", src, e));
+        let mut stmts: Vec<Stmt> = prog
+            .items
+            .into_iter()
+            .filter_map(|i| match i {
+                Item::Stmt(Stmt::LineMarker(_)) => None,
+                Item::Stmt(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(stmts.len(), 1, "{}", src);
+        stmts.remove(0)
+    }
+
+    #[test]
+    fn parses_line_with_its_points_color_and_box_flag() {
+        let s = only("Picture1.Line (10, 20)-(30, 40), vbRed, BF\n");
+        let Stmt::Graphics { target, shape } = s else {
+            panic!("{:?}", s)
+        };
+        assert!(matches!(target, Some(Expr::Var(ref n)) if n == "Picture1"));
+        let Graphic::Line {
+            from,
+            to,
+            color,
+            boxed,
+        } = shape
+        else {
+            panic!()
+        };
+        assert!(from.is_some_and(|p| !p.step));
+        assert!(!to.step);
+        assert!(color.is_some());
+        assert_eq!(boxed, 2);
+        // no from point, Step, a box without a colour, a target form
+        let s = only("Form2.Picture1.Line -Step(5, 5), , B\n");
+        let Stmt::Graphics { target, shape } = s else {
+            panic!()
+        };
+        assert!(matches!(target, Some(Expr::Member { ref name, .. }) if name == "Picture1"));
+        let Graphic::Line {
+            from,
+            to,
+            color,
+            boxed,
+        } = shape
+        else {
+            panic!()
+        };
+        assert!(from.is_none() && to.step && color.is_none());
+        assert_eq!(boxed, 1);
+        // on the form itself, and on an array element
+        assert!(matches!(
+            only("Line (0, 0)-(1, 1)\n"),
+            Stmt::Graphics { target: None, .. }
+        ));
+        assert!(matches!(
+            only("Pic(2).PSet (3, 4), 0\n"),
+            Stmt::Graphics {
+                target: Some(Expr::Call { .. }),
+                shape: Graphic::PSet { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_circle_with_left_out_arguments() {
+        let s = only("Picture1.Circle (50, 50), 20, , 0, 3.14, 0.5\n");
+        let Stmt::Graphics { shape, .. } = s else {
+            panic!()
+        };
+        let Graphic::Circle {
+            color,
+            start,
+            end,
+            aspect,
+            ..
+        } = shape
+        else {
+            panic!()
+        };
+        assert!(color.is_none() && start.is_some() && end.is_some() && aspect.is_some());
+        let s = only("Circle Step(1, 2), 5\n");
+        let Stmt::Graphics { shape, target } = s else {
+            panic!()
+        };
+        assert!(target.is_none());
+        assert!(matches!(
+            shape,
+            Graphic::Circle {
+                center: GPoint { step: true, .. },
+                color: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn line_pset_and_circle_are_still_ordinary_names_elsewhere() {
+        // a variable called Line, a sub called Circle, a property PSet
+        assert!(matches!(only("line = 5\n"), Stmt::Assign { .. }));
+        assert!(matches!(only("x = line + 1\n"), Stmt::Assign { .. }));
+        assert!(matches!(only("Circle 5\n"), Stmt::Call { .. }));
+        assert!(matches!(only("Obj.PSet = 3\n"), Stmt::Assign { .. }));
+        assert!(matches!(only("Lines = 2\n"), Stmt::Assign { .. }));
     }
 }

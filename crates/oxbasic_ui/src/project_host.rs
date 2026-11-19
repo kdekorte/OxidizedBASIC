@@ -76,6 +76,13 @@ impl ProjectHost {
         }
     }
 
+    /// The project's folder, which pictures' file names are relative to.
+    pub fn set_base_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        for f in &mut self.forms {
+            f.base_dir = dir.clone();
+        }
+    }
+
     pub fn form_count(&self) -> usize {
         self.forms.len()
     }
@@ -214,10 +221,28 @@ impl ProjectHost {
         }
     }
 
+    /// The form and control a drawing statement's target means: a control
+    /// of the running form (`Picture1`), or `Form2.Picture1`, which the
+    /// interpreter hands over as the object `Form2.Picture1`.
+    fn drawing_target(&self, o: &ObjectRef) -> ExecResult<(usize, ObjectRef)> {
+        if let Some((form, rest)) = o.name.split_once('.') {
+            let Some(f) = self.form_index(form) else {
+                return err(424, "object required");
+            };
+            let target = ObjectRef {
+                name: rest.to_string(),
+                index: o.index,
+            };
+            return Ok((f, target));
+        }
+        let f = self.host_for(o)?;
+        Ok((f, o.clone()))
+    }
+
     /// Where `Name.Member` points: a form (the context's own `Me`, or any
     /// form by name) or a control, which is the context form's unless the
     /// program wrote it as `Form2.Label1`.
-    fn host_for(&mut self, object: &ObjectRef) -> ExecResult<usize> {
+    fn host_for(&self, object: &ObjectRef) -> ExecResult<usize> {
         // `Form2.Label1.Caption`: the interpreter passes the dotted tail
         // as the property, so the object here is just the form
         if let Some(i) = self.form_of(&object.name) {
@@ -344,6 +369,28 @@ impl ObjectHost for ProjectHost {
             .iter_mut()
             .flat_map(|f| f.take_raised())
             .collect()
+    }
+
+    fn draw(
+        &mut self,
+        object: Option<&ObjectRef>,
+        shape: oxbasic_runtime::DrawCmd,
+    ) -> ExecResult<()> {
+        // `Picture1.Line`, or `Form2.Picture1.Line` (its form named first)
+        match object {
+            Some(o) => {
+                let (form, target) = self.drawing_target(o)?;
+                self.forms[form].draw_on(Some(&target), shape)
+            }
+            None => self.forms[self.context].draw_on(None, shape),
+        }
+    }
+
+    fn current_point(&self, object: Option<&ObjectRef>) -> (f32, f32) {
+        match object.and_then(|o| self.drawing_target(o).ok()) {
+            Some((form, target)) => self.forms[form].current_of(Some(&target)),
+            None => (0.0, 0.0),
+        }
     }
 
     fn unloading_form(&self, object: &ObjectRef) -> Option<String> {

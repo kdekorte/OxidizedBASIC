@@ -293,3 +293,56 @@ fn tooltip_mouse_pointer_picture_and_a_system_colour_are_drawn(cx: &mut gpui::Te
     );
     live.stop();
 }
+
+#[gpui::test]
+fn drawing_stretching_and_auto_sizing_show_in_the_live_window(cx: &mut gpui::TestAppContext) {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase");
+    let logo = dir.join("logo.png");
+    let mut f = FormSpec::new("Form1", "Art", 400.0, 300.0);
+    f.control(ControlSpec::new(
+        "Picture1",
+        ControlKind::PictureBox,
+        Rect::new(10.0, 10.0, 120.0, 100.0),
+    ));
+    f.control(ControlSpec::new(
+        "Image1",
+        ControlKind::Image,
+        Rect::new(150.0, 10.0, 80.0, 60.0),
+    ));
+    f.control(ControlSpec::new(
+        "Picture2",
+        ControlKind::PictureBox,
+        Rect::new(10.0, 130.0, 50.0, 50.0),
+    ));
+    let src = format!(
+        "Sub Form_Load()\n\
+         \x20 Picture1.Line (5, 5)-(60, 40), vbRed\n\
+         \x20 Picture1.Circle (60, 60), 20\n\
+         \x20 Image1.Picture = LoadPicture(\"{p}\")\n\
+         \x20 Image1.Stretch = True\n\
+         \x20 Picture2.AutoSize = True\n\
+         \x20 Picture2.Picture = LoadPicture(\"{p}\")\n\
+         End Sub\n",
+        p = logo.display()
+    );
+    let mut live = Live::start(f, &src, cx);
+    // the drawing reached the window, and is painted over the picture box
+    let shapes = live.read(|r| r.state[0].canvas.shapes.len());
+    assert_eq!(shapes, 2, "a line and a circle");
+    // a stretched Image fills its control; the picture is drawn at its size
+    let image = live.win.debug_bounds("run-Image1").unwrap();
+    let pic = live
+        .win
+        .debug_bounds("Image1-picture")
+        .expect("the Image's picture");
+    assert_eq!(pic.size, image.size, "Stretch scales it to the control");
+    // AutoSize: the PictureBox took the picture's size (512x512 plus border)
+    let size = live.read(|r| {
+        (
+            r.form.controls[2].rect.width,
+            r.form.controls[2].rect.height,
+        )
+    });
+    assert_eq!(size, (516.0, 516.0));
+    live.stop();
+}

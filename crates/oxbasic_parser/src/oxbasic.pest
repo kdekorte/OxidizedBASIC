@@ -110,6 +110,7 @@ Statement = _{
     | GoToStmt
     | EndStmt
     | PrintStmt
+    | GraphicsStmt
     | LetStmt
     | CallStmt
     | ExprCallStmt
@@ -225,6 +226,33 @@ PSep = { ";" | "," }
 
 LetStmt = { PostfixExpr ~ "=" ~ Expr }
 CallStmt = { kw_call ~ PostfixExpr }
+// VB's graphics statements, which take coordinate pairs:
+//   [obj.]Line [Step](x1, y1)-[Step](x2, y2) [, color] [, B | BF]
+//   [obj.]Line -[Step](x2, y2) ...            (from the last point drawn)
+//   [obj.]PSet [Step](x, y) [, color]
+//   [obj.]Circle [Step](x, y), radius [, color [, start [, end [, aspect]]]]
+GraphicsStmt = { (GraphicsTarget ~ ".")? ~ (LineCall | PSetCall | CircleCall) }
+// `Picture1`, `Pic(2)` or `Form2.Picture1`: what is drawn on
+GraphicsTarget = { !ReservedKw ~ !GraphicsVerb ~ Ident ~ ElementIndex? ~ ("." ~ !GraphicsVerb ~ Ident)* }
+// atomic, as the other keywords are: `Line` then a non-identifier char
+kw_line = @{ ^"line" ~ !IdentChar }
+kw_pset = @{ ^"pset" ~ !IdentChar }
+kw_circle = @{ ^"circle" ~ !IdentChar }
+GraphicsVerb = _{ kw_line | kw_pset | kw_circle }
+// the statement is a graphics one only when a point follows: `Line = 5` and
+// `Circle 5` (a variable, a sub) stay what they were
+LineCall = { kw_line ~ &(StepKw | "(" | "-") ~ Point? ~ "-" ~ Point ~ GraphicsColor? ~ BoxFlag? }
+PSetCall = { kw_pset ~ &(StepKw | "(") ~ Point ~ GraphicsColor? }
+CircleCall = { kw_circle ~ &(StepKw | "(") ~ Point ~ "," ~ Expr ~ ("," ~ CircleArg)* }
+// one optional argument of Circle, possibly left out: `, , 0, 3.14`
+CircleArg = { Expr? }
+Point = { StepKw? ~ "(" ~ Expr ~ "," ~ Expr ~ ")" }
+StepKw = { kw_step }
+// `, color`, or just `,` before the box flag (`Line (..)-(..), , B`)
+GraphicsColor = { "," ~ Expr? ~ &("," | NEWLINE | EOI | ":" | "'") }
+BoxFlag = { "," ~ (BoxFill | BoxOnly) }
+BoxFill = @{ ^"bf" ~ !IdentChar }
+BoxOnly = @{ ^"b" ~ !IdentChar }
 ExprCallStmt = { !ReservedKw ~ Ident ~ ElementIndex? ~ MemberTail ~ BareArgs? }
 // `Command1(2).SetFocus`: a control array element, before its members
 ElementIndex = { "(" ~ Expr ~ ")" ~ &"." }

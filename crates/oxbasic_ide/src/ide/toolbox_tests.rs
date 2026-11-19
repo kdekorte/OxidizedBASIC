@@ -241,7 +241,7 @@ fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppCont
         v
     };
     let text_rows = ["locked", "maxlength", "multiline", "scrollbars"];
-    let expect: [(ControlKind, Vec<&str>); 10] = [
+    let expect: [(ControlKind, Vec<&str>); 11] = [
         (
             ControlKind::Label,
             with(&["name", "caption"], &[], true, false),
@@ -269,7 +269,12 @@ fn inspector_offers_only_the_properties_a_control_has(cx: &mut gpui::TestAppCont
         // a PictureBox takes the focus; a Timer isn't on the tab order
         (
             ControlKind::PictureBox,
-            with(&["name"], &["picture"], false, true),
+            with(&["name"], &["picture", "autosize"], false, true),
+        ),
+        // an Image takes no focus and no font; it has Picture and Stretch
+        (
+            ControlKind::Image,
+            with(&["name"], &["picture", "stretch"], false, false),
         ),
         (
             ControlKind::Timer,
@@ -946,5 +951,22 @@ fn dragging_a_control_onto_a_frame_puts_it_in_and_off_takes_it_out(cx: &mut gpui
         let c = &ide.form.controls[1];
         assert_eq!(c.container, None);
         assert_eq!((c.rect.left, c.rect.top), (26.0, 200.0));
+    });
+}
+
+#[gpui::test]
+fn the_image_toolbox_button_adds_an_image_with_vb_defaults(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let button = cx.debug_bounds("tool-Image").expect("the Image button");
+    cx.simulate_click(button.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        let c = &ide.form.controls[0];
+        assert_eq!((c.kind, c.name.as_str()), (ControlKind::Image, "Image1"));
+        assert_eq!(
+            (c.rect.width, c.rect.height),
+            ControlKind::Image.default_size()
+        );
+        assert!(!c.stretch && c.caption.is_empty());
     });
 }

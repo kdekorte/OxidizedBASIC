@@ -24,9 +24,11 @@ pub mod gpui_backend;
 #[cfg(feature = "gpui")]
 pub mod gpui_controls;
 
+pub mod canvas;
 pub mod events;
 pub mod host;
 mod host_controls;
+mod host_draw;
 pub use host_controls::{container_key, split_element};
 pub mod project;
 pub mod project_host;

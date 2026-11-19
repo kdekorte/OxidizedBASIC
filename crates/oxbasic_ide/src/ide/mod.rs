@@ -654,6 +654,7 @@ impl Ide {
             ControlKind::Timer => "Timer",
             ControlKind::CheckBox => "Check",
             ControlKind::OptionButton => "Option",
+            ControlKind::Image => "Image",
         };
         // The first free `<Prefix><n>` — renamed controls can leave gaps or
         // already hold the next number.
@@ -1431,6 +1432,7 @@ impl Ide {
                     .child(self.toolbox_button("▧ PictureBox", ControlKind::PictureBox, cx))
                     .child(self.toolbox_button("☑ CheckBox", ControlKind::CheckBox, cx))
                     .child(self.toolbox_button("◉ OptionButton", ControlKind::OptionButton, cx))
+                    .child(self.toolbox_button("▣ Image", ControlKind::Image, cx))
                     .child(self.toolbox_button("◷ Timer", ControlKind::Timer, cx)),
             )
     }
@@ -2684,6 +2686,8 @@ impl Ide {
             "scrollbars" => format!("{}", c.scroll_bars),
             "multiselect" => format!("{}", c.multi_select),
             "picture" => c.picture.clone(),
+            "stretch" => if c.stretch { "True" } else { "False" }.to_string(),
+            "autosize" => if c.auto_size { "True" } else { "False" }.to_string(),
             // blank: on the form itself
             "container" => c.container.clone().unwrap_or_default(),
             "tooltiptext" => c.tool_tip.clone(),
@@ -2907,6 +2911,16 @@ impl Ide {
                 }
             }
             "picture" => c.picture = val.trim().to_string(),
+            "stretch" => {
+                if let Some(b) = Self::parse_bool(val) {
+                    c.stretch = b;
+                }
+            }
+            "autosize" => {
+                if let Some(b) = Self::parse_bool(val) {
+                    c.auto_size = b;
+                }
+            }
             "tooltiptext" => c.tool_tip = val.to_string(),
             "mousepointer" => {
                 if let Ok(n) = val.trim().parse::<i16>() {
@@ -3313,8 +3327,14 @@ impl Ide {
         if k == ControlKind::ListBox {
             rows.push(("multiselect", "MultiSelect"));
         }
-        if k == ControlKind::PictureBox {
+        if k.has_picture() {
             rows.push(("picture", "Picture"));
+        }
+        if k == ControlKind::Image {
+            rows.push(("stretch", "Stretch"));
+        }
+        if k == ControlKind::PictureBox {
+            rows.push(("autosize", "AutoSize"));
         }
         if k != ControlKind::Timer {
             rows.push(("container", "Container"));

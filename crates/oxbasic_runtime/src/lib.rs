@@ -253,6 +253,49 @@ pub trait ObjectHost {
     fn unloading_form(&self, _object: &ObjectRef) -> Option<String> {
         None
     }
+    /// Draw `shape` on `object` (`None`: the form whose code runs), its
+    /// coordinates already worked out (a `Step` added to `CurrentX/Y`).
+    /// Hosts that can't draw raise 438.
+    fn draw(&mut self, _object: Option<&ObjectRef>, _shape: DrawCmd) -> ExecResult<()> {
+        Err(VbError {
+            number: 438,
+            description: "object doesn't support this property or method".into(),
+        })
+    }
+    /// `CurrentX` / `CurrentY` of `object` (`None`: the form), where a
+    /// `Step` counts from.
+    fn current_point(&self, _object: Option<&ObjectRef>) -> (f32, f32) {
+        (0.0, 0.0)
+    }
+}
+
+/// A shape a graphics statement draws, in the drawing's own coordinates
+/// (pixels from its top-left). `color` is `None` for the drawing's
+/// `ForeColor`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DrawCmd {
+    Line {
+        from: (f32, f32),
+        to: (f32, f32),
+        color: Option<u32>,
+        /// 0 a line, 1 a box, 2 a filled box.
+        boxed: u8,
+    },
+    PSet {
+        at: (f32, f32),
+        color: Option<u32>,
+    },
+    Circle {
+        center: (f32, f32),
+        radius: f32,
+        color: Option<u32>,
+        /// An arc from `start` to `end` (radians); negative values also
+        /// draw the radius to that end (a pie slice), as in VB.
+        start: Option<f32>,
+        end: Option<f32>,
+        /// Height over width (1 a circle).
+        aspect: f32,
+    },
 }
 
 /// An event a host object raised by itself (a property change made by the
@@ -1081,6 +1124,10 @@ impl<'out> Interpreter<'out> {
                 self.exec_print(items, *trailing_sep, f)?;
                 Ok(Flow::Normal)
             }
+            Stmt::Graphics { target, shape } => {
+                self.exec_graphics(target.as_ref(), shape, f)?;
+                Ok(Flow::Normal)
+            }
             Stmt::Call { target, args, .. } => {
                 self.exec_call(target, args, f)?;
                 Ok(Flow::Normal)
@@ -1395,6 +1442,107 @@ impl<'out> Interpreter<'out> {
                 .map(|(object, prefix)| (object, format!("{}{}.", prefix, name)))),
             _ => Ok(None),
         }
+    }
+
+    /// `Line`, `PSet` or `Circle` on `target` (the form whose code runs when
+    /// `None`): its coordinates and colour worked out, then handed to the
+    /// host. A `Step` point counts from `CurrentX`/`CurrentY`.
+    fn exec_graphics(
+        &mut self,
+        target: Option<&Expr>,
+        shape: &Graphic,
+        f: &mut Frame,
+    ) -> ExecResult<()> {
+        let Some(host) = self.objects.clone() else {
+            return err(438, "object doesn't support this property or method");
+        };
+        let object = match target {
+            Some(t) => match self.object_ref(t, f)? {
+                Some((o, prefix)) if prefix.is_empty() => Some(o),
+                // `Form2.Picture1`: the form's control, named by its path
+                Some((o, prefix)) => Some(ObjectRef {
+                    name: format!("{}.{}", o.name, prefix.trim_end_matches('.')),
+                    index: o.index,
+                }),
+                None => return err(424, "object required"),
+            },
+            None => None,
+        };
+        let here = host.borrow().current_point(object.as_ref());
+        let num = |me: &mut Self, e: &Expr, f: &mut Frame| -> ExecResult<f32> {
+            Ok(to_f64(&me.eval(e, f)?)? as f32)
+        };
+        let point = |me: &mut Self,
+                     p: &GPoint,
+                     from: (f32, f32),
+                     f: &mut Frame|
+         -> ExecResult<(f32, f32)> {
+            let (x, y) = (num(me, &p.x, f)?, num(me, &p.y, f)?);
+            Ok(if p.step {
+                (from.0 + x, from.1 + y)
+            } else {
+                (x, y)
+            })
+        };
+        let color = |me: &mut Self, c: &Option<Expr>, f: &mut Frame| -> ExecResult<Option<i64>> {
+            match c {
+                Some(e) => Ok(Some(to_i64(&me.eval(e, f)?)?)),
+                None => Ok(None),
+            }
+        };
+        // colours arrive as VB Longs; the host makes them its own
+        let cmd = match shape {
+            Graphic::Line {
+                from,
+                to,
+                color: c,
+                boxed,
+            } => {
+                let a = match from {
+                    Some(p) => point(self, p, here, f)?,
+                    None => here,
+                };
+                let b = point(self, to, a, f)?;
+                DrawCmd::Line {
+                    from: a,
+                    to: b,
+                    color: color(self, c, f)?.map(|v| v as u32),
+                    boxed: *boxed,
+                }
+            }
+            Graphic::PSet { at, color: c } => DrawCmd::PSet {
+                at: point(self, at, here, f)?,
+                color: color(self, c, f)?.map(|v| v as u32),
+            },
+            Graphic::Circle {
+                center,
+                radius,
+                color: c,
+                start,
+                end,
+                aspect,
+            } => {
+                let center = point(self, center, here, f)?;
+                let radius = num(self, radius, f)?;
+                let opt =
+                    |me: &mut Self, e: &Option<Expr>, f: &mut Frame| -> ExecResult<Option<f32>> {
+                        match e {
+                            Some(e) => Ok(Some(num(me, e, f)?)),
+                            None => Ok(None),
+                        }
+                    };
+                DrawCmd::Circle {
+                    center,
+                    radius,
+                    color: color(self, c, f)?.map(|v| v as u32),
+                    start: opt(self, start, f)?,
+                    end: opt(self, end, f)?,
+                    aspect: opt(self, aspect, f)?.unwrap_or(1.0),
+                }
+            }
+        };
+        let result = host.borrow_mut().draw(object.as_ref(), cmd);
+        result
     }
 
     fn exec_print(

@@ -113,6 +113,13 @@ pub enum Stmt {
         items: Vec<PrintItem>,
         trailing_sep: bool,
     },
+    /// `[obj.]Line`, `PSet`, `Circle`: VB's drawing statements, whose
+    /// coordinate pairs aren't ordinary arguments.
+    Graphics {
+        /// What is drawn on (`Picture1`); `None` is the form whose code runs.
+        target: Option<Expr>,
+        shape: Graphic,
+    },
     Exit(ExitKind),
     GoTo(String),
     OnError(OnErrorMode),
@@ -125,6 +132,41 @@ pub enum Stmt {
 pub struct IfArm {
     pub cond: Expr,
     pub body: Vec<Stmt>,
+}
+
+/// A point of a graphics statement: `(x, y)`, or `Step(x, y)` relative to
+/// the last point drawn (`CurrentX`, `CurrentY`).
+#[derive(Debug, Clone)]
+pub struct GPoint {
+    pub step: bool,
+    pub x: Expr,
+    pub y: Expr,
+}
+
+#[derive(Debug, Clone)]
+pub enum Graphic {
+    /// `Line [from]-to [, color] [, B | BF]`: no `from` starts at the last
+    /// point drawn.
+    Line {
+        from: Option<GPoint>,
+        to: GPoint,
+        color: Option<Expr>,
+        /// 0 a line, 1 a box (`B`), 2 a filled box (`BF`).
+        boxed: u8,
+    },
+    PSet {
+        at: GPoint,
+        color: Option<Expr>,
+    },
+    /// `Circle (x, y), radius [, color [, start [, end [, aspect]]]]`.
+    Circle {
+        center: GPoint,
+        radius: Expr,
+        color: Option<Expr>,
+        start: Option<Expr>,
+        end: Option<Expr>,
+        aspect: Option<Expr>,
+    },
 }
 
 #[derive(Debug, Clone)]
