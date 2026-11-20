@@ -11,6 +11,11 @@ pub mod code_window;
 pub mod debug_session;
 pub mod editor;
 pub mod editor_input;
+pub mod find;
+pub mod find_bar;
+pub mod find_bar_view;
+#[cfg(test)]
+mod find_tests;
 pub mod highlight;
 pub mod launch;
 pub mod live_forms;
@@ -132,9 +137,39 @@ gpui::actions!(
         EditCut,
         EditCopy,
         EditPaste,
-        EditSelectAll
+        EditSelectAll,
+        EditFind,
+        EditReplace,
+        EditFindNext,
+        EditFindPrevious
     ]
 );
+
+/// Register the IDE's keyboard shortcuts. The app calls it at start-up; the
+/// tests call it too, so they use the same shortcuts a user does.
+pub(super) fn bind_shortcuts(cx: &mut App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("cmd-q", Quit, None),
+        gpui::KeyBinding::new("cmd-n", NewProject, None),
+        gpui::KeyBinding::new("cmd-o", OpenProject, None),
+        gpui::KeyBinding::new("cmd-s", SaveProject, None),
+        gpui::KeyBinding::new("cmd-shift-s", SaveProjectAs, None),
+        gpui::KeyBinding::new("cmd-r", RunProgram, None),
+        gpui::KeyBinding::new("cmd-shift-r", StopProgram, None),
+        gpui::KeyBinding::new("f7", ViewCode, None),
+        gpui::KeyBinding::new("shift-f7", ViewObject, None),
+        gpui::KeyBinding::new("cmd-z", EditUndo, None),
+        gpui::KeyBinding::new("cmd-shift-z", EditRedo, None),
+        gpui::KeyBinding::new("cmd-x", EditCut, None),
+        gpui::KeyBinding::new("cmd-c", EditCopy, None),
+        gpui::KeyBinding::new("cmd-v", EditPaste, None),
+        gpui::KeyBinding::new("cmd-a", EditSelectAll, None),
+        gpui::KeyBinding::new("cmd-f", EditFind, None),
+        gpui::KeyBinding::new("cmd-alt-f", EditReplace, None),
+        gpui::KeyBinding::new("cmd-g", EditFindNext, None),
+        gpui::KeyBinding::new("cmd-shift-g", EditFindPrevious, None),
+    ]);
+}
 
 /// Launch the IDE, optionally loading a `.bas` source file and an
 /// `.oxform` layout file.
@@ -142,23 +177,7 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
     let bas_path = bas_path.map(|s| s.to_string());
     let oxform_path = oxform_path.map(|s| s.to_string());
     Application::new().run(move |cx: &mut App| {
-        cx.bind_keys([
-            gpui::KeyBinding::new("cmd-q", Quit, None),
-            gpui::KeyBinding::new("cmd-n", NewProject, None),
-            gpui::KeyBinding::new("cmd-o", OpenProject, None),
-            gpui::KeyBinding::new("cmd-s", SaveProject, None),
-            gpui::KeyBinding::new("cmd-shift-s", SaveProjectAs, None),
-            gpui::KeyBinding::new("cmd-r", RunProgram, None),
-            gpui::KeyBinding::new("cmd-shift-r", StopProgram, None),
-            gpui::KeyBinding::new("f7", ViewCode, None),
-            gpui::KeyBinding::new("shift-f7", ViewObject, None),
-            gpui::KeyBinding::new("cmd-z", EditUndo, None),
-            gpui::KeyBinding::new("cmd-shift-z", EditRedo, None),
-            gpui::KeyBinding::new("cmd-x", EditCut, None),
-            gpui::KeyBinding::new("cmd-c", EditCopy, None),
-            gpui::KeyBinding::new("cmd-v", EditPaste, None),
-            gpui::KeyBinding::new("cmd-a", EditSelectAll, None),
-        ]);
+        bind_shortcuts(cx);
         cx.set_menus(vec![
             gpui::Menu {
                 name: "OxidizedBASIC".into(),
@@ -192,6 +211,11 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
                     gpui::MenuItem::action("Copy", EditCopy),
                     gpui::MenuItem::action("Paste", EditPaste),
                     gpui::MenuItem::action("Select All", EditSelectAll),
+                    gpui::MenuItem::separator(),
+                    gpui::MenuItem::action("Find…", EditFind),
+                    gpui::MenuItem::action("Replace…", EditReplace),
+                    gpui::MenuItem::action("Find Next", EditFindNext),
+                    gpui::MenuItem::action("Find Previous", EditFindPrevious),
                 ],
             },
             gpui::Menu {
@@ -260,6 +284,10 @@ pub struct Ide {
     /// A mouse button is down in the editor: dragging extends the selection.
     selecting: bool,
     editor_focus: FocusHandle,
+    /// The code window's find bar, when it is open.
+    find: Option<find_bar::FindBar>,
+    find_focus: FocusHandle,
+    replace_focus: FocusHandle,
     /// Focus for the designer, so window-level shortcuts (F7) reach the
     /// IDE while no text field is being edited.
     designer_focus: FocusHandle,
@@ -400,6 +428,9 @@ Print \"Total = \" & CStr(Total)
             history: editor::History::default(),
             selecting: false,
             editor_focus: cx.focus_handle(),
+            find: None,
+            find_focus: cx.focus_handle(),
+            replace_focus: cx.focus_handle(),
             designer_focus: cx.focus_handle(),
             editor_scroll: ScrollHandle::new(),
             designer_scroll: ScrollHandle::new(),
@@ -1672,6 +1703,13 @@ impl Ide {
 
     fn render_editor(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let selection = self.selection();
+        // the find bar's matches and the current one, tinted in the code
+        let find_matches: Vec<editor::Range> = self
+            .find
+            .as_ref()
+            .map(|b| b.found.clone())
+            .unwrap_or_default();
+        let find_current = self.find.as_ref().and_then(|b| b.current);
         let bps = self.breakpoints.lock().unwrap().clone();
         let paused_line = self.paused.as_ref().map(|p| p.line);
         // Retain the width of the longest source line so horizontal scrolling
@@ -1725,7 +1763,18 @@ impl Ide {
             let len = line.chars().count();
             let selected = selection.and_then(|r| r.columns_on(idx, len));
             let caret = is_cursor.then_some(self.cursor.1);
-            code = code.child(render_code_line(&line, selected, caret));
+            // the find matches on this row, as (from, to, is current)
+            let found: Vec<(usize, usize, bool)> = find_matches
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.start.0 <= idx && idx <= r.end.0)
+                .filter_map(|(i, r)| {
+                    let from = if r.start.0 == idx { r.start.1 } else { 0 };
+                    let to = if r.end.0 == idx { r.end.1 } else { len };
+                    (from < to).then_some((from, to, find_current == Some(i)))
+                })
+                .collect();
+            code = code.child(render_code_line(&line, selected, caret, &found));
 
             list = list.child(
                 div()
@@ -1789,6 +1838,9 @@ impl Ide {
 
 /// The selection's tint behind code.
 const SELECTION_BG: u32 = 0xB4D7FF;
+/// The tint of a find match, and the stronger tint of the current one.
+const FIND_BG: u32 = 0xFFF2A8;
+const FIND_CURRENT_BG: u32 = 0xFFB020;
 
 /// One line of code with its syntax colours, the selected columns
 /// (`(from, to)`; `to` is `None` when the selection runs on into the next
@@ -1797,9 +1849,10 @@ fn render_code_line(
     line: &str,
     selected: Option<(usize, Option<usize>)>,
     caret: Option<usize>,
+    found: &[(usize, usize, bool)],
 ) -> gpui::Div {
     // colour each character by its token, then cut the line wherever the
-    // selection or the caret starts or ends
+    // selection, a find match or the caret starts or ends
     let mut colors: Vec<(char, u32)> = Vec::new();
     for (text, kind) in highlight::tokenize_line(line) {
         let color = match kind {
@@ -1817,6 +1870,13 @@ fn render_code_line(
         Some((a, b)) => (a, b.unwrap_or(len)),
         None => (len + 1, len + 1),
     };
+    // per character: 0 no match, 1 a match, 2 the current match
+    let mut mark = vec![0u8; len];
+    for &(from, to, current) in found {
+        for m in mark.iter_mut().take(to.min(len)).skip(from) {
+            *m = (*m).max(if current { 2 } else { 1 });
+        }
+    }
     let caret_bar = || div().flex_none().w(px(1.5)).h(px(15.0)).bg(rgb(ACCENT));
     let mut row = div().flex().items_center();
     let mut i = 0;
@@ -1826,12 +1886,12 @@ fn render_code_line(
         }
         let in_sel = i >= sel_from && i < sel_to;
         let color = colors[i].1;
-        // a run of characters with the same colour and selection, up to
-        // the caret
+        // a run of characters with the same colour, selection and match
         let mut j = i + 1;
         while j < len
             && colors[j].1 == color
             && (j >= sel_from && j < sel_to) == in_sel
+            && mark[j] == mark[i]
             && caret != Some(j)
         {
             j += 1;
@@ -1840,6 +1900,11 @@ fn render_code_line(
         let mut span = div().text_color(rgb(color)).child(SharedString::from(text));
         if in_sel {
             span = span.bg(rgb(SELECTION_BG));
+        } else if mark[i] == 2 {
+            // the current match, stronger than the others
+            span = span.bg(rgb(FIND_CURRENT_BG));
+        } else if mark[i] == 1 {
+            span = span.bg(rgb(FIND_BG));
         }
         row = row.child(span);
         i = j;

@@ -32,7 +32,7 @@ impl Ide {
     }
 
     /// Record the text as it is now, before an edit of `kind`.
-    fn begin_edit(&mut self, kind: EditKind) {
+    pub(super) fn begin_edit(&mut self, kind: EditKind) {
         let before = self.state();
         self.history.record(before, kind);
     }

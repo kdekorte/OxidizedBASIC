@@ -472,6 +472,22 @@ impl Ide {
             .on_action(cx.listener(|this, _: &EditPaste, win, cx| {
                 this.edit_action(win, cx, |ide, cx| ide.paste(cx));
             }))
+            .on_action(cx.listener(|this, _: &EditFind, win, cx| {
+                this.open_find(false, win);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &EditReplace, win, cx| {
+                this.open_find(true, win);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &EditFindNext, _win, cx| {
+                this.find_step(true);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &EditFindPrevious, _win, cx| {
+                this.find_step(false);
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &EditSelectAll, win, cx| {
                 this.edit_action(win, cx, |ide, _| ide.select_all());
             }))
@@ -501,6 +517,7 @@ impl Ide {
                 }),
             )
             .child(header)
+            .children(self.find.as_ref().map(|_| self.render_find_bar(win, cx)))
             .child(div().flex_1().min_h_0().child(self.render_editor(cx)));
         if let Some(popup) = popup {
             root = root.child(popup);
