@@ -18,6 +18,7 @@ fn main() {
         Some("repl") => cmd_repl(),
         Some("gui") => cmd_gui(&args[2..]),
         Some("ide") => cmd_ide(&args[2..]),
+        Some("play") => cmd_play(&args[2..]),
         Some("version") | Some("--version") => {
             println!(
                 "oxbasic {} (Phase 1: parser + interpreter)",
@@ -32,6 +33,7 @@ fn main() {
             eprintln!("  oxbasic gui <form.oxform> <file.bas>   open a GPUI form window");
             eprintln!("  oxbasic repl             interactive immediate window");
             eprintln!("  oxbasic ide [file.bas] [form.oxform]   launch the visual IDE");
+            eprintln!("  oxbasic play <project.oxproj>          run a project as an app");
             eprintln!("  oxbasic version          print version");
             std::process::exit(2);
         }
@@ -105,6 +107,16 @@ fn cmd_ide(args: &[String]) {
     let bas = args.first().map(|s| s.as_str());
     let oxform = args.get(1).map(|s| s.as_str());
     ide::run_ide(bas, oxform);
+}
+
+/// `oxbasic play <project.oxproj>` — run the project as an app: its program
+/// with only its own form windows, no editor.
+fn cmd_play(args: &[String]) {
+    let Some(file) = args.first() else {
+        eprintln!("usage: oxbasic play <project.oxproj>");
+        std::process::exit(2);
+    };
+    ide::play::run_play(std::path::Path::new(file));
 }
 
 /// `oxbasic gui <form.oxform> <program.bas>` — Phase 2 GPUI element

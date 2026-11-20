@@ -120,8 +120,16 @@ mod tests {
     fn the_default_file_is_in_application_support() {
         // in a test run the default is a folder of its own, never the real list
         let f = default_file();
-        assert!(!f.starts_with(std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
-            .join("Library")), "a test never uses the user's Library folder: {:?}", f);
+        assert!(
+            !f.starts_with(
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_default()
+                    .join("Library")
+            ),
+            "a test never uses the user's Library folder: {:?}",
+            f
+        );
         assert!(f.ends_with(format!("recent-{}.json", std::process::id())));
     }
 }
