@@ -93,6 +93,10 @@ const ERROR: u32 = 0xD70015;
 
 /// Inspector rows for the form itself use this in place of a control index.
 const FORM_IDX: usize = usize::MAX;
+/// The index the project's package settings use in the property buffers. No
+/// control or form has it, so the project's fields share the editing code of
+/// the other inspector fields without colliding with them.
+const PROJECT_IDX: usize = usize::MAX - 1;
 /// The code window's object list entry for module-level code.
 const GENERAL: &str = "(General)";
 /// The code window's procedure list entry for the module-level code.
@@ -374,6 +378,9 @@ pub struct Ide {
     // form designer
     form: FormSpec,
     selected: Option<usize>,
+    /// The project itself is selected in the Project panel: the Properties
+    /// panel then shows its package settings (version, icon, bundle id).
+    project_selected: bool,
     drag: Option<DesignDrag>, // moving or resizing a control, with the last pointer position
     // property inspector buffers: (control idx or FORM_IDX, prop) -> live text
     prop_bufs: HashMap<(usize, &'static str), String>,
@@ -511,6 +518,7 @@ Print \"Total = \" & CStr(Total)
             breakpoints: Arc::new(Mutex::new(HashSet::new())),
             form,
             selected: None,
+            project_selected: false,
             drag: None,
             prop_bufs: HashMap::new(),
             prop_focus: HashMap::new(),
@@ -843,6 +851,8 @@ mod event_tests;
 mod member_tests;
 #[cfg(test)]
 mod multiform_tests;
+#[cfg(test)]
+mod project_settings_tests;
 #[cfg(test)]
 mod project_tests;
 #[cfg(test)]
@@ -1495,12 +1505,23 @@ impl Ide {
     /// a form's second line shows its code file, double-clicked to edit.
     fn render_project_explorer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let ws = &self.workspace;
-        let mut list = div()
-            .p_2()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(SharedString::from(format!("▾  {}", ws.name)));
+        let mut list = div().p_2().flex().flex_col().gap_1().child(
+            div()
+                .id("project-row")
+                .debug_selector(|| "project-row".into())
+                .px_1()
+                .rounded_sm()
+                .cursor_pointer()
+                .when(self.project_selected, |s| s.bg(rgb(SEL_BG)))
+                .hover(|s| s.bg(rgb(SEL_BG)))
+                .child(SharedString::from(format!("▾  {}", ws.name)))
+                .on_click(cx.listener(|this: &mut Ide, _ev, _win, cx| {
+                    // the project's settings replace the form's in Properties
+                    this.project_selected = true;
+                    this.selected = None;
+                    cx.notify();
+                })),
+        );
         for (i, doc) in ws.docs.iter().enumerate() {
             let active = i == ws.active;
             let icon = match doc.kind {
@@ -2833,6 +2854,14 @@ impl Ide {
     /// The current value of inspector property `key` for `idx` (a control
     /// index, or [`FORM_IDX`]).
     fn prop_value(&self, idx: usize, key: &str) -> String {
+        if idx == PROJECT_IDX {
+            return match key {
+                "version" => self.workspace.version.clone(),
+                "icon" => self.workspace.icon.clone(),
+                "bundleid" => self.workspace.bundle_id.clone(),
+                _ => String::new(),
+            };
+        }
         if idx == FORM_IDX {
             let f = &self.form;
             return match key {
@@ -2941,6 +2970,17 @@ impl Ide {
     /// Apply an inspector edit as it is typed. `Name` is not applied here
     /// (see [`Ide::commit_rename`]); numbers apply once they parse.
     fn apply_prop(&mut self, idx: usize, key: &str, val: &str) {
+        if idx == PROJECT_IDX {
+            // the package settings: text, saved with the project
+            let v = val.trim().to_string();
+            match key {
+                "version" => self.workspace.version = v,
+                "icon" => self.workspace.icon = v,
+                "bundleid" => self.workspace.bundle_id = v,
+                _ => {}
+            }
+            return;
+        }
         let num = val
             .trim()
             .parse::<f32>()
@@ -3283,6 +3323,8 @@ impl Ide {
             self.commit_pending_rename();
         }
         self.selected = idx;
+        // choosing a control or the form leaves the project's settings
+        self.project_selected = false;
     }
 
     /// One keystroke into inspector field `key` of `idx`.
@@ -3544,6 +3586,53 @@ impl Ide {
     }
 
     fn render_inspector(&mut self, win: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The project's package settings, when the project is selected in the
+        // Project panel: the same fields as the form's, for the app's version,
+        // icon and bundle id (saved with the project).
+        if self.project_selected {
+            let mut list = div().p_2().flex().flex_col().gap_1();
+            for (key, label) in [
+                ("version", "Version"),
+                ("icon", "Icon"),
+                ("bundleid", "Bundle Id"),
+            ] {
+                list = list.child(self.prop_row(PROJECT_IDX, key, label, win, cx));
+            }
+            return div()
+                .flex_1()
+                .min_h_0()
+                .rounded_lg()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .bg(rgb(WINDOW_BG))
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .child(self.dock_title("Properties"))
+                .child(
+                    div()
+                        .debug_selector(|| "project-settings".into())
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .bg(rgb(PANEL))
+                        .border_b_1()
+                        .border_color(rgb(BORDER))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(SharedString::from(self.workspace.name.clone())),
+                )
+                .child(list)
+                .child(
+                    div()
+                        .px_3()
+                        .pt_1()
+                        .text_xs()
+                        .text_color(rgb(DIM))
+                        .child("Used by File > Package Project. Enter applies a value."),
+                )
+                .into_any_element();
+        }
         // The selected control, or the form itself (as VB's Properties
         // window shows when the form background is selected).
         let (idx, title, kind) = match self.selected.and_then(|i| self.form.controls.get(i)) {
@@ -3609,6 +3698,7 @@ impl Ide {
                     .border_color(rgb(BORDER)),
                 ),
             )
+            .into_any_element()
     }
 
     fn render_output(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
