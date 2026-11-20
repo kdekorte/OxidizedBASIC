@@ -47,6 +47,18 @@ impl Ide {
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .child(SharedString::from(text))
+                .when(focused, |s| {
+                    s.child(
+                        div()
+                            .debug_selector(move || {
+                                format!("{}-caret", id.trim_end_matches("-text"))
+                            })
+                            .flex_none()
+                            .w(px(1.5))
+                            .h(px(14.0))
+                            .bg(rgb(ACCENT)),
+                    )
+                })
                 .on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(move |_this: &mut Ide, _ev: &MouseDownEvent, win, cx| {

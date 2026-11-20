@@ -211,3 +211,31 @@ fn the_matches_are_tinted_and_the_current_one_more_strongly(cx: &mut gpui::TestA
     assert!(code.debug_bounds(sel("editor-row-0".into())).is_some());
     assert!(code.debug_bounds(sel("editor-row-1".into())).is_some());
 }
+
+#[gpui::test]
+fn the_focused_box_shows_a_caret(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let mut code = code_window_with(&ide, cx, "abc");
+    code.simulate_keystrokes("cmd-alt-f");
+    code.run_until_parked();
+    // the Find box has the focus when the bar opens: its caret is drawn
+    assert!(
+        code.debug_bounds(sel("find-caret".into())).is_some(),
+        "the Find box shows a caret"
+    );
+    assert!(
+        code.debug_bounds(sel("replace-caret".into())).is_none(),
+        "the Replace box has no caret while Find has the focus"
+    );
+    // clicking the Replace box moves the focus and the caret; redraw first,
+    // since debug_bounds keeps entries from the frame before
+    let replace = code
+        .debug_bounds(sel("replace-text".into()))
+        .expect("the Replace box");
+    code.simulate_click(replace.center(), gpui::Modifiers::none());
+    code.run_until_parked();
+    ide.update(&mut code, |_, cx| cx.notify());
+    code.run_until_parked();
+    assert!(code.debug_bounds(sel("replace-caret".into())).is_some());
+    assert!(code.debug_bounds(sel("find-caret".into())).is_none());
+}
