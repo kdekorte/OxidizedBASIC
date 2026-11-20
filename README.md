@@ -6,6 +6,12 @@ Full syntax and semantic compatibility with Visual Basic 6.0 / classic VBA
 is the goal; GPUI-based GUI rendering and the visual IDE follow in later
 phases.
 
+![The OxidizedBASIC IDE running the showcase project](docs/ide-screenshot.png)
+
+*The IDE with the showcase project: the designer (Form1 with its controls),
+the toolbox on the left, the project and properties on the right, and the
+Immediate pane below.*
+
 ## Status — Phases 1 & 2 complete, Phase 3 (IDE) in progress
 
 ### Phase 1: syntax parser & core runtime
