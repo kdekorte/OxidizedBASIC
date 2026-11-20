@@ -549,8 +549,10 @@ impl FormHost {
             // a DirListBox's Path changing lists another folder: VB's Change
             ControlKind::DirListBox if after.path != before.path => self.raise(i, "Change"),
             ControlKind::CheckBox if after.value != before.value => self.raise(i, "Click"),
-            // a scrollbar's Value changing raises Change, as VB does
-            ControlKind::HScrollBar | ControlKind::VScrollBar if after.value != before.value => {
+            // a scrollbar's or slider's Value changing raises Change, as VB does
+            ControlKind::HScrollBar | ControlKind::VScrollBar | ControlKind::Slider
+                if after.value != before.value =>
+            {
                 self.raise(i, "Change")
             }
             // setting an option button True clicks it; the others it clears
@@ -668,7 +670,8 @@ impl FormHost {
             }
             // a scrollbar dragged to a new Value, kept within its range
             UserEdit::Scroll { control, value } => {
-                if control < self.state.len() && self.form.controls[control].kind.is_scroll() {
+                // only a thumb the user can drag (a scrollbar or slider), not a progress bar
+                if control < self.state.len() && self.form.controls[control].kind.is_draggable() {
                     let before = self.watched(control);
                     let c = &self.form.controls[control];
                     let v = value.clamp(c.scroll_min, c.scroll_max);
@@ -799,6 +802,7 @@ impl FormHost {
             "max" if c.kind.is_scroll() => Variant::Long(c.scroll_max),
             "smallchange" if c.kind.is_scroll() => Variant::Long(c.small_change),
             "largechange" if c.kind.is_scroll() => Variant::Long(c.large_change),
+            "orientation" if c.kind == ControlKind::Slider => Variant::Integer(c.orientation as i16),
             "value" if c.kind.is_scroll() => Variant::Long(s.value),
             "style" if c.kind == ControlKind::ComboBox => Variant::Integer(c.style as i16),
             "shape" if c.kind == ControlKind::Shape => Variant::Integer(c.shape_type as i16),
@@ -1105,6 +1109,13 @@ impl FormHost {
                     return err(380, "Invalid property value");
                 }
                 self.form.controls[i].small_change = n;
+            }
+            "orientation" if kind == ControlKind::Slider => {
+                let n = value.as_i64()?;
+                if !(0..=1).contains(&n) {
+                    return err(380, "Invalid property value");
+                }
+                self.form.controls[i].orientation = n as u8;
             }
             "largechange" if kind.is_scroll() => {
                 let n = value.as_i64()? as i32;

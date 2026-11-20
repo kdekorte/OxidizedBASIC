@@ -44,6 +44,12 @@ pub enum ControlKind {
     /// VB's FileListBox: the files in `Path` whose names match `Pattern`
     /// (`*.*` by default), read when the form loads and when either changes.
     FileListBox,
+    /// VB's Slider (TrackBar): a draggable thumb over `Min`..`Max`, read and
+    /// set through `Value`, with `Orientation` (0 horizontal, 1 vertical).
+    Slider,
+    /// VB's ProgressBar: a bar filled to `Value` over `Min`..`Max`. The
+    /// program sets it; the user can't drag it.
+    ProgressBar,
 }
 
 impl ControlKind {
@@ -68,6 +74,8 @@ impl ControlKind {
             ControlKind::VolumeListBox => "VolumeListBox",
             ControlKind::DirListBox => "DirListBox",
             ControlKind::FileListBox => "FileListBox",
+            ControlKind::Slider => "Slider",
+            ControlKind::ProgressBar => "ProgressBar",
         }
     }
 
@@ -89,6 +97,8 @@ impl ControlKind {
             "volumelistbox" | "volumelist" => ControlKind::VolumeListBox,
             "dirlistbox" | "dirlist" => ControlKind::DirListBox,
             "filelistbox" | "filelist" => ControlKind::FileListBox,
+            "slider" | "trackbar" => ControlKind::Slider,
+            "progressbar" | "progress" => ControlKind::ProgressBar,
             "timer" => ControlKind::Timer,
             "checkbox" | "check" => ControlKind::CheckBox,
             "optionbutton" | "option" | "radio" => ControlKind::OptionButton,
@@ -156,6 +166,9 @@ pub struct ControlSpec {
     /// `Shape` (Shape control): 0 rectangle, 1 square, 2 oval, 3 circle.
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub shape_type: u8,
+    /// `Orientation` (Slider): 0 horizontal (the default), 1 vertical.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub orientation: u8,
     /// `FillStyle` (Shape control): 0 solid, 1 transparent (VB's default).
     #[serde(default = "default_one_u8")]
     pub fill_style: u8,
@@ -341,6 +354,8 @@ impl ControlKind {
             ControlKind::VolumeListBox => (120.0, 84.0),
             ControlKind::DirListBox => (120.0, 84.0),
             ControlKind::FileListBox => (120.0, 84.0),
+            ControlKind::Slider => (160.0, 40.0),
+            ControlKind::ProgressBar => (200.0, 20.0),
         }
     }
 
@@ -374,9 +389,24 @@ impl ControlKind {
         )
     }
 
+    /// Whether the user can drag the control's thumb (scrollbars and sliders;
+    /// a progress bar only shows the program's value).
+    pub fn is_draggable(&self) -> bool {
+        matches!(
+            self,
+            ControlKind::HScrollBar | ControlKind::VScrollBar | ControlKind::Slider
+        )
+    }
+
     /// Whether the control is a scrollbar (`Min`, `Max`, `Value`...).
     pub fn is_scroll(&self) -> bool {
-        matches!(self, ControlKind::HScrollBar | ControlKind::VScrollBar)
+        matches!(
+            self,
+            ControlKind::HScrollBar
+                | ControlKind::VScrollBar
+                | ControlKind::Slider
+                | ControlKind::ProgressBar
+        )
     }
 
     /// Whether the control shows a `Picture`.
@@ -483,6 +513,7 @@ impl ControlSpec {
             small_change: 1,
             large_change: 1,
             shape_type: 0,
+            orientation: 0,
             fill_style: 1,
             diagonal: false,
             path: String::new(),

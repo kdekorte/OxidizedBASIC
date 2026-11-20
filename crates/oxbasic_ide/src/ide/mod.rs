@@ -760,6 +760,8 @@ impl Ide {
             ControlKind::VolumeListBox => "Volume",
             ControlKind::DirListBox => "Dir",
             ControlKind::FileListBox => "File",
+            ControlKind::Slider => "Slider",
+            ControlKind::ProgressBar => "Progress",
         };
         // The first free `<Prefix><n>` — renamed controls can leave gaps or
         // already hold the next number.
@@ -1625,6 +1627,8 @@ impl Ide {
                     .child(self.toolbox_button("▤ VolumeListBox", ControlKind::VolumeListBox, cx))
                     .child(self.toolbox_button("▥ DirListBox", ControlKind::DirListBox, cx))
                     .child(self.toolbox_button("▦ FileListBox", ControlKind::FileListBox, cx))
+                    .child(self.toolbox_button("⇆ Slider", ControlKind::Slider, cx))
+                    .child(self.toolbox_button("▰ ProgressBar", ControlKind::ProgressBar, cx))
                     .child(self.toolbox_button("⌄ ComboBox", ControlKind::ComboBox, cx))
                     .child(self.toolbox_button("▧ PictureBox", ControlKind::PictureBox, cx))
                     .child(self.toolbox_button("☑ CheckBox", ControlKind::CheckBox, cx))

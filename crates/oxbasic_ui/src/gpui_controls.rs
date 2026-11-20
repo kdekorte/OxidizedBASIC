@@ -816,7 +816,45 @@ pub fn paint_control<V: 'static>(
             };
             hook(Part::Body, track.child(thumb), cx)
         }
-        // VB's Line and Shape: one drawn figure filling the control, painted
+        // VB's Slider: a track with a thumb at Value, horizontal or vertical
+        // by its Orientation (0 horizontal, 1 vertical)
+        ControlKind::Slider => {
+            let horizontal = c.orientation == 0;
+            let span = (c.scroll_max - c.scroll_min).max(1) as f32;
+            let value = if look.design { c.value } else { look.value };
+            let frac = ((value - c.scroll_min) as f32 / span).clamp(0.0, 1.0);
+            let track = base
+                .overflow_hidden()
+                .bg(rgb(BUTTON_FACE))
+                .border_1()
+                .border_color(rgb(BUTTON_BORDER));
+            let thumb = div().absolute().bg(rgb(ACCENT)).rounded_sm();
+            let thumb = if horizontal {
+                thumb.top(px(2.0)).bottom(px(2.0)).w(px(10.0)).left(relative(frac))
+            } else {
+                thumb.left(px(2.0)).right(px(2.0)).h(px(10.0)).top(relative(frac))
+            };
+            hook(Part::Body, track.child(thumb), cx)
+        }
+        // VB's ProgressBar: a track filled from its start to Value (not draggable)
+        ControlKind::ProgressBar => {
+            let span = (c.scroll_max - c.scroll_min).max(1) as f32;
+            let value = if look.design { c.value } else { look.value };
+            let frac = ((value - c.scroll_min) as f32 / span).clamp(0.0, 1.0);
+            let track = base
+                .overflow_hidden()
+                .bg(rgb(BUTTON_FACE))
+                .border_1()
+                .border_color(rgb(BUTTON_BORDER));
+            let fill = div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                .w(relative(frac))
+                .bg(rgb(ACCENT));
+            hook(Part::Body, track.child(fill), cx)
+        }
         // by the same code that paints a PictureBox's drawing
         ControlKind::Line | ControlKind::Shape => {
             let mut canvas = crate::canvas::Canvas::default();

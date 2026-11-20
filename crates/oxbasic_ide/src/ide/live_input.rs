@@ -558,7 +558,7 @@ impl FormRunner {
         }
         // a press on a scrollbar starts a drag from the value it has: each
         // move adds the pointer's travel, so the window's offset cancels
-        if left && self.form.controls[idx].kind.is_scroll() && self.form.controls[idx].enabled {
+        if left && self.form.controls[idx].kind.is_draggable() && self.form.controls[idx].enabled {
             self.scroll_drag = Some(idx);
             self.scroll_start = Some((ev.position, self.state[idx].value));
         }
@@ -642,7 +642,11 @@ impl FormRunner {
         let Some(start) = self.scroll_start else {
             return false;
         };
-        let horizontal = c.kind == ControlKind::HScrollBar;
+        let horizontal = match c.kind {
+            ControlKind::HScrollBar => true,
+            ControlKind::Slider => c.orientation == 0,
+            _ => false,
+        };
         let (travel, length) = if horizontal {
             (f32::from(pos.x) - f32::from(start.0.x), c.rect.width)
         } else {
