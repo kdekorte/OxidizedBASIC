@@ -147,6 +147,7 @@ gpui::actions!(
         PackageProject,
         CloseProject,
         AddForm,
+        SetStartForm,
         AddModule,
         RemoveDocument,
         RunProgram,
@@ -233,6 +234,7 @@ fn file_menu(recent: &recent::RecentList) -> Vec<gpui::MenuItem> {
         gpui::MenuItem::action("Save Form", SaveForm),
         gpui::MenuItem::separator(),
         gpui::MenuItem::action("Add Form", AddForm),
+        gpui::MenuItem::action("Set as Start Form", SetStartForm),
         gpui::MenuItem::action("Add Module", AddModule),
         gpui::MenuItem::action("Remove Form or Module", RemoveDocument),
         gpui::MenuItem::separator(),
@@ -1345,6 +1347,9 @@ impl Render for Ide {
             }))
             .on_action(cx.listener(|this, _: &AddForm, _win, cx| {
                 this.add_form(cx);
+            }))
+            .on_action(cx.listener(|this, _: &SetStartForm, _win, cx| {
+                this.set_start_form(cx);
             }))
             .on_action(cx.listener(|this, _: &AddModule, _win, cx| {
                 this.add_module(cx);

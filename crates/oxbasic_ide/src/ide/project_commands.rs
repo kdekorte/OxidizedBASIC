@@ -291,6 +291,21 @@ impl Ide {
     }
 
     /// File > Add Form: a new form (unsaved until the project is saved).
+    /// Project > Set as Start Form: the active form becomes the one the
+    /// program starts with. Modules can't be the start.
+    pub(super) fn set_start_form(&mut self, cx: &mut Context<Self>) {
+        let doc = self.workspace.active_doc();
+        let name = doc.name.clone();
+        if doc.kind != DocKind::Form {
+            self.status = format!("{} is a module; choose a form", name);
+        } else if let Err(e) = self.workspace.set_start_form(&name) {
+            self.status = e;
+        } else {
+            self.status = format!("{} starts the program", name);
+        }
+        cx.notify();
+    }
+
     pub(super) fn add_form(&mut self, cx: &mut Context<Self>) {
         self.store_active();
         self.workspace.add_form();

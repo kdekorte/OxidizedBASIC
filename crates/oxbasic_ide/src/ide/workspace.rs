@@ -181,6 +181,8 @@ pub struct Workspace {
     pub version: String,
     pub icon: String,
     pub bundle_id: String,
+    /// The start form was chosen since the project was last saved.
+    pub startup_changed: bool,
 }
 
 impl Workspace {
@@ -195,6 +197,7 @@ impl Workspace {
             version: oxbasic_ui::project::default_version(),
             icon: String::new(),
             bundle_id: String::new(),
+            startup_changed: false,
         }
     }
 
@@ -208,7 +211,21 @@ impl Workspace {
 
     /// Whether any document has unsaved changes.
     pub fn is_dirty(&self) -> bool {
-        self.docs.iter().any(|d| d.is_dirty())
+        self.startup_changed || self.docs.iter().any(|d| d.is_dirty())
+    }
+
+    /// Make form `name` the one the program starts with. Refused when there
+    /// is no such form. Marks the project unsaved when it changes.
+    pub fn set_start_form(&mut self, name: &str) -> Result<(), String> {
+        let i = self
+            .find(name)
+            .filter(|&i| self.docs[i].kind == DocKind::Form)
+            .ok_or_else(|| format!("{} is not a form", name))?;
+        if !self.startup.eq_ignore_ascii_case(&self.docs[i].name) {
+            self.startup = self.docs[i].name.clone();
+            self.startup_changed = true;
+        }
+        Ok(())
     }
 
     /// The index of the document named `name` (case-insensitive).
@@ -324,6 +341,7 @@ impl Workspace {
             self.save_doc(i)?;
         }
         self.to_project().save(file)?;
+        self.startup_changed = false;
         Ok(())
     }
 
@@ -452,6 +470,7 @@ impl Workspace {
             version: project.version,
             icon: project.icon,
             bundle_id: project.bundle_id,
+            startup_changed: false,
         })
     }
 
@@ -596,5 +615,36 @@ mod tests {
         std::fs::remove_file(dir.0.join("Form1.bas")).unwrap();
         let err = Workspace::open(&file).unwrap_err();
         assert!(err.contains("Form1.bas"), "{}", err);
+    }
+
+    #[test]
+    fn choosing_the_start_form_marks_the_project_unsaved_until_saved() {
+        let dir = Dir::new("startform");
+        let file = dir.0.join("app.oxproj");
+        let mut w = Workspace::new_project();
+        w.add_form();
+        w.add_module();
+        w.save_all(&file).unwrap();
+        assert!(!w.is_dirty());
+
+        // a module or an unknown name is refused, and changes nothing
+        assert!(w.set_start_form("Module1").is_err());
+        assert!(w.set_start_form("Nope").is_err());
+        assert!(!w.is_dirty());
+
+        // choosing another form is a change to the project
+        w.set_start_form("form2").unwrap();
+        assert_eq!(w.startup, "Form2");
+        assert!(w.is_dirty(), "the project has unsaved changes");
+
+        // choosing the same form again is not
+        w.save_all(&file).unwrap();
+        assert!(!w.is_dirty());
+        w.set_start_form("Form2").unwrap();
+        assert!(!w.is_dirty());
+
+        // and the choice is kept in the project file
+        let back = Workspace::open(&file).unwrap();
+        assert_eq!(back.startup, "Form2");
     }
 }
