@@ -20,6 +20,8 @@ pub mod highlight;
 pub mod launch;
 pub mod live_forms;
 pub mod live_input;
+pub mod package;
+pub mod package_command;
 pub mod play;
 pub mod program;
 pub mod project_commands;
@@ -138,6 +140,7 @@ gpui::actions!(
         ClearRecent,
         SaveProject,
         SaveProjectAs,
+        PackageProject,
         CloseProject,
         AddForm,
         AddModule,
@@ -221,6 +224,7 @@ fn file_menu(recent: &recent::RecentList) -> Vec<gpui::MenuItem> {
         gpui::MenuItem::separator(),
         gpui::MenuItem::action("Save Project", SaveProject),
         gpui::MenuItem::action("Save Project As…", SaveProjectAs),
+        gpui::MenuItem::action("Package Project…", PackageProject),
         gpui::MenuItem::action("Save Code", SaveCode),
         gpui::MenuItem::action("Save Form", SaveForm),
         gpui::MenuItem::separator(),
@@ -1322,6 +1326,9 @@ impl Render for Ide {
             }))
             .on_action(cx.listener(|this, _: &SaveProjectAs, win, cx| {
                 this.save_project_as(win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PackageProject, win, cx| {
+                this.package_project(win, cx);
             }))
             .on_action(cx.listener(|this, _: &CloseProject, win, cx| {
                 this.close_project(win, cx);
