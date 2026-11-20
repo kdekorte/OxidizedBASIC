@@ -70,11 +70,20 @@ impl Ide {
                     runner.state = state.clone();
                     runner.handlers = handlers.clone();
                     runner.base_dir = base_dir.clone();
-                    // Form_Activate / Form_Deactivate
-                    let sub =
-                        cx.observe_window_activation(win, |runner: &mut FormRunner, win, _cx| {
-                            runner.activation_changed(win.is_window_active());
-                        });
+                    // Form_Activate / Form_Deactivate; the form's menu bar
+                    // is the application's while its window is in front
+                    let sub = cx.observe_window_activation(win, {
+                        let ide = ide.clone();
+                        move |runner: &mut FormRunner, win, cx| {
+                            let active = win.is_window_active();
+                            runner.activation_changed(active);
+                            if active {
+                                oxbasic_ui::menu_bar::install(&runner.form.menus, cx);
+                            } else if let Some(ide) = ide.upgrade() {
+                                ide.update(cx, |ide, cx| ide.refresh_file_menu(cx));
+                            }
+                        }
+                    });
                     runner._subscriptions.push(sub);
                     runner
                 });

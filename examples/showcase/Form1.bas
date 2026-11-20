@@ -133,3 +133,23 @@ End Sub
 Sub cmdFiles_Click()
     frmFiles.Show
 End Sub
+
+' ---- The menu bar: File and Help. Each item runs the same code as its button
+' (the shortcuts are on the items: Ctrl+D, Ctrl+F, Ctrl+Q).
+
+Sub mnuDrawing_Click()
+    frmDrawing.Show
+End Sub
+
+Sub mnuFiles_Click()
+    frmFiles.Show
+End Sub
+
+Sub mnuQuit_Click()
+    End
+End Sub
+
+Sub mnuAbout_Click()
+    frmAbout.lblVersion.Caption = "Greetings so far: " & Greeted
+    frmAbout.Show
+End Sub

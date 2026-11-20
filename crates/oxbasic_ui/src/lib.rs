@@ -20,6 +20,8 @@
 
 mod form;
 pub mod menu;
+#[cfg(feature = "gpui")]
+pub mod menu_bar;
 
 #[cfg(test)]
 mod dir_tests;

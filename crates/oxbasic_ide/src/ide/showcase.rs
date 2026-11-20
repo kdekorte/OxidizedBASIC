@@ -205,6 +205,25 @@ fn main_form() -> FormSpec {
     // the drawing and file browser each have their own form, opened from here
     f.control(captioned("cmdDrawing", CommandButton, "Drawing…", (16.0, 430.0, 140.0, 30.0)));
     f.control(captioned("cmdFiles", CommandButton, "Files…", (170.0, 430.0, 140.0, 30.0)));
+    // the menu bar: File (Drawing, Files, Quit) and Help (About)
+    use oxbasic_ui::menu::MenuItem;
+    let mut file = MenuItem::new("mnuFile", "&File", None);
+    file.shortcut = String::new();
+    f.menus.push(file);
+    let mut drawing = MenuItem::new("mnuDrawing", "&Drawing…", Some(0));
+    drawing.shortcut = "Ctrl+D".into();
+    f.menus.push(drawing);
+    let mut files = MenuItem::new("mnuFiles", "&Files…", Some(0));
+    files.shortcut = "Ctrl+F".into();
+    f.menus.push(files);
+    f.menus.push(MenuItem::new("mnuSep", "-", Some(0)));
+    let mut quit = MenuItem::new("mnuQuit", "&Quit", Some(0));
+    quit.shortcut = "Ctrl+Q".into();
+    f.menus.push(quit);
+    // Help is item 5; About sits under it
+    let help = MenuItem::new("mnuHelp", "&Help", None);
+    f.menus.push(help);
+    f.menus.push(MenuItem::new("mnuAbout", "&About…", Some(5)));
     f
 }
 

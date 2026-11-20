@@ -38,6 +38,8 @@ mod scroll_drag_tests;
 #[cfg(test)]
 mod showcase_control_tests;
 #[cfg(test)]
+mod showcase_menu_tests;
+#[cfg(test)]
 mod showcase_flow_tests;
 #[cfg(test)]
 mod showcase_form_tests;

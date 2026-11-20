@@ -999,5 +999,50 @@
         "strikethrough": false
       }
     }
+  ],
+  "menus": [
+    {
+      "name": "mnuFile",
+      "caption": "&File",
+      "enabled": true
+    },
+    {
+      "name": "mnuDrawing",
+      "caption": "&Drawing…",
+      "parent": 0,
+      "shortcut": "Ctrl+D",
+      "enabled": true
+    },
+    {
+      "name": "mnuFiles",
+      "caption": "&Files…",
+      "parent": 0,
+      "shortcut": "Ctrl+F",
+      "enabled": true
+    },
+    {
+      "name": "mnuSep",
+      "caption": "-",
+      "parent": 0,
+      "enabled": true
+    },
+    {
+      "name": "mnuQuit",
+      "caption": "&Quit",
+      "parent": 0,
+      "shortcut": "Ctrl+Q",
+      "enabled": true
+    },
+    {
+      "name": "mnuHelp",
+      "caption": "&Help",
+      "enabled": true
+    },
+    {
+      "name": "mnuAbout",
+      "caption": "&About…",
+      "parent": 5,
+      "enabled": true
+    }
   ]
 }

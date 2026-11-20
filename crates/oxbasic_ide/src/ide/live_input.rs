@@ -355,6 +355,20 @@ impl FormRunner {
 
 /// The window.
 impl FormRunner {
+    /// A menu item of this form was chosen: run its `Name_Click` handler in
+    /// the program. Disabled items don't run.
+    pub(super) fn menu_clicked(&mut self, index: usize) {
+        let Some(item) = self.form.menus.get(index).cloned() else {
+            return;
+        };
+        if !item.enabled || item.is_separator() {
+            return;
+        }
+        let handler = oxbasic_ui::menu::click_handler(&item);
+        self.session
+            .send(DebugCommand::Call(self.form_index, handler, Vec::new()));
+    }
+
     /// The window became active or stopped being: `Form_Activate` /
     /// `Form_Deactivate` (VB raises them when the focus moves between the
     /// application's forms).
@@ -418,6 +432,12 @@ impl Render for FormRunner {
             .bg(rgb(FORM_BACK))
             .text_color(rgb(FG))
             .track_focus(&self.form_focus)
+            // a menu item of the form's bar was chosen: run its Name_Click
+            .on_action(cx.listener(
+                |this: &mut FormRunner, act: &oxbasic_ui::menu_bar::FormMenuClick, _win, _cx| {
+                    this.menu_clicked(act.index);
+                },
+            ))
             // a press on no control is the form's; it closes any open list
             .on_any_mouse_down(cx.listener(
                 |this: &mut FormRunner, ev: &MouseDownEvent, win, cx| {
