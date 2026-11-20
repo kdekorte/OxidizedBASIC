@@ -1300,7 +1300,14 @@ impl Render for Ide {
                                 "{} · Designer — double-click a control to edit its code",
                                 self.form.name
                             )))
-                            .child(div().flex_1().min_h_0().child(self.render_designer(cx))),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .child(self.render_designer(cx)),
+                            ),
                     )
                     .child(self.splitter(splitters::Split::Side, cx))
                     .child(
@@ -1527,52 +1534,64 @@ impl Ide {
         let viewport = handle.bounds().size;
         let max = handle.max_offset();
         let offset = handle.offset();
-        let overlay = div().absolute().size_full().child(if max.height > px(0.0) {
-            let track = (f32::from(viewport.height) - 20.0).max(24.0);
-            let thumb = (track * f32::from(viewport.height)
-                / (f32::from(viewport.height) + f32::from(max.height)))
-            .clamp(24.0, track);
-            let travel = track - thumb;
-            let top = 2.0 + (-f32::from(offset.y) / f32::from(max.height)) * travel;
-            let scroll = handle.clone();
-            div()
-                .debug_selector(|| format!("scrollbar-{}-vertical", pane))
-                .absolute()
-                .left(px((f32::from(viewport.width) - 10.0).max(0.0)))
-                .top(px(2.0))
-                .w(px(8.0))
-                .h(px(track))
-                .rounded_full()
-                .bg(rgb(0xE5E5EA))
-                .child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top(px(top - 2.0))
-                        .w(px(8.0))
-                        .h(px(thumb))
-                        .rounded_full()
-                        .bg(rgb(0x8E8E93))
-                        .hover(|s| s.bg(rgb(0x636366)))
-                        .cursor_pointer()
-                        .on_mouse_down(
-                            gpui::MouseButton::Left,
-                            cx.listener(move |this: &mut Ide, ev: &MouseDownEvent, _win, cx| {
-                                cx.stop_propagation();
-                                this.scrollbar_drag = Some(ScrollbarDrag {
-                                    pane,
-                                    vertical: true,
-                                    pointer_start: f32::from(ev.position.y),
-                                    offset_start: f32::from(scroll.offset().y),
-                                    max_offset: f32::from(scroll.max_offset().height),
-                                    thumb_travel: travel,
-                                });
-                            }),
-                        ),
-                )
-        } else {
-            div()
-        });
+        // the overlay is a child of the scrolled area, so it moves with the
+        // content: shift it back by the scroll offset to keep the bars on
+        // the visible edges
+        let overlay = div()
+            .debug_selector(move || format!("scrollbars-{}", pane))
+            .absolute()
+            .left(-offset.x)
+            .top(-offset.y)
+            .w(viewport.width)
+            .h(viewport.height)
+            .child(if max.height > px(0.0) {
+                let track = (f32::from(viewport.height) - 20.0).max(24.0);
+                let thumb = (track * f32::from(viewport.height)
+                    / (f32::from(viewport.height) + f32::from(max.height)))
+                .clamp(24.0, track);
+                let travel = track - thumb;
+                let top = 2.0 + (-f32::from(offset.y) / f32::from(max.height)) * travel;
+                let scroll = handle.clone();
+                div()
+                    .debug_selector(|| format!("scrollbar-{}-vertical", pane))
+                    .absolute()
+                    .left(px((f32::from(viewport.width) - 10.0).max(0.0)))
+                    .top(px(2.0))
+                    .w(px(8.0))
+                    .h(px(track))
+                    .rounded_full()
+                    .bg(rgb(0xE5E5EA))
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(top - 2.0))
+                            .w(px(8.0))
+                            .h(px(thumb))
+                            .rounded_full()
+                            .bg(rgb(0x8E8E93))
+                            .hover(|s| s.bg(rgb(0x636366)))
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(
+                                    move |this: &mut Ide, ev: &MouseDownEvent, _win, cx| {
+                                        cx.stop_propagation();
+                                        this.scrollbar_drag = Some(ScrollbarDrag {
+                                            pane,
+                                            vertical: true,
+                                            pointer_start: f32::from(ev.position.y),
+                                            offset_start: f32::from(scroll.offset().y),
+                                            max_offset: f32::from(scroll.max_offset().height),
+                                            thumb_travel: travel,
+                                        });
+                                    },
+                                ),
+                            ),
+                    )
+            } else {
+                div()
+            });
 
         overlay.child(if max.width > px(0.0) {
             let track = (f32::from(viewport.width) - 20.0).max(24.0);
@@ -1847,6 +1866,9 @@ impl Ide {
         let mut form_area = div()
             .debug_selector(|| "designer-form".into())
             .relative()
+            // the form keeps its own size whatever room the designer has:
+            // a narrower pane scrolls instead of squeezing it
+            .flex_none()
             .w(px(form.width))
             .h(px(form.height))
             .bg(rgb(FORM_BG))
@@ -2048,11 +2070,12 @@ impl Ide {
             }
         }
 
-        // the designer region tracks mouse movement for dragging
+        // the designer region tracks mouse movement for dragging; it fills
+        // its pane and scrolls a form bigger than that
         div()
             .id("designer")
-            .flex_1()
-            .min_h_0()
+            .debug_selector(|| "designer-viewport".into())
+            .size_full()
             .overflow_scroll()
             .scrollbar_width(px(8.0))
             .track_scroll(&self.designer_scroll)

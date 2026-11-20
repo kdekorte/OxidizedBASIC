@@ -107,3 +107,53 @@ fn property_labels_are_smaller_and_on_one_line(cx: &mut gpui::TestAppContext) {
         assert_eq!(bounds(cx, p).origin.x, name.origin.x, "{}", p);
     }
 }
+
+#[gpui::test]
+fn a_narrower_designer_scrolls_the_form_instead_of_squeezing_it(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    // the form as designed: 400 x 500
+    let before = bounds(cx, "designer-form");
+    assert_eq!(f32::from(before.size.width), 400.0);
+    // widen the Project / Properties column until the designer is narrower
+    // than the form, and the Immediate window until it is shorter
+    drag_bar(cx, "split-side", -600.0, 0.0);
+    drag_bar(cx, "split-output", 0.0, -600.0);
+    let view = bounds(cx, "designer-viewport");
+    assert!(
+        f32::from(view.size.width) < 400.0,
+        "the designer is now narrower than the form: {:?}",
+        view.size
+    );
+    // the form keeps its size
+    let after = bounds(cx, "designer-form");
+    assert_eq!(after.size, before.size, "the form outline is unchanged");
+    ide.read_with(cx, |ide, _| {
+        assert_eq!((ide.form.width, ide.form.height), (400.0, 500.0));
+        // and the designer can scroll to all of it
+        let max = ide.designer_scroll.max_offset();
+        assert!(f32::from(max.width) > 0.0, "it scrolls sideways");
+        if f32::from(view.size.height) < 500.0 {
+            assert!(f32::from(max.height) > 0.0, "it scrolls up and down");
+        }
+    });
+    // scrolled all the way right, the scroll bars stay on the designer's
+    // visible edges instead of moving away with the form
+    ide.update(cx, |ide, cx| {
+        let max = ide.designer_scroll.max_offset();
+        ide.designer_scroll.set_offset(gpui::point(-max.width, -max.height));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    ide.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    let bars = bounds(cx, "scrollbars-designer");
+    let view = bounds(cx, "designer-viewport");
+    assert_eq!(bars.origin, view.origin, "the bars are over the visible area");
+    let bar = bounds(cx, "scrollbar-designer-horizontal");
+    assert!(
+        bar.origin.x >= view.origin.x && bar.right() <= view.right(),
+        "the horizontal bar is inside the designer: {:?} in {:?}",
+        bar,
+        view
+    );
+}
