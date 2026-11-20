@@ -56,20 +56,68 @@ pub fn project_files(file: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
+/// What a project's package is made of: the settings the project file gives,
+/// with the defaults for any it leaves out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PackageSettings {
+    pub version: String,
+    /// The bundle identifier: the project's, or one derived from its name.
+    pub bundle_id: String,
+    /// The icon file, resolved against the project's folder, if the project
+    /// names one.
+    pub icon: Option<PathBuf>,
+}
+
+/// The packaging settings of the project at `project`. An icon named in the
+/// project is resolved against the project's folder; a missing icon is an
+/// error, as any missing project file is.
+pub fn package_settings(project: &Path) -> Result<PackageSettings, String> {
+    let p = oxbasic_ui::project::Project::load(project)?;
+    let dir = project.parent().unwrap_or(Path::new("."));
+    let icon = if p.icon.is_empty() {
+        None
+    } else {
+        let path = dir.join(&p.icon);
+        if !path.is_file() {
+            return Err(format!("icon not found: {}", path.display()));
+        }
+        Some(path)
+    };
+    let bundle_id = if p.bundle_id.trim().is_empty() {
+        bundle_identifier(&p.name)
+    } else {
+        p.bundle_id.trim().to_string()
+    };
+    let version = if p.version.trim().is_empty() {
+        oxbasic_ui::project::default_version()
+    } else {
+        p.version.trim().to_string()
+    };
+    Ok(PackageSettings {
+        version,
+        bundle_id,
+        icon,
+    })
+}
+
 /// What a package needs to be written: the project to carry, where the
-/// bundle goes, the app's name, and the icon file to use.
+/// bundle goes, the app's name, and the settings (icon, version, identifier)
+/// the project gives.
 #[derive(Debug, Clone)]
 pub struct PackageSpec {
     /// The `.oxproj` to package.
     pub project: PathBuf,
     /// The `.app` folder to write (e.g. `~/Desktop/Hello.app`).
     pub bundle: PathBuf,
-    /// The app's name, from the project's name.
+    /// The app's name, from the bundle's name.
     pub name: String,
     /// The app icon (`.icns`), copied into the bundle.
     pub icon: Option<PathBuf>,
     /// The `oxbasic` executable the app runs.
     pub binary: PathBuf,
+    /// The app's version, and its bundle identifier.
+    pub version: String,
+    pub bundle_id: String,
 }
 
 /// The app's bundle identifier, built from the project's name so it is stable
@@ -176,8 +224,8 @@ pub fn info_plist(spec: &PackageSpec) -> String {
 </plist>
 "#,
         name = spec.name,
-        id = bundle_identifier(&spec.name),
-        version = env!("CARGO_PKG_VERSION"),
+        id = spec.bundle_id,
+        version = spec.version,
     )
 }
 
@@ -317,6 +365,8 @@ mod bundle_tests {
             name: name.into(),
             icon: None,
             binary: fake_binary(dir),
+            version: "1.0.0".into(),
+            bundle_id: bundle_identifier(name),
         }
     }
 
@@ -362,16 +412,14 @@ mod bundle_tests {
             name: "Hello World".into(),
             icon: None,
             binary: PathBuf::from("/x/bin"),
+            version: "2.3.4".into(),
+            bundle_id: "com.acme.hello".into(),
         };
         let plist = info_plist(&s);
         assert!(plist.contains("<string>Hello World</string>"));
         assert!(plist.contains("<string>Hello World-launch</string>"));
         assert!(plist.contains("<key>CFBundleIdentifier</key>"));
-        assert!(
-            plist.contains("com.oxidizedbasic.app.helloworld"),
-            "{}",
-            plist
-        );
+        assert!(plist.contains("com.acme.hello"), "{}", plist);
     }
 
     #[test]
@@ -426,9 +474,126 @@ mod bundle_tests {
                 name: "Showcase".into(),
                 icon: icon.exists().then_some(icon),
                 binary: root.join("target/debug/oxbasic"),
+                version: "1.0.0".into(),
+                bundle_id: bundle_identifier("Showcase"),
             })
             .expect("packages");
             assert!(bundle.join("Contents/MacOS/Showcase-launch").exists());
+        }
+    }
+
+    #[cfg(test)]
+    mod settings_tests {
+        use super::*;
+
+        /// A project folder with a one-form project whose file gives `extra` (more
+        /// project fields, as JSON text). Returns the project file's path.
+        fn project_with(tag: &str, extra: &str) -> PathBuf {
+            let dir =
+                std::env::temp_dir().join(format!("oxide-set-{}-{}", tag, std::process::id()));
+            std::fs::remove_dir_all(&dir).ok();
+            std::fs::create_dir_all(&dir).unwrap();
+            let layout = serde_json::json!({
+                "name": "Form1", "caption": "Hi", "width": 200.0, "height": 120.0,
+                "controls": []
+            });
+            std::fs::write(dir.join("Form1.oxform"), layout.to_string()).unwrap();
+            std::fs::write(dir.join("Form1.bas"), "Sub Form_Load()\nEnd Sub\n").unwrap();
+            std::fs::write(dir.join("icon.icns"), b"icns").unwrap();
+            let text = format!(
+                r#"{{"name": "Game", "startup": "Form1",
+                "forms": [{{"name": "Form1", "layout": "Form1.oxform", "code": "Form1.bas"}}],
+                "modules": []{}}}"#,
+                extra
+            );
+            let file = dir.join("game.oxproj");
+            std::fs::write(&file, text).unwrap();
+            file
+        }
+
+        #[test]
+        fn the_version_identifier_and_icon_come_from_the_project() {
+            let file = project_with(
+                "given",
+                r#", "version": "2.1.0", "bundleId": "com.acme.game", "icon": "icon.icns""#,
+            );
+            let s = package_settings(&file).expect("reads");
+            assert_eq!(s.version, "2.1.0");
+            assert_eq!(s.bundle_id, "com.acme.game");
+            assert_eq!(
+                s.icon.as_deref(),
+                Some(file.parent().unwrap().join("icon.icns").as_path())
+            );
+            std::fs::remove_dir_all(file.parent().unwrap()).ok();
+        }
+
+        #[test]
+        fn a_project_that_says_nothing_gets_the_defaults() {
+            let file = project_with("defaults", "");
+            let s = package_settings(&file).expect("reads");
+            assert_eq!(s.version, "1.0.0", "the default version");
+            assert_eq!(
+                s.bundle_id, "com.oxidizedbasic.app.game",
+                "one derived from the name"
+            );
+            assert!(s.icon.is_none(), "no icon: the default one");
+            std::fs::remove_dir_all(file.parent().unwrap()).ok();
+        }
+
+        #[test]
+        fn a_named_icon_that_is_missing_is_an_error() {
+            let file = project_with("noicon", r#", "icon": "gone.icns""#);
+            let err = package_settings(&file).unwrap_err();
+            assert!(err.contains("gone.icns"), "{}", err);
+            std::fs::remove_dir_all(file.parent().unwrap()).ok();
+        }
+
+        #[test]
+        fn the_bundle_carries_the_projects_version_and_identifier() {
+            let file = project_with(
+                "plist",
+                r#", "version": "3.0.1", "bundleId": "com.acme.plist""#,
+            );
+            let bundle = file.parent().unwrap().join("Game.app");
+            let s = package_settings(&file).unwrap();
+            write_package(&PackageSpec {
+                project: file.clone(),
+                bundle: bundle.clone(),
+                name: "Game".into(),
+                icon: s.icon.clone(),
+                binary: std::env::current_exe().unwrap(),
+                version: s.version.clone(),
+                bundle_id: s.bundle_id.clone(),
+            })
+            .expect("packages");
+            let plist = std::fs::read_to_string(bundle.join("Contents/Info.plist")).unwrap();
+            assert!(plist.contains("<string>3.0.1</string>"), "{}", plist);
+            assert!(
+                plist.contains("<string>com.acme.plist</string>"),
+                "{}",
+                plist
+            );
+            std::fs::remove_dir_all(file.parent().unwrap()).ok();
+        }
+
+        #[test]
+        fn the_settings_survive_opening_and_saving_the_project() {
+            use crate::ide::workspace::Workspace;
+            let file = project_with(
+                "roundtrip",
+                r#", "version": "4.2.0", "bundleId": "com.acme.keep", "icon": "icon.icns""#,
+            );
+            let mut w = Workspace::open(&file).expect("opens");
+            assert_eq!(w.version, "4.2.0");
+            assert_eq!(w.bundle_id, "com.acme.keep");
+            assert_eq!(w.icon, "icon.icns");
+            // a save writes them back, unchanged
+            w.save_all(&file).expect("saves");
+            let again = Workspace::open(&file).expect("reopens");
+            assert_eq!(again.version, "4.2.0");
+            assert_eq!(again.bundle_id, "com.acme.keep");
+            assert_eq!(again.icon, "icon.icns");
+            std::fs::remove_dir_all(file.parent().unwrap()).ok();
         }
     }
 }

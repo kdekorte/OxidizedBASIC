@@ -3,7 +3,7 @@
 //! the app is written where the user chooses. The bundle itself is written by
 //! `package.rs`.
 
-use super::package::{write_package, PackageSpec};
+use super::package::{package_settings, write_package, PackageSpec};
 use super::*;
 
 impl Ide {
@@ -72,12 +72,17 @@ pub fn package_from_here(
     project: &std::path::Path,
     bundle: &std::path::Path,
 ) -> Result<(), String> {
+    // the version, identifier and icon come from the project file; the IDE's
+    // own icon is used only when the project names none
+    let settings = package_settings(project)?;
     write_package(&PackageSpec {
         project: project.to_path_buf(),
         bundle: bundle.to_path_buf(),
         name: app_name(bundle),
-        icon: app_icon(),
+        icon: settings.icon.or_else(app_icon),
         binary: std::env::current_exe().map_err(|e| format!("cannot find this program: {}", e))?,
+        version: settings.version,
+        bundle_id: settings.bundle_id,
     })
 }
 

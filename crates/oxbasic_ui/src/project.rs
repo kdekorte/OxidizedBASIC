@@ -48,6 +48,22 @@ pub struct Project {
     pub forms: Vec<FormEntry>,
     #[serde(default)]
     pub modules: Vec<ModuleEntry>,
+    /// The app's version, shown in a package's Finder info (`1.0.0`).
+    #[serde(default = "default_version")]
+    pub version: String,
+    /// The app icon, an `.icns` file relative to the project file. Empty uses
+    /// the default icon.
+    #[serde(default)]
+    pub icon: String,
+    /// The app's bundle identifier (`com.example.game`). Empty derives one
+    /// from the name, so a rename doesn't change the app's identity once set.
+    #[serde(default, rename = "bundleId")]
+    pub bundle_id: String,
+}
+
+/// The version a project has until it is given one.
+pub fn default_version() -> String {
+    "1.0.0".to_string()
 }
 
 /// Why a project can't be used as it stands.
@@ -93,6 +109,9 @@ impl Project {
             startup: String::new(),
             forms: Vec::new(),
             modules: Vec::new(),
+            version: default_version(),
+            icon: String::new(),
+            bundle_id: String::new(),
         }
     }
 
@@ -200,6 +219,10 @@ impl Project {
         }
         for m in &self.modules {
             files.push(m.code.clone());
+        }
+        // the app icon is a file the project needs, like any other
+        if !self.icon.is_empty() {
+            files.push(self.icon.clone());
         }
         files
     }
@@ -362,5 +385,46 @@ mod tests {
         p.validate(&dir).unwrap();
         assert_eq!(Project::resolve(&file, "Form1.bas"), dir.join("Form1.bas"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(test)]
+    mod package_settings_tests {
+        use super::*;
+
+        #[test]
+        fn a_project_without_the_package_fields_gets_the_defaults() {
+            let p: Project = serde_json::from_str(r#"{"name": "Old", "forms": [], "modules": []}"#)
+                .expect("an older project still loads");
+            assert_eq!(p.version, "1.0.0");
+            assert!(p.icon.is_empty());
+            assert!(p.bundle_id.is_empty());
+        }
+
+        #[test]
+        fn the_package_fields_round_trip_through_the_file() {
+            let mut p = Project::new("Game");
+            p.version = "2.0.0".into();
+            p.icon = "icons/game.icns".into();
+            p.bundle_id = "com.acme.game".into();
+            let text = serde_json::to_string(&p).unwrap();
+            let back: Project = serde_json::from_str(&text).unwrap();
+            assert_eq!(back, p);
+            assert!(
+                text.contains("\"bundleId\""),
+                "camelCase, as the other fields: {}",
+                text
+            );
+        }
+
+        #[test]
+        fn a_named_icon_is_one_of_the_project_files() {
+            let mut p = Project::new("Game");
+            assert!(
+                !p.files().contains(&"icons/game.icns".to_string()),
+                "none named, none listed"
+            );
+            p.icon = "icons/game.icns".into();
+            assert!(p.files().contains(&"icons/game.icns".to_string()));
+        }
     }
 }

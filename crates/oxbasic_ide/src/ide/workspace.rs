@@ -176,6 +176,11 @@ pub struct Workspace {
     pub docs: Vec<Doc>,
     /// Index into `docs` of the document being edited.
     pub active: usize,
+    /// The app's version, and its icon and bundle id, as the project file
+    /// gives them (see `oxbasic_ui::project::Project`).
+    pub version: String,
+    pub icon: String,
+    pub bundle_id: String,
 }
 
 impl Workspace {
@@ -187,6 +192,9 @@ impl Workspace {
             startup: "Form1".into(),
             docs: vec![Doc::new_form("Form1")],
             active: 0,
+            version: oxbasic_ui::project::default_version(),
+            icon: String::new(),
+            bundle_id: String::new(),
         }
     }
 
@@ -372,6 +380,9 @@ impl Workspace {
         };
         let mut project = Project::new(&self.name);
         project.startup = self.startup.clone();
+        project.version = self.version.clone();
+        project.icon = self.icon.clone();
+        project.bundle_id = self.bundle_id.clone();
         for d in &self.docs {
             match d.kind {
                 DocKind::Form => project.forms.push(FormEntry {
@@ -438,6 +449,9 @@ impl Workspace {
             startup,
             docs,
             active: 0,
+            version: project.version,
+            icon: project.icon,
+            bundle_id: project.bundle_id,
         })
     }
 
