@@ -192,20 +192,6 @@ mod imp {
         }
         usable
     }
-
-    #[cfg(test)]
-    pub fn drag_link_pointer() -> usize {
-        let class = Class::get("NSCursor").unwrap();
-        let p: *mut Object = unsafe { msg_send![class, dragLinkCursor] };
-        p as usize
-    }
-
-    #[cfg(test)]
-    pub fn pointing_hand_pointer() -> usize {
-        let class = Class::get("NSCursor").unwrap();
-        let p: *mut Object = unsafe { msg_send![class, pointingHandCursor] };
-        p as usize
-    }
 }
 
 #[cfg(all(test, target_os = "macos"))]

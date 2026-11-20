@@ -8,7 +8,10 @@
 //!
 //! No GUI is needed here, so this module is usable and tested headless.
 
-use crate::{form::{list_items, volume_names}, ControlKind, ControlSpec, FormSpec};
+use crate::{
+    form::{list_items, volume_names},
+    ControlKind, ControlSpec, FormSpec,
+};
 use oxbasic_runtime::{ExecResult, ObjectHost, ObjectRef, RaisedEvent, Variant, VbError};
 
 /// A control's run-time state: the text of a TextBox or ComboBox, the
@@ -473,7 +476,10 @@ impl FormHost {
                 c.items = volumes.clone();
             } else if c.kind == ControlKind::DirListBox || c.kind == ControlKind::FileListBox {
                 let path = if c.path.is_empty() {
-                    volumes.first().map(|v| format!("/Volumes/{}", v)).unwrap_or_default()
+                    volumes
+                        .first()
+                        .map(|v| format!("/Volumes/{}", v))
+                        .unwrap_or_default()
                 } else {
                     c.path.clone()
                 };
@@ -743,7 +749,14 @@ impl FormHost {
     fn get_control(&self, i: usize, p: &str, args: &[Variant]) -> ExecResult<Variant> {
         let c = &self.form.controls[i];
         let s = &self.state[i];
-        let is_list = matches!(c.kind, ControlKind::ListBox | ControlKind::ComboBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox);
+        let is_list = matches!(
+            c.kind,
+            ControlKind::ListBox
+                | ControlKind::ComboBox
+                | ControlKind::VolumeListBox
+                | ControlKind::DirListBox
+                | ControlKind::FileListBox
+        );
         if let Some(fp) = p.strip_prefix("font.") {
             return self.get_font(i, fp);
         }
@@ -810,7 +823,9 @@ impl FormHost {
             "max" if c.kind.is_scroll() => Variant::Long(c.scroll_max),
             "smallchange" if c.kind.is_scroll() => Variant::Long(c.small_change),
             "largechange" if c.kind.is_scroll() => Variant::Long(c.large_change),
-            "orientation" if c.kind == ControlKind::Slider => Variant::Integer(c.orientation as i16),
+            "orientation" if c.kind == ControlKind::Slider => {
+                Variant::Integer(c.orientation as i16)
+            }
             "tab" if c.kind == ControlKind::TabControl => Variant::Integer(s.tab as i16),
             "tabs" if c.kind == ControlKind::TabControl => Variant::Integer(c.tabs.len() as i16),
             "value" if c.kind.is_scroll() => Variant::Long(s.value),
@@ -946,7 +961,14 @@ impl FormHost {
         value: &Variant,
     ) -> ExecResult<()> {
         let kind = self.form.controls[i].kind;
-        let is_list = matches!(kind, ControlKind::ListBox | ControlKind::ComboBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox);
+        let is_list = matches!(
+            kind,
+            ControlKind::ListBox
+                | ControlKind::ComboBox
+                | ControlKind::VolumeListBox
+                | ControlKind::DirListBox
+                | ControlKind::FileListBox
+        );
         match p {
             "caption" if kind.has_caption() => {
                 self.form.controls[i].caption = value.as_string()?;
@@ -1062,7 +1084,9 @@ impl FormHost {
                 self.auto_size_to_picture(i, base.as_deref());
             }
             "container" => return self.set_container(i, value),
-            "text" if is_list && kind != ControlKind::ComboBox => return err(382, "Property is read-only"),
+            "text" if is_list && kind != ControlKind::ComboBox => {
+                return err(382, "Property is read-only")
+            }
             "left" => self.form.controls[i].rect.left = coord(value)?,
             "top" => self.form.controls[i].rect.top = coord(value)?,
             "width" | "height" => {
@@ -1196,7 +1220,11 @@ impl FormHost {
                 let pattern = value.as_string()?;
                 let c = &mut self.form.controls[i];
                 c.pattern = pattern.clone();
-                let path = if c.path.is_empty() { String::new() } else { c.path.clone() };
+                let path = if c.path.is_empty() {
+                    String::new()
+                } else {
+                    c.path.clone()
+                };
                 c.items = list_items(kind, &path, &pattern);
                 self.state[i].list_index = None;
             }
@@ -1291,7 +1319,6 @@ fn coord(value: &Variant) -> ExecResult<f32> {
 pub const DEFAULT_FONT_NAME: &str = "MS Sans Serif";
 /// The text colour a control has unless `ForeColor` is set.
 pub const DEFAULT_FORE: u32 = 0x1D1D1F;
-
 
 /// The background a kind of control has unless `BackColor` is set.
 fn default_back(kind: ControlKind) -> u32 {
@@ -1493,7 +1520,11 @@ impl ObjectHost for FormHost {
             Target::Control(i)
                 if matches!(
                     self.form.controls[i].kind,
-                    ControlKind::ListBox | ControlKind::ComboBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox
+                    ControlKind::ListBox
+                        | ControlKind::ComboBox
+                        | ControlKind::VolumeListBox
+                        | ControlKind::DirListBox
+                        | ControlKind::FileListBox
                 ) =>
             {
                 i
@@ -2650,7 +2681,11 @@ mod scroll_tests {
             Rect::new(0.0, 0.0, 120.0, 17.0),
         ));
         f.controls[0].scroll_max = 100;
-        let mut v = ControlSpec::new("VScroll1", ControlKind::VScrollBar, Rect::new(0.0, 30.0, 17.0, 120.0));
+        let mut v = ControlSpec::new(
+            "VScroll1",
+            ControlKind::VScrollBar,
+            Rect::new(0.0, 30.0, 17.0, 120.0),
+        );
         v.scroll_min = 10;
         v.scroll_max = 20;
         v.value = 10;
@@ -2727,7 +2762,10 @@ mod volume_tests {
         let items = &h.form.controls[0].items;
         assert_eq!(items, &volume_names(), "the list is the volumes now");
         assert!(items.windows(2).all(|w| w[0] <= w[1]), "sorted");
-        assert!(items.iter().all(|n| !n.starts_with('.')), "no hidden entries");
+        assert!(
+            items.iter().all(|n| !n.starts_with('.')),
+            "no hidden entries"
+        );
     }
 
     #[test]

@@ -83,20 +83,32 @@ fn dragging_a_scrollbar_thumb_sets_value_and_the_program_sees_it(cx: &mut gpui::
     live.win
         .simulate_mouse_down(quarter, gpui::MouseButton::Left, gpui::Modifiers::none());
     live.settle();
-    assert_eq!(live.read(|r| r.state[1].value), 0, "a press alone doesn't move it");
+    assert_eq!(
+        live.read(|r| r.state[1].value),
+        0,
+        "a press alone doesn't move it"
+    );
     live.win.simulate_mouse_move(
         three_quarters,
         Some(gpui::MouseButton::Left),
         gpui::Modifiers::none(),
     );
     live.settle();
-    assert_eq!(live.read(|r| r.state[1].value), 50, "the drag follows the pointer's travel");
+    assert_eq!(
+        live.read(|r| r.state[1].value),
+        50,
+        "the drag follows the pointer's travel"
+    );
     live.win.simulate_mouse_up(
         three_quarters,
         gpui::MouseButton::Left,
         gpui::Modifiers::none(),
     );
     live.settle();
-    assert_eq!(live.caption(0), "at 50", "the program's Change handler saw the drag");
+    assert_eq!(
+        live.caption(0),
+        "at 50",
+        "the program's Change handler saw the drag"
+    );
     live.stop();
 }

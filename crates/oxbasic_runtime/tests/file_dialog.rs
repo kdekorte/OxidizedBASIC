@@ -57,7 +57,10 @@ fn a_choice_the_filter_rejects_gives_an_empty_string() {
 
 #[test]
 fn save_dialog_is_marked_as_a_save() {
-    let (_, d) = run("Print SaveFileDialog(\"*.oxproj\")\n", Some("/tmp/New.oxproj"));
+    let (_, d) = run(
+        "Print SaveFileDialog(\"*.oxproj\")\n",
+        Some("/tmp/New.oxproj"),
+    );
     assert_eq!(d.filters, vec![("*.oxproj".to_string(), true)]);
 }
 

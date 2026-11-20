@@ -495,7 +495,6 @@ pub fn list_items(kind: ControlKind, path: &str, pattern: &str) -> Vec<String> {
     }
 }
 
-
 /// The regular files in `path` whose names match `pattern` (see
 /// [`pattern_matches`]), sorted, hidden ones left out. A folder that can't be
 /// read has none.
@@ -512,8 +511,6 @@ pub fn file_names(path: &str, pattern: &str) -> Vec<String> {
     names.sort();
     names
 }
-
-
 
 impl ControlSpec {
     /// place: enabled, visible, no caption or text, no items.
@@ -981,13 +978,6 @@ mod tests {
     #[test]
     fn dispatch_runs_basic() {
         use oxbasic_runtime::{Interpreter, Output};
-
-        struct Sink(String);
-        impl Output for Sink {
-            fn write(&mut self, s: &str) {
-                self.0.push_str(s);
-            }
-        }
 
         let src = "Sub Command1_Click()\n  MsgBox \"clicked!\"\nEnd Sub\n\
                    Function Add(a As Long, b As Long) As Long\n  Add = a + b\nEnd Function\n";

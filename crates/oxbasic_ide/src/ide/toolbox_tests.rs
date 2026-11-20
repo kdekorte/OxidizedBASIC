@@ -729,7 +729,7 @@ pub(super) fn open_live_window(
     let handle = ide
         .read_with(cx, |ide, _| ide.form_window())
         .expect("the form window is open");
-    let mut win = gpui::VisualTestContext::from_window(handle.into(), cx);
+    let win = gpui::VisualTestContext::from_window(handle.into(), cx);
     win.simulate_resize(size(px(500.0), px(400.0)));
     win.run_until_parked();
     (handle, win)

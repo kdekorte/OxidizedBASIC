@@ -634,7 +634,13 @@ pub fn paint_control<V: 'static>(
         // raised; the page below is the control's body (its controls draw on it)
         ControlKind::TabControl => {
             const STRIP: f32 = 24.0;
-            let mut strip = div().absolute().left_0().top_0().right_0().h(px(STRIP)).flex();
+            let mut strip = div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .right_0()
+                .h(px(STRIP))
+                .flex();
             for (i, caption) in c.tabs.iter().enumerate() {
                 let selected = i as u8 == look.tab;
                 let mut tab = div()
@@ -719,7 +725,10 @@ pub fn paint_control<V: 'static>(
             }
             hook(Part::Body, body, cx)
         }
-        ControlKind::ListBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox => {
+        ControlKind::ListBox
+        | ControlKind::VolumeListBox
+        | ControlKind::DirListBox
+        | ControlKind::FileListBox => {
             let rows = list_rows(
                 SharedString::from(format!("{}-list", c.name)),
                 c,
@@ -833,22 +842,11 @@ pub fn paint_control<V: 'static>(
                 .bg(rgb(BUTTON_FACE))
                 .border_1()
                 .border_color(rgb(BUTTON_BORDER));
-            let thumb = div()
-                .absolute()
-                .bg(rgb(BUTTON_BORDER))
-                .rounded_sm();
+            let thumb = div().absolute().bg(rgb(BUTTON_BORDER)).rounded_sm();
             let thumb = if horizontal {
-                thumb
-                    .top_0()
-                    .bottom_0()
-                    .w(px(12.0))
-                    .left(relative(frac))
+                thumb.top_0().bottom_0().w(px(12.0)).left(relative(frac))
             } else {
-                thumb
-                    .left_0()
-                    .right_0()
-                    .h(px(12.0))
-                    .top(relative(frac))
+                thumb.left_0().right_0().h(px(12.0)).top(relative(frac))
             };
             hook(Part::Body, track.child(thumb), cx)
         }
@@ -866,9 +864,17 @@ pub fn paint_control<V: 'static>(
                 .border_color(rgb(BUTTON_BORDER));
             let thumb = div().absolute().bg(rgb(ACCENT)).rounded_sm();
             let thumb = if horizontal {
-                thumb.top(px(2.0)).bottom(px(2.0)).w(px(10.0)).left(relative(frac))
+                thumb
+                    .top(px(2.0))
+                    .bottom(px(2.0))
+                    .w(px(10.0))
+                    .left(relative(frac))
             } else {
-                thumb.left(px(2.0)).right(px(2.0)).h(px(10.0)).top(relative(frac))
+                thumb
+                    .left(px(2.0))
+                    .right(px(2.0))
+                    .h(px(10.0))
+                    .top(relative(frac))
             };
             hook(Part::Body, track.child(thumb), cx)
         }

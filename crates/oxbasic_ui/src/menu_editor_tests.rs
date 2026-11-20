@@ -25,7 +25,11 @@ fn new_adds_under_the_selections_parent_and_selects_the_new_item() {
     let mut ed = MenuEditor::new(file_menu());
     ed.select(Some(1)); // Open, under File
     let at = ed.add("&Print");
-    assert_eq!(ed.items[at].parent, Some(0), "a sibling of Open, under File");
+    assert_eq!(
+        ed.items[at].parent,
+        Some(0),
+        "a sibling of Open, under File"
+    );
     assert_eq!(ed.selected, Some(at));
 }
 
@@ -54,7 +58,11 @@ fn indent_and_outdent_act_on_the_selection() {
     assert!(ed.indent(), "Edit goes under Save");
     assert_eq!(ed.items[3].parent, Some(2));
     assert!(ed.outdent(), "and back up one level, to Save's level");
-    assert_eq!(ed.items[3].parent, Some(0), "Save's parent is File, so Edit sits under File");
+    assert_eq!(
+        ed.items[3].parent,
+        Some(0),
+        "Save's parent is File, so Edit sits under File"
+    );
 }
 
 #[test]

@@ -10,11 +10,19 @@ use std::rc::Rc;
 
 fn host() -> Rc<RefCell<FormHost>> {
     let mut f = FormSpec::new("Form1", "Range", 400.0, 300.0);
-    let mut s = ControlSpec::new("Slider1", ControlKind::Slider, Rect::new(0.0, 0.0, 160.0, 40.0));
+    let mut s = ControlSpec::new(
+        "Slider1",
+        ControlKind::Slider,
+        Rect::new(0.0, 0.0, 160.0, 40.0),
+    );
     s.scroll_min = 0;
     s.scroll_max = 100;
     f.control(s);
-    let mut p = ControlSpec::new("Progress1", ControlKind::ProgressBar, Rect::new(0.0, 60.0, 200.0, 20.0));
+    let mut p = ControlSpec::new(
+        "Progress1",
+        ControlKind::ProgressBar,
+        Rect::new(0.0, 60.0, 200.0, 20.0),
+    );
     p.scroll_min = 0;
     p.scroll_max = 50;
     f.control(p);
@@ -44,9 +52,15 @@ fn a_progress_bar_is_set_by_the_program_within_its_range() {
 #[test]
 fn a_user_drag_moves_a_slider_but_never_a_progress_bar() {
     let h = host();
-    h.borrow_mut().apply_edit(UserEdit::Scroll { control: 0, value: 75 });
+    h.borrow_mut().apply_edit(UserEdit::Scroll {
+        control: 0,
+        value: 75,
+    });
     assert_eq!(h.borrow().state[0].value, 75, "the slider takes the drag");
-    h.borrow_mut().apply_edit(UserEdit::Scroll { control: 1, value: 25 });
+    h.borrow_mut().apply_edit(UserEdit::Scroll {
+        control: 1,
+        value: 25,
+    });
     assert_eq!(h.borrow().state[1].value, 0, "the progress bar does not");
 }
 
@@ -60,7 +74,10 @@ fn a_slider_raises_change_when_its_value_moves() {
     h.borrow_mut().state[0].value = 10;
     h.borrow_mut().raise_changes(0, &before);
     assert!(
-        h.borrow().raised_handlers().iter().any(|e| e == "Slider1_Change"),
+        h.borrow()
+            .raised_handlers()
+            .iter()
+            .any(|e| e == "Slider1_Change"),
         "{:?}",
         h.borrow().raised_handlers()
     );

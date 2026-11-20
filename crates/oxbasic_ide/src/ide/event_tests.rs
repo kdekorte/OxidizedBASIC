@@ -488,7 +488,7 @@ fn a_property_the_program_sets_raises_its_event_inside_the_statement(
 fn only_handled_events_are_sent_to_the_program(cx: &mut gpui::TestAppContext) {
     // the program handles no mouse event: moving over the form sends none
     let src = plain_handler("Command1", "Click", "click");
-    let mut run = Run::start(event_form(), &src, cx);
+    let run = Run::start(event_form(), &src, cx);
     run.handle
         .read_with(&run.win, |r, _| {
             let set = r.handlers.as_ref().expect("the program said");

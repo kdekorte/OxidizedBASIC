@@ -158,13 +158,27 @@ pub fn add(items: &mut Vec<MenuItem>, parent: Option<usize>, caption: &str) -> u
 
 /// A name for a new item: `mnu` and its caption's letters, numbered if taken.
 fn next_name(items: &[MenuItem], caption: &str) -> String {
-    let base: String = caption.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    let base = if base.is_empty() { "Item".to_string() } else { base };
+    let base: String = caption
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let base = if base.is_empty() {
+        "Item".to_string()
+    } else {
+        base
+    };
     let base = format!("mnu{}", base);
     let mut n = 1;
     loop {
-        let candidate = if n == 1 { base.clone() } else { format!("{}{}", base, n) };
-        if !items.iter().any(|m| m.name.eq_ignore_ascii_case(&candidate)) {
+        let candidate = if n == 1 {
+            base.clone()
+        } else {
+            format!("{}{}", base, n)
+        };
+        if !items
+            .iter()
+            .any(|m| m.name.eq_ignore_ascii_case(&candidate))
+        {
             return candidate;
         }
         n += 1;

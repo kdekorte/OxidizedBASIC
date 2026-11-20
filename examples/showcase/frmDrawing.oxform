@@ -241,6 +241,108 @@
         "underline": false,
         "strikethrough": false
       }
+    },
+    {
+      "name": "lblSlider",
+      "kind": "Label",
+      "rect": {
+        "left": 20.0,
+        "top": 300.0,
+        "width": 200.0,
+        "height": 20.0
+      },
+      "caption": "Slider sets the width:",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "scrollMin": 0,
+      "scrollMax": 32767,
+      "smallChange": 1,
+      "largeChange": 1,
+      "fillStyle": 1,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "sldWidth",
+      "kind": "Slider",
+      "rect": {
+        "left": 20.0,
+        "top": 322.0,
+        "width": 200.0,
+        "height": 30.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "scrollMin": 20,
+      "scrollMax": 300,
+      "smallChange": 1,
+      "largeChange": 1,
+      "fillStyle": 1,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 100,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
+    },
+    {
+      "name": "prgWidth",
+      "kind": "ProgressBar",
+      "rect": {
+        "left": 240.0,
+        "top": 330.0,
+        "width": 240.0,
+        "height": 16.0
+      },
+      "caption": "",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "scrollMin": 20,
+      "scrollMax": 300,
+      "smallChange": 1,
+      "largeChange": 1,
+      "fillStyle": 1,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 100,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
     }
   ]
 }

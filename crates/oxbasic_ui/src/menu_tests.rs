@@ -59,7 +59,11 @@ fn a_click_is_named_for_its_item_and_found_by_that_name() {
     let items = file_menu();
     assert_eq!(click_handler(&items[1]), "mnuOpen_Click");
     assert_eq!(item_for_handler(&items, "mnuOpen_Click"), Some(1));
-    assert_eq!(item_for_handler(&items, "MNUSAVE_CLICK"), Some(2), "case-blind");
+    assert_eq!(
+        item_for_handler(&items, "MNUSAVE_CLICK"),
+        Some(2),
+        "case-blind"
+    );
     assert_eq!(item_for_handler(&items, "mnuNone_Click"), None);
 }
 
@@ -75,7 +79,10 @@ fn shortcuts_are_checked_and_turned_into_key_bindings() {
     assert!(!shortcut_is_valid("F13"), "no such function key");
 
     assert_eq!(keystroke_for("Ctrl+O").as_deref(), Some("cmd-o"));
-    assert_eq!(keystroke_for("Ctrl+Shift+S").as_deref(), Some("cmd-shift-s"));
+    assert_eq!(
+        keystroke_for("Ctrl+Shift+S").as_deref(),
+        Some("cmd-shift-s")
+    );
     assert_eq!(keystroke_for("F5").as_deref(), Some("f5"));
     assert_eq!(keystroke_for("Cmd+Alt+X").as_deref(), Some("cmd-alt-x"));
     assert_eq!(keystroke_for(""), None);
@@ -88,7 +95,11 @@ fn a_form_keeps_its_menu_and_an_old_form_has_none() {
     let mut f = FormSpec::new("Form1", "Menus", 400.0, 300.0);
     f.menus = file_menu();
     let back = FormSpec::from_oxform(&f.to_oxform()).unwrap();
-    assert_eq!(back.menus, file_menu(), "the menu round-trips through .oxform");
+    assert_eq!(
+        back.menus,
+        file_menu(),
+        "the menu round-trips through .oxform"
+    );
     // a form saved before menus existed has none, and its file has no menus key
     let old = FormSpec::new("Old", "Old", 100.0, 100.0);
     assert!(!old.to_oxform().contains("\"menus\""));
@@ -125,8 +136,15 @@ fn removing_a_middle_item_shifts_later_parents_down() {
     let mut items = file_menu();
     remove(&mut items, 1); // Open goes; Save, the separator, Edit, Copy move up
     let names: Vec<&str> = items.iter().map(|m| m.name.as_str()).collect();
-    assert_eq!(names, vec!["mnuFile", "mnuSave", "mnuSep", "mnuEdit", "mnuCopy"]);
-    assert_eq!(items[4].parent, Some(3), "Copy's parent, Edit, moved from 4 to 3");
+    assert_eq!(
+        names,
+        vec!["mnuFile", "mnuSave", "mnuSep", "mnuEdit", "mnuCopy"]
+    );
+    assert_eq!(
+        items[4].parent,
+        Some(3),
+        "Copy's parent, Edit, moved from 4 to 3"
+    );
     assert!(is_well_formed(&items));
 }
 
@@ -135,7 +153,10 @@ fn indent_makes_an_item_the_child_of_the_one_above_and_refuses_bad_moves() {
     use crate::menu::indent;
     // a valid indent: Save (2) goes under Open (1), the item above it
     let mut items = file_menu();
-    assert!(indent(&mut items, 2), "Save goes under Open, the item above it");
+    assert!(
+        indent(&mut items, 2),
+        "Save goes under Open, the item above it"
+    );
     assert_eq!(items[2].parent, Some(1));
     assert!(is_well_formed(&items));
 

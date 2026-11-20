@@ -74,3 +74,23 @@ fn a_file_shows_its_full_path_when_chosen() {
     // nothing chosen yet: the list has no file, so the name is empty
     assert_eq!(caption(&snap, "lblChosen"), "Chosen: ");
 }
+
+#[test]
+fn the_slider_and_the_width_bar_move_together() {
+    let run = Run::start();
+    open(&run, "cmdDrawing_Click", DRAWING);
+    // a drag on the Slider sets the width bar (and the shape) through the program
+    let slider = run.control(DRAWING, "sldWidth", None);
+    run.session.send(DebugCommand::Edit(
+        DRAWING,
+        UserEdit::Scroll {
+            control: slider,
+            value: 180,
+        },
+    ));
+    let snap = run.call(DRAWING, "sldWidth_Change", &[]);
+    let bar = run.control(DRAWING, "hsbWidth", None);
+    assert_eq!(snap.state[bar].value, 180, "the width bar follows the slider");
+    let shape = run.control(DRAWING, "shpBox", None);
+    assert_eq!(snap.form.controls[shape].rect.width, 180.0);
+}

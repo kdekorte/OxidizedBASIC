@@ -3,9 +3,9 @@
 //! FileName is the selected file's full path.
 
 use crate::form::file_names;
-use oxbasic_runtime::pattern_matches;
 use crate::host::FormHost;
 use crate::{ControlKind, ControlSpec, FormSpec, Rect};
+use oxbasic_runtime::pattern_matches;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -16,7 +16,13 @@ fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("oxbasic-file-{}", name));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("Sub")).unwrap();
-    for f in ["game.bas", "Alpha.bas", "proj.oxproj", "notes.txt", ".secret.bas"] {
+    for f in [
+        "game.bas",
+        "Alpha.bas",
+        "proj.oxproj",
+        "notes.txt",
+        ".secret.bas",
+    ] {
         std::fs::write(dir.join(f), "x").unwrap();
     }
     dir
@@ -45,7 +51,10 @@ fn a_pattern_matches_listed_extensions_and_exact_names_ignoring_case() {
     assert!(pattern_matches("proj.oxproj", "*.bas;*.oxproj"));
     assert!(!pattern_matches("notes.txt", "*.bas;*.oxproj"));
     assert!(pattern_matches("readme", "readme"));
-    assert!(pattern_matches("anything.zip", ""), "an empty pattern lists every file");
+    assert!(
+        pattern_matches("anything.zip", ""),
+        "an empty pattern lists every file"
+    );
 }
 
 #[test]
@@ -57,7 +66,11 @@ fn a_file_list_holds_only_matching_files_sorted_without_folders_or_hidden_ones()
     );
     // every file, but still no folder and no hidden file
     let all = file_names(dir.to_str().unwrap(), "");
-    assert!(all.iter().all(|n| n != "Sub" && !n.starts_with('.')), "{:?}", all);
+    assert!(
+        all.iter().all(|n| n != "Sub" && !n.starts_with('.')),
+        "{:?}",
+        all
+    );
     assert_eq!(all.len(), 4, "{:?}", all);
 }
 
@@ -65,7 +78,10 @@ fn a_file_list_holds_only_matching_files_sorted_without_folders_or_hidden_ones()
 fn the_file_list_loads_with_its_path_and_pattern() {
     let dir = scratch("load");
     let h = host(dir.to_str().unwrap(), "*.bas");
-    assert_eq!(h.borrow().form.controls[0].items, vec!["Alpha.bas", "game.bas"]);
+    assert_eq!(
+        h.borrow().form.controls[0].items,
+        vec!["Alpha.bas", "game.bas"]
+    );
     let out = run("Print File1.ListCount\n", &h).unwrap();
     assert_eq!(out, " 2 \n");
 }
@@ -88,7 +104,10 @@ fn setting_path_reloads_the_files_in_it() {
     let dir = scratch("path");
     let h = host("", "");
     let out = run(
-        &format!("File1.Path = \"{}\"\nPrint File1.ListCount\n", dir.display()),
+        &format!(
+            "File1.Path = \"{}\"\nPrint File1.ListCount\n",
+            dir.display()
+        ),
         &h,
     )
     .unwrap();
@@ -108,6 +127,9 @@ fn the_file_name_is_the_selected_files_full_path() {
     let h = host(dir.to_str().unwrap(), "*.bas");
     let out = run("File1.ListIndex = 1\nPrint File1.FileName\n", &h).unwrap();
     assert_eq!(out, format!("{}\n", dir.join("game.bas").display()));
-    let none = run("File1.ListIndex = -1\nPrint \"[\" & File1.FileName & \"]\"\n", &h);
+    let none = run(
+        "File1.ListIndex = -1\nPrint \"[\" & File1.FileName & \"]\"\n",
+        &h,
+    );
     assert_eq!(none.unwrap(), "[]\n");
 }

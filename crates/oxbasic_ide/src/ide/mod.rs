@@ -6,6 +6,7 @@
 //! - an output / immediate pane,
 //! - debug controls (run, step-over, stop) with a variable watch pane.
 
+pub mod choose_file;
 pub mod code_model;
 pub mod code_window;
 pub mod debug_session;
@@ -20,6 +21,9 @@ pub mod highlight;
 pub mod launch;
 pub mod live_forms;
 pub mod live_input;
+#[cfg(test)]
+mod menu_editor_tests;
+pub mod menu_editor_window;
 pub mod package;
 pub mod package_command;
 pub mod play;
@@ -32,22 +36,20 @@ pub mod recent_store;
 #[cfg(test)]
 mod recent_tests;
 #[cfg(test)]
-pub mod showcase;
-#[cfg(test)]
 mod scroll_drag_tests;
 #[cfg(test)]
-mod showcase_control_tests;
+pub mod showcase;
 #[cfg(test)]
-mod showcase_menu_tests;
+mod showcase_control_tests;
 #[cfg(test)]
 mod showcase_flow_tests;
 #[cfg(test)]
 mod showcase_form_tests;
 #[cfg(test)]
+mod showcase_menu_tests;
+#[cfg(test)]
 mod showcase_run;
 pub mod splitters;
-pub mod choose_file;
-pub mod menu_editor_window;
 pub mod text_field;
 pub mod toolbar;
 pub mod workspace;
@@ -654,11 +656,6 @@ Print \"Total = \" & CStr(Total)
                 self.close_form_window(cx);
             }
         }
-    }
-
-    #[cfg(test)]
-    fn source(&self) -> String {
-        self.lines.join("\n")
     }
 }
 
@@ -3664,6 +3661,19 @@ impl Ide {
             list = list.child(self.prop_row(idx, key, label, win, cx));
         }
         let handler_target = if idx == FORM_IDX { None } else { Some(idx) };
+        // a form's menu is edited from the form's own Properties
+        let menu_button = (idx == FORM_IDX).then(|| {
+            div().px_2().pt_2().child(
+                self.action_button(
+                    "inspector-menu-editor",
+                    "Menu Editor…",
+                    move |this, cx| this.open_menu_editor(cx),
+                    cx,
+                )
+                .border_1()
+                .border_color(rgb(BORDER)),
+            )
+        });
         div()
             .flex_1()
             .min_h_0()
@@ -3716,6 +3726,7 @@ impl Ide {
                     .border_color(rgb(BORDER)),
                 ),
             )
+            .children(menu_button)
             .into_any_element()
     }
 

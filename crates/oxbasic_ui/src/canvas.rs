@@ -623,6 +623,9 @@ mod tests {
     #[test]
     fn other_kinds_draw_no_figure() {
         use crate::ControlKind;
-        assert_eq!(control_shape(ControlKind::Label, 10.0, 10.0, 0, 0, 1, false), None);
+        assert_eq!(
+            control_shape(ControlKind::Label, 10.0, 10.0, 0, 0, 1, false),
+            None
+        );
     }
 }

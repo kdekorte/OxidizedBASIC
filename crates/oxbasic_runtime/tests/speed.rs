@@ -49,11 +49,7 @@ fn time(src: &str, debugger: bool) -> f64 {
     if debugger {
         // what the IDE installs: breakpoints (none set) and a hook
         rt.set_breakpoints(Arc::new(Mutex::new(HashSet::new())));
-        let mut first = true;
-        rt.set_debug_hook(Box::new(move |_| {
-            first = false;
-            DebugAction::Continue
-        }));
+        rt.set_debug_hook(Box::new(move |_| DebugAction::Continue));
     }
     let t = Instant::now();
     rt.run().unwrap();

@@ -22,7 +22,12 @@ impl MenuEditor {
     /// The rows in the order the editor shows them, each with its depth
     /// (0 on the bar), so a submenu is drawn indented under its item.
     pub fn rows(&self) -> Vec<(usize, usize)> {
-        fn walk(items: &[MenuItem], parent: Option<usize>, depth: usize, out: &mut Vec<(usize, usize)>) {
+        fn walk(
+            items: &[MenuItem],
+            parent: Option<usize>,
+            depth: usize,
+            out: &mut Vec<(usize, usize)>,
+        ) {
             for i in menu::children(items, parent) {
                 out.push((i, depth));
                 walk(items, Some(i), depth + 1, out);

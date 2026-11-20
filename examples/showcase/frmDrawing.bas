@@ -8,7 +8,14 @@ End Sub
 Sub hsbWidth_Change()
     shpBox.Width = hsbWidth.Value
     lneRule.Width = hsbWidth.Value
+    sldWidth.Value = hsbWidth.Value
+    prgWidth.Value = hsbWidth.Value
     ShowReadout
+End Sub
+
+' The Slider is a second way to set the width: it moves the width bar too.
+Sub sldWidth_Change()
+    hsbWidth.Value = sldWidth.Value
 End Sub
 
 Sub vsbHeight_Change()

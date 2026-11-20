@@ -74,7 +74,9 @@ pub fn run_play(file: &std::path::Path) {
         // the app's menu bar: About and Quit, as any Mac app has
         cx.on_action(|_: &AboutApp, cx| {
             let version = env!("CARGO_PKG_VERSION");
-            let window = cx.active_window().or_else(|| cx.windows().into_iter().next());
+            let window = cx
+                .active_window()
+                .or_else(|| cx.windows().into_iter().next());
             if let Some(window) = window {
                 let _ = window.update(cx, |_, win, cx| {
                     let _ = win.prompt(

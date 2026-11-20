@@ -203,8 +203,18 @@ fn main_form() -> FormSpec {
     status.fore_color = Some(0x555555);
     f.control(status);
     // the drawing and file browser each have their own form, opened from here
-    f.control(captioned("cmdDrawing", CommandButton, "Drawing…", (16.0, 430.0, 140.0, 30.0)));
-    f.control(captioned("cmdFiles", CommandButton, "Files…", (170.0, 430.0, 140.0, 30.0)));
+    f.control(captioned(
+        "cmdDrawing",
+        CommandButton,
+        "Drawing…",
+        (16.0, 430.0, 140.0, 30.0),
+    ));
+    f.control(captioned(
+        "cmdFiles",
+        CommandButton,
+        "Files…",
+        (170.0, 430.0, 140.0, 30.0),
+    ));
     // the menu bar: File (Drawing, Files, Quit) and Help (About)
     use oxbasic_ui::menu::MenuItem;
     let mut file = MenuItem::new("mnuFile", "&File", None);
@@ -270,6 +280,19 @@ fn drawing_form() -> FormSpec {
     let mut ruler = control("lneRule", Line, (200.0, 240.0, 240.0, 40.0));
     ruler.fore_color = Some(0x555555);
     f.control(ruler);
+    // a Slider sets the shape's width (the same as the width bar), and a
+    // ProgressBar shows that width across its range; the program fills it
+    f.control(captioned("lblSlider", Label, "Slider sets the width:", (20.0, 300.0, 200.0, 20.0)));
+    let mut slider = control("sldWidth", Slider, (20.0, 322.0, 200.0, 30.0));
+    slider.scroll_min = 20;
+    slider.scroll_max = 300;
+    slider.value = 100;
+    f.control(slider);
+    let mut progress = control("prgWidth", ProgressBar, (240.0, 330.0, 240.0, 16.0));
+    progress.scroll_min = 20;
+    progress.scroll_max = 300;
+    progress.value = 100;
+    f.control(progress);
     f
 }
 
@@ -284,7 +307,11 @@ fn files_form() -> FormSpec {
         "Volumes",
         (20.0, 16.0, 160.0, 20.0),
     ));
-    f.control(control("volVolume", VolumeListBox, (20.0, 40.0, 160.0, 200.0)));
+    f.control(control(
+        "volVolume",
+        VolumeListBox,
+        (20.0, 40.0, 160.0, 200.0),
+    ));
     f.control(captioned(
         "lblFolders",
         Label,
@@ -382,13 +409,10 @@ pub fn showcase(code: impl Fn(&str) -> String) -> Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ide::debug_session::*;
+
     use crate::ide::program::combine;
-    use std::collections::HashSet;
+
     use std::path::PathBuf;
-    use std::sync::mpsc::{channel, Receiver};
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
 
     /// `examples/showcase/` in the repository.
     fn dir() -> PathBuf {

@@ -21,7 +21,11 @@ fn scratch(name: &str) -> PathBuf {
 
 fn host(path: &str) -> Rc<RefCell<FormHost>> {
     let mut f = FormSpec::new("Form1", "Dirs", 400.0, 300.0);
-    let mut d = ControlSpec::new("Dir1", ControlKind::DirListBox, Rect::new(0.0, 0.0, 120.0, 84.0));
+    let mut d = ControlSpec::new(
+        "Dir1",
+        ControlKind::DirListBox,
+        Rect::new(0.0, 0.0, 120.0, 84.0),
+    );
     d.path = path.to_string();
     f.control(d);
     Rc::new(RefCell::new(FormHost::new(f)))

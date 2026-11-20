@@ -12,14 +12,26 @@ use std::rc::Rc;
 /// on page 0 and a CheckBox on page 1.
 fn host() -> Rc<RefCell<FormHost>> {
     let mut f = FormSpec::new("Form1", "Tabs", 400.0, 300.0);
-    let mut t = ControlSpec::new("Tab1", ControlKind::TabControl, Rect::new(0.0, 0.0, 320.0, 200.0));
+    let mut t = ControlSpec::new(
+        "Tab1",
+        ControlKind::TabControl,
+        Rect::new(0.0, 0.0, 320.0, 200.0),
+    );
     t.tabs = vec!["General".into(), "Advanced".into()];
     f.control(t);
-    let mut text = ControlSpec::new("Text1", ControlKind::TextBox, Rect::new(10.0, 40.0, 120.0, 24.0));
+    let mut text = ControlSpec::new(
+        "Text1",
+        ControlKind::TextBox,
+        Rect::new(10.0, 40.0, 120.0, 24.0),
+    );
     text.container = Some("Tab1".into());
     text.page = 0;
     f.control(text);
-    let mut check = ControlSpec::new("Check1", ControlKind::CheckBox, Rect::new(10.0, 40.0, 120.0, 22.0));
+    let mut check = ControlSpec::new(
+        "Check1",
+        ControlKind::CheckBox,
+        Rect::new(10.0, 40.0, 120.0, 22.0),
+    );
     check.container = Some("Tab1".into());
     check.page = 1;
     f.control(check);
@@ -67,7 +79,10 @@ fn a_tab_change_raises_click() {
     h.borrow_mut().state[0].tab = 1;
     h.borrow_mut().raise_changes(0, &before);
     assert!(
-        h.borrow().raised_handlers().iter().any(|e| e == "Tab1_Click"),
+        h.borrow()
+            .raised_handlers()
+            .iter()
+            .any(|e| e == "Tab1_Click"),
         "{:?}",
         h.borrow().raised_handlers()
     );

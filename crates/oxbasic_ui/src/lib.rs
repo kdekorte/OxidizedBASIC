@@ -20,28 +20,28 @@
 
 mod form;
 pub mod menu;
-pub mod menu_editor;
 #[cfg(feature = "gpui")]
 pub mod menu_bar;
+pub mod menu_editor;
 
 #[cfg(test)]
 mod dir_tests;
 #[cfg(test)]
 mod file_tests;
-#[cfg(test)]
-mod range_tests;
-#[cfg(test)]
-mod tab_tests;
-#[cfg(test)]
-mod menu_tests;
-#[cfg(test)]
-mod menu_editor_tests;
 #[cfg(feature = "gpui")]
 pub mod gpui_backend;
 #[cfg(feature = "gpui")]
 pub mod gpui_controls;
 #[cfg(feature = "gpui")]
 pub mod gpui_text_hit;
+#[cfg(test)]
+mod menu_editor_tests;
+#[cfg(test)]
+mod menu_tests;
+#[cfg(test)]
+mod range_tests;
+#[cfg(test)]
+mod tab_tests;
 
 pub mod canvas;
 pub mod events;
