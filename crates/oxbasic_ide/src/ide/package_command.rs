@@ -50,14 +50,7 @@ impl Ide {
         bundle: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let spec = PackageSpec {
-            project,
-            bundle: bundle.clone(),
-            name: app_name(&bundle),
-            icon: app_icon(),
-            binary: std::env::current_exe().unwrap_or_else(|_| "oxbasic".into()),
-        };
-        match write_package(&spec) {
+        match package_from_here(&project, &bundle) {
             Ok(()) => {
                 self.status = format!("packaged {}", bundle.display());
                 self.output
@@ -72,6 +65,22 @@ impl Ide {
     }
 }
 
+/// Package the project at `project` as the app at `bundle`, from this running
+/// binary: the same program, icon and name rules the menu command uses. The
+/// menu and the `package` command line both go through here.
+pub fn package_from_here(
+    project: &std::path::Path,
+    bundle: &std::path::Path,
+) -> Result<(), String> {
+    write_package(&PackageSpec {
+        project: project.to_path_buf(),
+        bundle: bundle.to_path_buf(),
+        name: app_name(bundle),
+        icon: app_icon(),
+        binary: std::env::current_exe().map_err(|e| format!("cannot find this program: {}", e))?,
+    })
+}
+
 /// The app's name: the bundle's file name without `.app`, so the menu bar and
 /// Finder show what the user named it.
 fn app_name(bundle: &std::path::Path) -> String {
@@ -82,13 +91,23 @@ fn app_name(bundle: &std::path::Path) -> String {
         .unwrap_or_else(|| "OxidizedBASIC".into())
 }
 
-/// The OxidizedBASIC icon, if the packaging folder is found next to the IDE's
-/// source (a development build). A packaged app then carries the icon; when
-/// the icon isn't found the app uses the default one.
+/// The OxidizedBASIC icon for a new package. A running IDE app carries it in its
+/// own bundle (`Contents/Resources`), so that is looked at first; a development
+/// build (`cargo run`) finds it in the repo's packaging folder instead. Returns
+/// `None` when neither is there, and the package then has the default icon.
 fn app_icon() -> Option<std::path::PathBuf> {
-    let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    if let Ok(exe) = std::env::current_exe() {
+        // Contents/MacOS/<exe> -> Contents/Resources/OxidizedBASIC.icns
+        if let Some(contents) = exe.parent().and_then(|m| m.parent()) {
+            let in_app = contents.join("Resources").join("OxidizedBASIC.icns");
+            if in_app.exists() {
+                return Some(in_app);
+            }
+        }
+    }
+    let in_repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/icons/OxidizedBASIC.icns");
-    here.exists().then_some(here)
+    in_repo.exists().then_some(in_repo)
 }
 
 #[cfg(test)]

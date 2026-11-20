@@ -19,6 +19,7 @@ fn main() {
         Some("gui") => cmd_gui(&args[2..]),
         Some("ide") => cmd_ide(&args[2..]),
         Some("play") => cmd_play(&args[2..]),
+        Some("package") => cmd_package(&args[2..]),
         Some("version") | Some("--version") => {
             println!(
                 "oxbasic {} (Phase 1: parser + interpreter)",
@@ -107,6 +108,25 @@ fn cmd_ide(args: &[String]) {
     let bas = args.first().map(|s| s.as_str());
     let oxform = args.get(1).map(|s| s.as_str());
     ide::run_ide(bas, oxform);
+}
+
+/// `oxbasic package <project.oxproj> <App.app>` — write the app that runs the
+/// project, as File > Package Project… does.
+fn cmd_package(args: &[String]) {
+    let (Some(project), Some(bundle)) = (args.first(), args.get(1)) else {
+        eprintln!("usage: oxbasic package <project.oxproj> <App.app>");
+        std::process::exit(2);
+    };
+    match ide::package_command::package_from_here(
+        std::path::Path::new(project),
+        std::path::Path::new(bundle),
+    ) {
+        Ok(()) => println!("packaged {}", bundle),
+        Err(e) => {
+            eprintln!("oxbasic package: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 /// `oxbasic play <project.oxproj>` — run the project as an app: its program
