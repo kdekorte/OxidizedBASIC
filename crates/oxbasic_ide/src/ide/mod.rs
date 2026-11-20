@@ -25,6 +25,7 @@ mod showcase_flow_tests;
 mod showcase_form_tests;
 #[cfg(test)]
 mod showcase_run;
+pub mod splitters;
 pub mod toolbar;
 pub mod workspace;
 
@@ -84,6 +85,10 @@ const DECLARATIONS: &str = "(Declarations)";
 const SELECT_W: f32 = 240.0;
 /// Height of one editor row (`h_5`).
 const ROW_H: f32 = 20.0;
+/// The Properties window's labels: a size smaller than the values beside
+/// them, in a column wide enough for the longest name on one line.
+const PROP_LABEL_SIZE: f32 = 11.0;
+const PROP_LABEL_W: f32 = 84.0;
 /// Editor gutter width plus the code's left padding.
 const CODE_X: f32 = 56.0;
 
@@ -262,6 +267,12 @@ pub struct Ide {
     designer_scroll: ScrollHandle,
     output_scroll: ScrollHandle,
     scrollbar_drag: Option<ScrollbarDrag>,
+    /// The sizes of the main window's panes, set by dragging the bars
+    /// between them (splitters.rs).
+    panes: splitters::Panes,
+    split_drag: Option<splitters::SplitDrag>,
+    /// The window's size at the last draw, which bounds the panes.
+    viewport: gpui::Size<gpui::Pixels>,
     scrollbars_initialized: bool,
     breakpoints: Arc<Mutex<HashSet<usize>>>,
     // form designer
@@ -394,6 +405,9 @@ Print \"Total = \" & CStr(Total)
             designer_scroll: ScrollHandle::new(),
             output_scroll: ScrollHandle::new(),
             scrollbar_drag: None,
+            panes: splitters::Panes::default(),
+            split_drag: None,
+            viewport: size(px(1180.0), px(760.0)),
             scrollbars_initialized: false,
             breakpoints: Arc::new(Mutex::new(HashSet::new())),
             form,
@@ -730,6 +744,8 @@ mod member_tests;
 mod multiform_tests;
 #[cfg(test)]
 mod project_tests;
+#[cfg(test)]
+mod splitter_tests;
 #[cfg(test)]
 mod toolbar_tests;
 #[cfg(test)]
@@ -1148,6 +1164,22 @@ impl Render for Ide {
         // the window shows the project, with `*` while anything is unsaved
         let dirty = if self.has_unsaved_work() { " *" } else { "" };
         window.set_window_title(&format!("{}{} — OxidizedBASIC", self.workspace.name, dirty));
+        // the window's size bounds how far the bars can be dragged; a
+        // window made smaller pulls the panes back into range
+        let vs = window.viewport_size();
+        if vs != self.viewport {
+            self.viewport = vs;
+            let view = self.viewport();
+            for which in [
+                splitters::Split::Toolbox,
+                splitters::Split::Side,
+                splitters::Split::Project,
+                splitters::Split::Output,
+            ] {
+                let now = self.panes.get(which);
+                self.panes.set(which, now, view);
+            }
+        }
         if !self.scrollbars_initialized {
             self.scrollbars_initialized = true;
             cx.on_next_frame(window, |_this, _window, cx| cx.notify());
@@ -1220,11 +1252,15 @@ impl Render for Ide {
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _win, cx| {
                 this.update_scrollbar_drag(ev, cx);
                 this.update_designer_drag(ev, cx);
+                this.update_split_drag(ev, cx);
             }))
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _ev: &gpui::MouseUpEvent, _win, cx| {
                     this.scrollbar_drag = None;
+                    if this.split_drag.take().is_some() {
+                        cx.notify();
+                    }
                     if let Some(DesignDrag::Move(idx, ..)) = this.drag.take() {
                         this.drop_into_container(idx);
                         cx.notify();
@@ -1244,9 +1280,10 @@ impl Render for Ide {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .p_1()
-                    .gap_1()
+                    .px_1()
+                    .pt_1()
                     .child(self.render_toolbox(cx))
+                    .child(self.splitter(splitters::Split::Toolbox, cx))
                     .child(
                         // The form designer is the document; the code is
                         // only shown when requested, in its own window.
@@ -1265,16 +1302,23 @@ impl Render for Ide {
                             )))
                             .child(div().flex_1().min_h_0().child(self.render_designer(cx))),
                     )
+                    .child(self.splitter(splitters::Split::Side, cx))
                     .child(
                         div()
                             .flex()
                             .flex_col()
-                            .w_72()
+                            .flex_none()
+                            .w(px(self.panes.side_w))
                             .min_w_0()
-                            .gap_2()
                             .child(self.render_project_explorer(cx))
+                            .child(self.splitter(splitters::Split::Project, cx))
                             .child(self.render_inspector(window, cx)),
                     ),
+            )
+            .child(
+                div()
+                    .px_2()
+                    .child(self.splitter(splitters::Split::Output, cx)),
             )
             .child(self.render_output(cx))
             .child(
@@ -1365,13 +1409,15 @@ impl Ide {
             );
         }
         div()
-            .h_40()
+            .flex_none()
+            .h(px(self.panes.project_h))
             .rounded_lg()
             .border_1()
             .border_color(rgb(BORDER))
             .bg(rgb(WINDOW_BG))
             .flex()
             .flex_col()
+            .overflow_hidden()
             .child(self.dock_title("Project"))
             .child(list)
     }
@@ -1410,7 +1456,8 @@ impl Ide {
 
     fn render_toolbox(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .w_48()
+            .flex_none()
+            .w(px(self.panes.toolbox_w))
             .min_w_0()
             .rounded_lg()
             .border_1()
@@ -3183,9 +3230,14 @@ impl Ide {
             .gap_2()
             .child(
                 div()
-                    .w_16()
+                    // labels are a size smaller than the values; wide enough
+                    // for the longest (ToolTipText, MousePointer, Font.Name)
+                    .w(px(PROP_LABEL_W))
                     .flex_none()
+                    .text_size(px(PROP_LABEL_SIZE))
                     .text_color(rgb(DIM))
+                    .whitespace_nowrap()
+                    .overflow_hidden()
                     .child(label.to_string()),
             )
             .child(field);
@@ -3198,7 +3250,7 @@ impl Ide {
                 .child(
                     div()
                         .debug_selector(|| "rename-error".into())
-                        .pl_20()
+                        .pl(px(PROP_LABEL_W + 8.0))
                         .text_xs()
                         .text_color(rgb(ERROR))
                         .child(SharedString::from(err)),
@@ -3385,7 +3437,8 @@ impl Ide {
             .map(|line| line.chars().count() as f32 * 8.0)
             .fold(160.0_f32, f32::max);
         let mut panel = div()
-            .h_40()
+            .flex_none()
+            .h(px(self.panes.output_h))
             .mx_2()
             .mb_2()
             .rounded_lg()
