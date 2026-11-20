@@ -20,6 +20,7 @@
 
 mod form;
 pub mod menu;
+pub mod menu_editor;
 #[cfg(feature = "gpui")]
 pub mod menu_bar;
 
@@ -33,6 +34,8 @@ mod range_tests;
 mod tab_tests;
 #[cfg(test)]
 mod menu_tests;
+#[cfg(test)]
+mod menu_editor_tests;
 #[cfg(feature = "gpui")]
 pub mod gpui_backend;
 #[cfg(feature = "gpui")]

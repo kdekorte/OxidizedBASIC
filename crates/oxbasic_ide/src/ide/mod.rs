@@ -47,6 +47,7 @@ mod showcase_form_tests;
 mod showcase_run;
 pub mod splitters;
 pub mod choose_file;
+pub mod menu_editor_window;
 pub mod text_field;
 pub mod toolbar;
 pub mod workspace;
