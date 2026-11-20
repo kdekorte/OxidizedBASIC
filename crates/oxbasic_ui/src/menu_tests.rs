@@ -54,6 +54,35 @@ fn a_cycle_is_not_well_formed() {
 }
 
 #[test]
+fn a_click_is_named_for_its_item_and_found_by_that_name() {
+    use crate::menu::{click_handler, item_for_handler};
+    let items = file_menu();
+    assert_eq!(click_handler(&items[1]), "mnuOpen_Click");
+    assert_eq!(item_for_handler(&items, "mnuOpen_Click"), Some(1));
+    assert_eq!(item_for_handler(&items, "MNUSAVE_CLICK"), Some(2), "case-blind");
+    assert_eq!(item_for_handler(&items, "mnuNone_Click"), None);
+}
+
+#[test]
+fn shortcuts_are_checked_and_turned_into_key_bindings() {
+    use crate::menu::{keystroke_for, shortcut_is_valid};
+    assert!(shortcut_is_valid(""), "no shortcut is fine");
+    assert!(shortcut_is_valid("Ctrl+O"));
+    assert!(shortcut_is_valid("Ctrl+Shift+S"));
+    assert!(shortcut_is_valid("F5"));
+    assert!(!shortcut_is_valid("Ctrl+"), "a modifier with no key");
+    assert!(!shortcut_is_valid("Hyper+O"), "an unknown modifier");
+    assert!(!shortcut_is_valid("F13"), "no such function key");
+
+    assert_eq!(keystroke_for("Ctrl+O").as_deref(), Some("cmd-o"));
+    assert_eq!(keystroke_for("Ctrl+Shift+S").as_deref(), Some("cmd-shift-s"));
+    assert_eq!(keystroke_for("F5").as_deref(), Some("f5"));
+    assert_eq!(keystroke_for("Cmd+Alt+X").as_deref(), Some("cmd-alt-x"));
+    assert_eq!(keystroke_for(""), None);
+    assert_eq!(keystroke_for("Hyper+O"), None);
+}
+
+#[test]
 fn a_form_keeps_its_menu_and_an_old_form_has_none() {
     use crate::form::FormSpec;
     let mut f = FormSpec::new("Form1", "Menus", 400.0, 300.0);

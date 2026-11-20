@@ -80,3 +80,68 @@ pub fn is_well_formed(items: &[MenuItem]) -> bool {
         true
     })
 }
+
+/// The name a menu item's click is known by, for `Name_Click`.
+pub fn click_handler(item: &MenuItem) -> String {
+    format!("{}_Click", item.name)
+}
+
+/// Which item a click is for, by the handler name it runs (`mnuOpen_Click`),
+/// matched without case. `None` when no item has that name.
+pub fn item_for_handler(items: &[MenuItem], handler: &str) -> Option<usize> {
+    items
+        .iter()
+        .position(|m| click_handler(m).eq_ignore_ascii_case(handler))
+}
+
+/// Whether a `Shortcut` (`Ctrl+O`, `Ctrl+Shift+S`, `F5`) is one this module
+/// can bind: optional modifiers (Ctrl, Shift, Alt, Cmd) and one key (a letter,
+/// digit, or F1 to F12). An empty shortcut is valid: it has none.
+pub fn shortcut_is_valid(text: &str) -> bool {
+    if text.trim().is_empty() {
+        return true;
+    }
+    let parts: Vec<String> = text
+        .split('+')
+        .map(|p| p.trim().to_ascii_lowercase())
+        .collect();
+    let Some((key, mods)) = parts.split_last() else {
+        return false;
+    };
+    let mods_ok = mods
+        .iter()
+        .all(|m| matches!(m.as_str(), "ctrl" | "shift" | "alt" | "cmd"));
+    let plain_key = key.len() == 1 && key.chars().all(|c| c.is_ascii_alphanumeric());
+    let function_key = key
+        .strip_prefix('f')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| (1..=12).contains(&n));
+    mods_ok && (plain_key || function_key)
+}
+
+/// The keystroke GPUI binds for a shortcut: Ctrl and Cmd both mean Command on
+/// the Mac, as the IDE's own bindings use it. `None` when the text is empty or
+/// not a valid shortcut.
+pub fn keystroke_for(text: &str) -> Option<String> {
+    if text.trim().is_empty() || !shortcut_is_valid(text) {
+        return None;
+    }
+    let parts: Vec<String> = text
+        .split('+')
+        .map(|p| p.trim().to_ascii_lowercase())
+        .collect();
+    let (key, mods) = parts.split_last()?;
+    let has = |m: &str| mods.iter().any(|x| x == m);
+    let mut out: Vec<&str> = Vec::new();
+    if has("ctrl") || has("cmd") {
+        out.push("cmd");
+    }
+    if has("alt") {
+        out.push("alt");
+    }
+    if has("shift") {
+        out.push("shift");
+    }
+    out.push(key);
+    Some(out.join("-"))
+}

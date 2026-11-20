@@ -603,6 +603,7 @@ impl FormHost {
 
     /// What the program changed since the last call, else `None`.
     /// The handler names queued by events raised so far (`Dir1_Change`...).
+    #[cfg(test)]
     pub(crate) fn raised_handlers(&self) -> Vec<String> {
         self.raised.iter().map(|e| e.handler.clone()).collect()
     }
@@ -1291,10 +1292,6 @@ pub const DEFAULT_FONT_NAME: &str = "MS Sans Serif";
 /// The text colour a control has unless `ForeColor` is set.
 pub const DEFAULT_FORE: u32 = 0x1D1D1F;
 
-/// Whether `kind` is a scrollbar (`Min`, `Max`, `Value`, `SmallChange`...).
-fn is_scroll(kind: ControlKind) -> bool {
-    kind.is_scroll()
-}
 
 /// The background a kind of control has unless `BackColor` is set.
 fn default_back(kind: ControlKind) -> u32 {
