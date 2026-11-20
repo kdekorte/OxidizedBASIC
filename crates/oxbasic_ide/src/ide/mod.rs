@@ -2083,8 +2083,10 @@ impl Ide {
             .flex()
             .items_start()
             .justify_start()
-            .p_4()
-            .child(form_area)
+            // the margin is inside the scrolled content, so the scroll range is
+            // only what the form needs beyond the pane: a form that fits shows
+            // no bars
+            .child(div().flex_none().p_4().child(form_area))
             .child(self.scrollbar_overlays("designer", &self.designer_scroll, cx))
     }
     /// A control dragged in the designer is dropped where its top-left
@@ -3483,16 +3485,18 @@ impl Ide {
                         .id("output-scroll")
                         .flex_1()
                         .min_h_0()
-                        .p_2()
                         .overflow_scroll()
                         .scrollbar_width(px(8.0))
                         .track_scroll(&self.output_scroll)
                         .font_family("Menlo")
                         .whitespace_nowrap()
+                        // the padding is inside the scrolled content, so only
+                        // text that is really too big for the window scrolls
                         .child(
                             div()
                                 .flex_none()
-                                .w(px(output_width))
+                                .w(px(output_width + 16.0))
+                                .p_2()
                                 .whitespace_nowrap()
                                 .child(SharedString::from(self.output.clone())),
                         )

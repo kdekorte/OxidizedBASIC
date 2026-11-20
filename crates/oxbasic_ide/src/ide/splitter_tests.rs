@@ -140,7 +140,8 @@ fn a_narrower_designer_scrolls_the_form_instead_of_squeezing_it(cx: &mut gpui::T
     // visible edges instead of moving away with the form
     ide.update(cx, |ide, cx| {
         let max = ide.designer_scroll.max_offset();
-        ide.designer_scroll.set_offset(gpui::point(-max.width, -max.height));
+        ide.designer_scroll
+            .set_offset(gpui::point(-max.width, -max.height));
         cx.notify();
     });
     cx.run_until_parked();
@@ -148,7 +149,10 @@ fn a_narrower_designer_scrolls_the_form_instead_of_squeezing_it(cx: &mut gpui::T
     cx.run_until_parked();
     let bars = bounds(cx, "scrollbars-designer");
     let view = bounds(cx, "designer-viewport");
-    assert_eq!(bars.origin, view.origin, "the bars are over the visible area");
+    assert_eq!(
+        bars.origin, view.origin,
+        "the bars are over the visible area"
+    );
     let bar = bounds(cx, "scrollbar-designer-horizontal");
     assert!(
         bar.origin.x >= view.origin.x && bar.right() <= view.right(),
@@ -156,4 +160,25 @@ fn a_narrower_designer_scrolls_the_form_instead_of_squeezing_it(cx: &mut gpui::T
         bar,
         view
     );
+}
+
+#[gpui::test]
+fn scroll_bars_appear_only_when_there_is_something_to_scroll(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    // the designer: a form that fits its pane has nothing to scroll to, so
+    // no bar is drawn (read the range the bar is drawn from)
+    ide.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    let range = ide.read_with(cx, |ide, _| ide.designer_scroll.max_offset());
+    assert_eq!(range, gpui::size(px(0.0), px(0.0)), "nothing to scroll to");
+    // the Immediate window: a short output has nothing to scroll to
+    ide.update(cx, |ide, cx| {
+        ide.output = "one line\n".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    ide.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    let range = ide.read_with(cx, |ide, _| ide.output_scroll.max_offset());
+    assert_eq!(range, gpui::size(px(0.0), px(0.0)), "nothing to scroll to");
 }
