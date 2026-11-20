@@ -594,6 +594,10 @@ pub struct FormSpec {
     /// before the focused control's (and may cancel the key for it).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub key_preview: bool,
+    /// The form's menu bar: its items, each with a `parent` (see `menu`).
+    /// Empty for a form with no menu.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub menus: Vec<crate::menu::MenuItem>,
 }
 
 impl FormSpec {
@@ -605,6 +609,7 @@ impl FormSpec {
             height,
             controls: Vec::new(),
             key_preview: false,
+            menus: Vec::new(),
         }
     }
 

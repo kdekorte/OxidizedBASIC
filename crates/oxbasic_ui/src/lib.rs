@@ -19,6 +19,7 @@
 //!   from GPUI input/timer events.
 
 mod form;
+pub mod menu;
 
 #[cfg(test)]
 mod dir_tests;
@@ -28,6 +29,8 @@ mod file_tests;
 mod range_tests;
 #[cfg(test)]
 mod tab_tests;
+#[cfg(test)]
+mod menu_tests;
 #[cfg(feature = "gpui")]
 pub mod gpui_backend;
 #[cfg(feature = "gpui")]
