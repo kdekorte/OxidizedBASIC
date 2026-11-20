@@ -106,6 +106,8 @@ impl gpui::Render for MenuEditorView {
             .collect();
         div()
             .size_full()
+            .bg(rgb(0xF2F2F7))
+            .text_color(rgb(0x1D1D1F))
             .flex()
             .flex_col()
             .gap_2()
@@ -145,6 +147,7 @@ impl gpui::Render for MenuEditorView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(menu_button("menu-new", "New").on_click(cx.listener(
                         |this, _ev: &gpui::ClickEvent, _win, cx| {
@@ -221,7 +224,7 @@ impl Ide {
         let items = self.form.menus.clone();
         let view = cx.new(|cx| MenuEditorView::new(items, cx));
         let ide = cx.entity().downgrade();
-        let bounds = Bounds::centered(None, size(px(420.), px(460.)), cx);
+        let bounds = Bounds::centered(None, size(px(520.), px(480.)), cx);
         let opened = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
