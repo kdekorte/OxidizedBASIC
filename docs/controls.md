@@ -41,6 +41,9 @@ for run-time access, `crates/oxbasic_ui/src/lib.rs` for events,
 | VolumeListBox | ▤ VolumeListBox | `Volume1` | 120x84 | — | read-only | — | yes | yes |
 | DirListBox | ▥ DirListBox | `Dir1` | 120x84 | — | read-only | — | yes | yes |
 | FileListBox | ▦ FileListBox | `File1` | 120x84 | — | read-only | — | yes | yes |
+| Slider | ⇆ Slider | `Slider1` | 160x40 | — | — | Min..Max | no | yes |
+| ProgressBar | ▰ ProgressBar | `Progress1` | 200x20 | — | — | Min..Max | no | no |
+| TabControl | ▤ TabControl | `Tab1` | 320x200 | — | — | Tab | yes | yes |
 
 "Font/colours" means `ForeColor` and `Font.*`. `BackColor` applies to
 everything except Timer. "Focus" means `SetFocus` works.
@@ -353,6 +356,57 @@ A `Path` that isn't a folder raises 76.
 an empty string when nothing is selected. The same pattern rule is what the
 file dialogs use (see `OpenFileDialog` in the README).
 
+### Slider
+A draggable thumb over `Min`..`Max`, read and set through `Value`.
+
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Min` | property | Long | R/W | R/W |
+| `Max` | property | Long | R/W | R/W |
+| `Value` | property | Long | R/W | R/W |
+| `Orientation` | property | Integer | R/W | R/W |
+
+`Orientation` is 0 (horizontal, the default) or 1 (vertical); other values
+raise 380. The range and `Value` follow the scrollbars' rules: `Min` stays
+below `Max`, and `Value` is kept inside the range. Dragging the thumb sets
+`Value` and raises `Change`; setting `Value` in code raises `Change` too.
+
+### ProgressBar
+A bar filled from `Min` to `Value` over `Min`..`Max`. The user can't drag it:
+only the program sets `Value` (and `Min`/`Max`), and out-of-range values raise
+380. It raises no events.
+
+### TabControl
+A row of tabs with a page under them. The controls on a page sit inside the
+TabControl (`Set Text1.Container = Tab1`) and are shown only while that page
+is selected. A control that is on another page is hidden and takes no input,
+as one in a hidden Frame does.
+
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Tab` | property | Integer | R/W | R/W |
+| `Tabs` | property | Integer | R (the number of tabs) | — |
+
+`Tab` is the selected page, from 0 up to the last tab; other values raise 380.
+Setting `Tab` shows that page and raises `Click`, as VB's TabStrip does. The
+tab captions are set in the designer.
+
+### Menu
+A form's menu bar is not a control: it is the form's `menus` list. Each item
+has a `name` (its handler is `name_Click`), a
+`caption` (`&File`; a `-` is a separator), a `parent` (the item it sits
+under; none for the bar), a `shortcut` (`Ctrl+O`, `Ctrl+Shift+S`, `F5`), and
+`enabled` and `checked` flags.
+
+- While the form's window is active, its menu is the application's menu bar,
+  and the IDE's menu comes back when the window is not in front.
+- Choosing an item runs its `Name_Click` handler in the program. A disabled
+  item and a separator don't run.
+- A shortcut runs the item it belongs to. Ctrl and Cmd both mean Command on
+  the Mac.
+- A menu's item and handler names must be unique; a submenu's parent must
+  exist, and a menu can't contain itself (the editor refuses such moves).
+
 ### Form
 Reached as `Me` or by its own name (`Form1.Caption`).
 
@@ -388,6 +442,9 @@ reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
 | HScrollBar | `Change`, `GotFocus`, `LostFocus`, `Mouse*` |
 | VScrollBar | `Change`, `GotFocus`, `LostFocus`, `Mouse*` |
 | Line, Shape | `Mouse*` |
+| Slider | `Change`, `GotFocus`, `LostFocus`, `Mouse*` |
+| ProgressBar | none (the program sets it) |
+| TabControl | `Click`, `Mouse*` (a tab click changes the page) |
 | ComboBox | `Change`, `Click`, `DblClick`, `DropDown`, `GotFocus`, `Key*`, `LostFocus`, `Scroll` |
 | PictureBox | `Change`, `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Paint`, `Resize` |
 | CheckBox, OptionButton | `Click`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
@@ -481,7 +538,9 @@ PictureBox. Checkbox-style lists (`ListBox.Style` 1), `Sorted`,
 `ItemData`, `TopIndex`, `ListBox.Columns`. `DragDrop`/`OLEDrag`. Animated
 or `.cur` cursors (a `MouseIcon` is a still image). On a platform other
 than macOS the waiting cursor and `MouseIcon` show the arrow and the
-pointing hand. Shapes are not clamped to the form, so a Shape or Line sized
+pointing hand. The Menu Editor window and its designer button aren't built yet:
+menus are written in the `.oxform` file (the rules are in place and tested).
+Shapes are not clamped to the form, so a Shape or Line sized
 past the form's edge is drawn past it. `FileListBox.Pattern` raises no
 `Change`, and `FileName` can't be set. Choosing a file doesn't open it.
 

@@ -75,11 +75,15 @@ Immediate pane below.*
     handler), `Shape` and `Line` (drawn through the PictureBox canvas),
     and the file browser: `VolumeListBox` (the mounted volumes, in place
     of VB6's DriveListBox), `DirListBox` (the sub-folders of `Path`) and
-    `FileListBox` (the files matching `Pattern`, with `FileName`). See
-    `docs/controls.md`.
-  - **Menus**: Edit, View and Run stay in the menu bar when the File menu
-    refreshes (Open Recent changes, saves). A packaged app has an App menu
-    with About and Quit.
+    `FileListBox` (the files matching `Pattern`, with `FileName`),
+    `Slider` (a draggable range, with `Orientation`), `ProgressBar` (a
+    range the program fills) and `TabControl` (tabs with pages of
+    controls). See `docs/controls.md`.
+  - **Menus**: a form's menu bar (File, Help and so on, with shortcuts).
+    While the form's window is in front its menu is the menu bar, and
+    choosing an item runs its `name_Click` handler. Edit, View and Run
+    stay in the IDE's menu bar when the File menu refreshes (Open Recent
+    changes, saves). A packaged app has an App menu with About and Quit.
   - **Property inspector**: `(Name)` (renames the control and its
     `Name_Event` handlers and references in code), Caption, Text, Items,
     Left/Top/Width/Height, Timer interval; the form's own properties show
@@ -245,6 +249,8 @@ needs a Developer ID signature and notarisation, which the script does not do.
   every file; a file the filter rejects comes back as `""`.
 - Shapes and Lines aren't clamped to the form, and choosing a file in a
   FileListBox doesn't open it.
+- The Menu Editor window and its designer button aren't built yet; menus
+  are written in the `.oxform` file for now.
 - `Resume`/`Resume Next` resume precisely when the handler sits at the
   same block level as the failing statement (the common VB idiom).
 - No `ReDim`, file I/O, or `Mid`-statement yet.
