@@ -6,10 +6,10 @@ use super::toolbox_tests::{ide_window, sel};
 use super::*;
 
 /// A folder for one test, removed afterwards.
-struct Dir(std::path::PathBuf);
+pub(super) struct Dir(pub(super) std::path::PathBuf);
 
 impl Dir {
-    fn new(tag: &str) -> Dir {
+    pub(super) fn new(tag: &str) -> Dir {
         let p = std::env::temp_dir().join(format!("oxide-{}-{}", tag, std::process::id()));
         std::fs::remove_dir_all(&p).ok();
         std::fs::create_dir_all(&p).unwrap();

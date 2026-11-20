@@ -113,6 +113,10 @@ impl Ide {
         }
         self.workspace.save_all(&file)?;
         self.status = format!("Saved {}", file_name(&file));
+        // a saved project goes to the top of File > Open Recent; the caller
+        // refreshes the menu, since this has no context to do it
+        self.recent.record(&self.workspace.name.clone(), &file);
+        self.store_recent();
         Ok(())
     }
 
@@ -190,7 +194,10 @@ impl Ide {
         cx.spawn_in(win, async move |this, cx| {
             let Ok(Ok(Some(path))) = rx.await else { return };
             let _ = this.update_in(cx, move |ide, win, cx| match ide.save_project_to(path) {
-                Ok(()) => then(ide, win, cx),
+                Ok(()) => {
+                    ide.refresh_file_menu(cx);
+                    then(ide, win, cx)
+                }
                 Err(e) => ide.status = format!("save failed: {}", e),
             });
         })
@@ -265,7 +272,11 @@ impl Ide {
     /// Open the project at `path`, replacing the current one.
     pub(super) fn open_project_file(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
         match Workspace::open(path) {
-            Ok(w) => self.install(w, cx),
+            Ok(w) => {
+                self.install(w, cx);
+                // opened projects move to the top of File > Open Recent
+                self.record_recent(path, cx);
+            }
             Err(e) => self.status = format!("open failed: {}", e),
         }
         cx.notify();

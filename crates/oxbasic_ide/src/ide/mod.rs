@@ -22,6 +22,11 @@ pub mod live_forms;
 pub mod live_input;
 pub mod program;
 pub mod project_commands;
+pub mod recent;
+pub mod recent_menu;
+pub mod recent_store;
+#[cfg(test)]
+mod recent_tests;
 #[cfg(test)]
 pub mod showcase;
 #[cfg(test)]
@@ -48,6 +53,7 @@ use oxbasic_ui::{
     FormSpec, Rect,
 };
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use toolbar::file_name;
@@ -122,6 +128,12 @@ gpui::actions!(
         SaveForm,
         NewProject,
         OpenProject,
+        OpenRecent1,
+        OpenRecent2,
+        OpenRecent3,
+        OpenRecent4,
+        OpenRecent5,
+        ClearRecent,
         SaveProject,
         SaveProjectAs,
         CloseProject,
@@ -172,6 +184,63 @@ pub(super) fn bind_shortcuts(cx: &mut App) {
     ]);
 }
 
+/// The File menu. Its Open Recent submenu lists `recent`'s projects, each
+/// with its name and path; the entries and their actions are numbered, so
+/// the menu is built afresh whenever the list changes.
+fn file_menu(recent: &recent::RecentList) -> Vec<gpui::MenuItem> {
+    let recent_items: Vec<gpui::MenuItem> = if recent.items().is_empty() {
+        vec![gpui::MenuItem::action("No Recent Projects", gpui::NoAction)]
+    } else {
+        let mut v: Vec<gpui::MenuItem> = recent
+            .items()
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                // the label shows the name and where it is; a file that has
+                // gone is marked, and opening it says so in the status line
+                let mut label = format!("{} — {}", p.name, p.path.display());
+                if !p.path.exists() {
+                    label.push_str("  (missing)");
+                }
+                recent_action(i, label)
+            })
+            .collect();
+        v.push(gpui::MenuItem::separator());
+        v.push(gpui::MenuItem::action("Clear Menu", ClearRecent));
+        v
+    };
+    vec![
+        gpui::MenuItem::action("New Project", NewProject),
+        gpui::MenuItem::action("Open Project…", OpenProject),
+        gpui::MenuItem::Submenu(gpui::Menu {
+            name: "Open Recent".into(),
+            items: recent_items,
+        }),
+        gpui::MenuItem::separator(),
+        gpui::MenuItem::action("Save Project", SaveProject),
+        gpui::MenuItem::action("Save Project As…", SaveProjectAs),
+        gpui::MenuItem::action("Save Code", SaveCode),
+        gpui::MenuItem::action("Save Form", SaveForm),
+        gpui::MenuItem::separator(),
+        gpui::MenuItem::action("Add Form", AddForm),
+        gpui::MenuItem::action("Add Module", AddModule),
+        gpui::MenuItem::action("Remove Form or Module", RemoveDocument),
+        gpui::MenuItem::separator(),
+        gpui::MenuItem::action("Close Project", CloseProject),
+    ]
+}
+
+/// The menu item for recent entry `i` (0 is the most recent).
+fn recent_action(i: usize, label: String) -> gpui::MenuItem {
+    match i {
+        0 => gpui::MenuItem::action(label, OpenRecent1),
+        1 => gpui::MenuItem::action(label, OpenRecent2),
+        2 => gpui::MenuItem::action(label, OpenRecent3),
+        3 => gpui::MenuItem::action(label, OpenRecent4),
+        _ => gpui::MenuItem::action(label, OpenRecent5),
+    }
+}
+
 /// Launch the IDE, optionally loading a `.bas` source file and an
 /// `.oxform` layout file.
 pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
@@ -179,6 +248,8 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
     let oxform_path = oxform_path.map(|s| s.to_string());
     Application::new().run(move |cx: &mut App| {
         bind_shortcuts(cx);
+        // the File menu lists the projects kept from earlier runs
+        let recent_at_start = recent_store::load(&recent_store::default_file());
         cx.set_menus(vec![
             gpui::Menu {
                 name: "OxidizedBASIC".into(),
@@ -186,21 +257,7 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
             },
             gpui::Menu {
                 name: "File".into(),
-                items: vec![
-                    gpui::MenuItem::action("New Project", NewProject),
-                    gpui::MenuItem::action("Open Project…", OpenProject),
-                    gpui::MenuItem::separator(),
-                    gpui::MenuItem::action("Save Project", SaveProject),
-                    gpui::MenuItem::action("Save Project As…", SaveProjectAs),
-                    gpui::MenuItem::action("Save Code", SaveCode),
-                    gpui::MenuItem::action("Save Form", SaveForm),
-                    gpui::MenuItem::separator(),
-                    gpui::MenuItem::action("Add Form", AddForm),
-                    gpui::MenuItem::action("Add Module", AddModule),
-                    gpui::MenuItem::action("Remove Form or Module", RemoveDocument),
-                    gpui::MenuItem::separator(),
-                    gpui::MenuItem::action("Close Project", CloseProject),
-                ],
+                items: file_menu(&recent_at_start),
             },
             gpui::Menu {
                 name: "Edit".into(),
@@ -274,6 +331,10 @@ pub struct Ide {
     /// The user answered the save prompt: the next close of the IDE's
     /// window goes through without asking again.
     allow_close: bool,
+    /// The File menu's recent projects, kept in the user's app-data folder.
+    recent: recent::RecentList,
+    /// Where `recent` is stored (see `recent_store`).
+    recent_file: PathBuf,
     // code editor
     lines: Vec<String>,
     cursor: (usize, usize), // (row, char-col)
@@ -462,6 +523,8 @@ Print \"Total = \" & CStr(Total)
             status: "Ready".into(),
             run_lines: None,
             allow_close: false,
+            recent_file: recent_store::default_file(),
+            recent: recent_store::load(&recent_store::default_file()),
             evt_rx,
             evt_tx,
         };
@@ -1226,6 +1289,24 @@ impl Render for Ide {
             }))
             .on_action(cx.listener(|this, _: &OpenProject, win, cx| {
                 this.open_project(win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenRecent1, win, cx| {
+                this.open_recent(0, win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenRecent2, win, cx| {
+                this.open_recent(1, win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenRecent3, win, cx| {
+                this.open_recent(2, win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenRecent4, win, cx| {
+                this.open_recent(3, win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenRecent5, win, cx| {
+                this.open_recent(4, win, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ClearRecent, _win, cx| {
+                this.clear_recent(cx);
             }))
             .on_action(cx.listener(|this, _: &SaveProject, win, cx| {
                 if this.workspace.file.is_some() {
