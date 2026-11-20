@@ -145,3 +145,96 @@ pub fn keystroke_for(text: &str) -> Option<String> {
     out.push(key);
     Some(out.join("-"))
 }
+
+/// The menu editor's operations on a form's menu items. Each keeps every
+/// `parent` pointing at the item it named before, after items move or go.
+///
+/// `add` puts a new item at the end of the list under `parent`.
+pub fn add(items: &mut Vec<MenuItem>, parent: Option<usize>, caption: &str) -> usize {
+    let name = next_name(items, caption);
+    items.push(MenuItem::new(&name, caption, parent));
+    items.len() - 1
+}
+
+/// A name for a new item: `mnu` and its caption's letters, numbered if taken.
+fn next_name(items: &[MenuItem], caption: &str) -> String {
+    let base: String = caption.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let base = if base.is_empty() { "Item".to_string() } else { base };
+    let base = format!("mnu{}", base);
+    let mut n = 1;
+    loop {
+        let candidate = if n == 1 { base.clone() } else { format!("{}{}", base, n) };
+        if !items.iter().any(|m| m.name.eq_ignore_ascii_case(&candidate)) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Remove item `i` and everything under it. Parents that pointed past it
+/// are shifted to match the new positions.
+pub fn remove(items: &mut Vec<MenuItem>, i: usize) {
+    let mut gone = vec![false; items.len()];
+    let mut stack = vec![i];
+    while let Some(k) = stack.pop() {
+        if k < items.len() && !gone[k] {
+            gone[k] = true;
+            stack.extend(children(items, Some(k)));
+        }
+    }
+    let mut new_index = vec![None; items.len()];
+    let mut next = 0;
+    for (k, g) in gone.iter().enumerate() {
+        if !g {
+            new_index[k] = Some(next);
+            next += 1;
+        }
+    }
+    let mut kept = Vec::new();
+    for (k, m) in items.iter().enumerate() {
+        if gone[k] {
+            continue;
+        }
+        let mut m = m.clone();
+        m.parent = m.parent.and_then(|p| new_index.get(p).copied().flatten());
+        kept.push(m);
+    }
+    *items = kept;
+}
+
+/// Indent item `i` one level: it becomes the last child of the item above it
+/// (the previous sibling in the list). Does nothing if there is no item above
+/// to take it, or it is already under that item.
+pub fn indent(items: &mut [MenuItem], i: usize) -> bool {
+    if i == 0 || i >= items.len() {
+        return false;
+    }
+    // the item directly above in the list becomes the new parent, if it can
+    // hold children (it is not a separator, and not under `i`)
+    let above = i - 1;
+    if items[above].is_separator() || items[i].parent == Some(above) {
+        return false;
+    }
+    // it can't become its own descendant
+    let mut at = Some(above);
+    while let Some(p) = at {
+        if p == i {
+            return false;
+        }
+        at = items[p].parent;
+    }
+    items[i].parent = Some(above);
+    true
+}
+
+/// Outdent item `i` one level: it moves up to its parent's level, sitting
+/// after that parent. Does nothing for a top-level item.
+pub fn outdent(items: &mut [MenuItem], i: usize) -> bool {
+    match items.get(i).and_then(|m| m.parent) {
+        Some(p) => {
+            items[i].parent = items[p].parent;
+            true
+        }
+        None => false,
+    }
+}

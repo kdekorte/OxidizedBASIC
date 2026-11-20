@@ -93,3 +93,69 @@ fn a_form_keeps_its_menu_and_an_old_form_has_none() {
     let old = FormSpec::new("Old", "Old", 100.0, 100.0);
     assert!(!old.to_oxform().contains("\"menus\""));
 }
+
+#[test]
+fn add_appends_an_item_under_the_parent_with_a_unique_name() {
+    use crate::menu::add;
+    let mut items = file_menu();
+    let n = add(&mut items, Some(0), "&Print");
+    assert_eq!(n, 6);
+    assert_eq!(items[n].parent, Some(0));
+    assert_eq!(items[n].name, "mnuPrint");
+    let again = add(&mut items, None, "&Print");
+    assert_eq!(items[again].name, "mnuPrint2", "a taken name is numbered");
+}
+
+#[test]
+fn removing_an_item_removes_its_children_and_keeps_the_rest_pointing_right() {
+    use crate::menu::remove;
+    let mut items = file_menu();
+    // removing File (0) takes Open, Save and the separator with it; Edit and
+    // Copy survive, and Copy still sits under Edit at its new place
+    remove(&mut items, 0);
+    let names: Vec<&str> = items.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, vec!["mnuEdit", "mnuCopy"]);
+    assert_eq!(items[1].parent, Some(0), "Copy is still under Edit");
+    assert!(is_well_formed(&items));
+}
+
+#[test]
+fn removing_a_middle_item_shifts_later_parents_down() {
+    use crate::menu::remove;
+    let mut items = file_menu();
+    remove(&mut items, 1); // Open goes; Save, the separator, Edit, Copy move up
+    let names: Vec<&str> = items.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, vec!["mnuFile", "mnuSave", "mnuSep", "mnuEdit", "mnuCopy"]);
+    assert_eq!(items[4].parent, Some(3), "Copy's parent, Edit, moved from 4 to 3");
+    assert!(is_well_formed(&items));
+}
+
+#[test]
+fn indent_makes_an_item_the_child_of_the_one_above_and_refuses_bad_moves() {
+    use crate::menu::indent;
+    // a valid indent: Save (2) goes under Open (1), the item above it
+    let mut items = file_menu();
+    assert!(indent(&mut items, 2), "Save goes under Open, the item above it");
+    assert_eq!(items[2].parent, Some(1));
+    assert!(is_well_formed(&items));
+
+    // the first item has nothing above it
+    let mut first = file_menu();
+    assert!(!indent(&mut first, 0));
+
+    // a separator can't hold children, so nothing indents under it: Edit (4)
+    // comes after the separator (3) and is refused
+    let mut sep = file_menu();
+    assert!(!indent(&mut sep, 4), "the item above is a separator");
+    assert_eq!(sep[4].parent, None, "Edit stays on the bar");
+}
+
+#[test]
+fn outdent_moves_an_item_up_a_level_and_leaves_top_level_items_alone() {
+    use crate::menu::outdent;
+    let mut items = file_menu();
+    assert!(outdent(&mut items, 1), "Open is under File");
+    assert_eq!(items[1].parent, None, "Open is now on the bar");
+    assert!(!outdent(&mut items, 0), "File is already top level");
+    assert!(is_well_formed(&items));
+}
