@@ -6,6 +6,36 @@
 use super::toolbox_tests::{ide_window, sel};
 use super::*;
 
+/// The Project panel marks unsaved items with ●, and the close prompt
+/// follows the same rule: nothing unsaved, no question.
+#[gpui::test]
+fn the_project_panel_marks_unsaved_work_and_close_asks_only_then(cx: &mut gpui::TestAppContext) {
+    let dir = super::project_tests::Dir::new("dirtymark");
+    let file = dir.0.join("app.oxproj");
+    let (ide, cx) = ide_window(cx);
+    ide.update(cx, |ide, _| ide.save_project_to(file.clone()).unwrap());
+    cx.run_until_parked();
+
+    // saved: nothing unsaved, so closing does not ask
+    ide.update(cx, |ide, _| {
+        assert!(!ide.working_copy_changed() && !ide.has_unsaved())
+    });
+    let closes = ide.update_in(cx, |ide, win, cx| ide.may_close(win, cx));
+    assert!(closes, "nothing unsaved: close without asking");
+    assert!(!cx.has_pending_prompt());
+
+    // an edit to the active form, still in the working copy, counts
+    ide.update(cx, |ide, _| ide.form.caption = "Edited".into());
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| assert!(ide.working_copy_changed()));
+    let closes = ide.update_in(cx, |ide, win, cx| ide.may_close(win, cx));
+    cx.run_until_parked();
+    assert!(!closes, "unsaved edits: the close waits for an answer");
+    assert!(cx.has_pending_prompt());
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+}
+
 #[gpui::test]
 fn selecting_the_project_shows_its_package_settings(cx: &mut gpui::TestAppContext) {
     let (ide, cx) = ide_window(cx);

@@ -1519,7 +1519,15 @@ impl Ide {
                 .cursor_pointer()
                 .when(self.project_selected, |s| s.bg(rgb(SEL_BG)))
                 .hover(|s| s.bg(rgb(SEL_BG)))
-                .child(SharedString::from(format!("▾  {}", ws.name)))
+                .child(SharedString::from(format!(
+                    "▾  {}{}",
+                    ws.name,
+                    if ws.is_dirty() || self.working_copy_changed() {
+                        " ●"
+                    } else {
+                        ""
+                    }
+                )))
                 .on_click(cx.listener(|this: &mut Ide, _ev, _win, cx| {
                     // the project's settings replace the form's in Properties
                     this.project_selected = true;
@@ -1534,12 +1542,18 @@ impl Ide {
                 DocKind::Module => "◧",
             };
             let startup = doc.kind == DocKind::Form && doc.name.eq_ignore_ascii_case(&ws.startup);
+            // the active document's unsaved edits are in the working copy
+            let unsaved = if active {
+                self.working_copy_changed() || doc.is_dirty()
+            } else {
+                doc.is_dirty()
+            };
             let label = format!(
                 "{}  {}{}{}",
                 icon,
                 doc.name,
                 if startup { "  (start)" } else { "" },
-                if doc.is_dirty() { " *" } else { "" }
+                if unsaved { " ●" } else { "" }
             );
             list = list.child(
                 div()
