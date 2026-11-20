@@ -64,6 +64,16 @@ phases.
     controls from the toolbox. With the form itself selected, handles
     on its bottom and right edges resize the form. The
     designer shows no code; Timers appear as ◷ icons.
+  - **Controls beyond the VB6 basics**: `HScrollBar` and `VScrollBar`
+    (a live thumb; dragging it sets `Value` and runs its `Change`
+    handler), `Shape` and `Line` (drawn through the PictureBox canvas),
+    and the file browser: `VolumeListBox` (the mounted volumes, in place
+    of VB6's DriveListBox), `DirListBox` (the sub-folders of `Path`) and
+    `FileListBox` (the files matching `Pattern`, with `FileName`). See
+    `docs/controls.md`.
+  - **Menus**: Edit, View and Run stay in the menu bar when the File menu
+    refreshes (Open Recent changes, saves). A packaged app has an App menu
+    with About and Quit.
   - **Property inspector**: `(Name)` (renames the control and its
     `Name_Event` handlers and references in code), Caption, Text, Items,
     Left/Top/Width/Height, Timer interval; the form's own properties show
@@ -91,7 +101,7 @@ cargo build -p oxbasic_ide
 ./target/debug/oxbasic gui examples/clickme.oxform \
                       examples/clickme.bas                      # GPUI form app
 ./target/debug/oxbasic repl                                     # immediate window
-cargo test --workspace                                          # 52 tests
+cargo test --workspace                                          # ~400 tests
 ```
 
 `.oxform` layout files are JSON:
@@ -138,6 +148,10 @@ Dates: `Now Date Time Year Month Day Hour Minute Second Weekday DateSerial
 TimeSerial DateAdd DateValue` (VB serial dates, day 0 = 1899-12-30)
 Console: `Print`, `Debug.Print`, `MsgBox`, `InputBox`, `Beep`, `DoEvents` (in the IDE it
 shows what a long handler has drawn so far, and lets Stop end it)
+File dialogs: `OpenFileDialog(filter)` and `SaveFileDialog(filter)` show the
+native macOS picker and return the chosen path, or `""` when cancelled or when
+the file doesn't match `filter` (`*.bas;*.oxproj`, the same rule as
+`FileListBox.Pattern`). They work in the IDE and in packaged apps.
 Constants: `vbCrLf vbCr vbLf vbNewLine vbTab vbNullString vbOKOnly …`
 
 ## Building the GUI on macOS
@@ -221,6 +235,10 @@ needs a Developer ID signature and notarisation, which the script does not do.
   step-over, and watch (no step-into).
 - `MsgBox` prints to the console/output pane (a native GPUI dialog is a
   follow-up).
+- The file dialog filters after the user picks a file, so the picker shows
+  every file; a file the filter rejects comes back as `""`.
+- Shapes and Lines aren't clamped to the form, and choosing a file in a
+  FileListBox doesn't open it.
 - `Resume`/`Resume Next` resume precisely when the handler sits at the
   same block level as the failing statement (the common VB idiom).
 - No `ReDim`, file I/O, or `Mid`-statement yet.

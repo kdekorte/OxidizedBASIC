@@ -34,6 +34,13 @@ for run-time access, `crates/oxbasic_ui/src/lib.rs` for events,
 | OptionButton | ◉ OptionButton | `Option1` | 110x22 | yes | — | True/False | yes | yes |
 | Image | ▣ Image | `Image1` | 100x100 | — | — | — | no | no |
 | Timer | ◷ Timer | `Timer1` | none | — | — | — | no | no |
+| HScrollBar | ↔ HScrollBar | `HScroll1` | 120x17 | — | — | Min..Max | no | yes |
+| VScrollBar | ↕ VScrollBar | `VScroll1` | 17x120 | — | — | Min..Max | no | yes |
+| Line | ╱ Line | `Line1` | 120x60 | — | — | — | yes (colour) | no |
+| Shape | ▭ Shape | `Shape1` | 100x60 | — | — | — | yes (colour) | no |
+| VolumeListBox | ▤ VolumeListBox | `Volume1` | 120x84 | — | read-only | — | yes | yes |
+| DirListBox | ▥ DirListBox | `Dir1` | 120x84 | — | read-only | — | yes | yes |
+| FileListBox | ▦ FileListBox | `File1` | 120x84 | — | read-only | — | yes | yes |
 
 "Font/colours" means `ForeColor` and `Font.*`. `BackColor` applies to
 everything except Timer. "Focus" means `SetFocus` works.
@@ -268,6 +275,84 @@ itself), as in VB.
 `Interval` is milliseconds; 0 or a disabled timer doesn't tick. Changes take
 effect on the running timer immediately. Negative intervals raise 380.
 
+### HScrollBar and VScrollBar
+Both are a slider over `Min`..`Max`. The thumb is at `Value`.
+
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Min` | property | Long | R/W | R/W |
+| `Max` | property | Long | R/W | R/W |
+| `Value` | property | Long | R/W | R/W |
+| `SmallChange` | property | Long | R/W | R/W |
+| `LargeChange` | property | Long | R/W | R/W |
+
+The defaults are 0, 32767, 0 and 1. `Min` must stay below `Max`; `Value`
+is kept inside the range, and changing `Min` or `Max` moves `Value` into the
+new range. Out-of-range values raise 380. `SmallChange` and `LargeChange`
+must be at least 1.
+
+Dragging the thumb, or pressing on the track, sets `Value` and raises
+`Change`, whose handler runs straight away. Setting `Value` in code raises
+`Change` too, as VB does.
+
+### Line
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Diagonal` | property | Boolean | R/W | R/W |
+
+A line runs from the control's top-left to its bottom-right corner, or from
+bottom-left to top-right when `Diagonal` is True. Its colour is `ForeColor`.
+`Width` and `Height` set its length, so resizing a Line from code moves it.
+
+### Shape
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Shape` | property | Integer | R/W | R/W |
+| `FillStyle` | property | Integer | R/W | R/W |
+
+`Shape`: 0 rectangle, 1 square, 2 oval, 3 circle (a square or circle takes
+the shorter of the control's sides). `FillStyle`: 0 solid, 1 transparent
+(the default). Its outline and fill use `ForeColor`. Values outside these
+ranges raise 380.
+
+### VolumeListBox
+A list of the mounted volumes, as `/Volumes` shows them, sorted. It reads the
+list when the form loads. It works as a ListBox does (`List`, `ListCount`,
+`ListIndex`, `Text`, `Click`), but its items come from the disk, so `AddItem`
+and `RemoveItem` change the list only until the form is reloaded.
+
+### DirListBox
+A list of the sub-folders of `Path`, sorted, with hidden entries left out.
+
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Path` | property | String | R/W | R/W |
+
+`Path` is the folder listed. When it is empty, the first mounted volume is
+listed. Setting `Path` to something that isn't a folder raises 76 (Path not
+found) and leaves the list as it was. Setting `Path` lists that folder and
+raises `Change`. Pair it with a VolumeListBox by setting `Path` to
+`"/Volumes/" & Volume1.Text` in the volume's `Click`.
+
+### FileListBox
+A list of the regular files in `Path` whose names match `Pattern`, sorted,
+with hidden files and folders left out.
+
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Path` | property | String | R/W | R/W |
+| `Pattern` | property | String | R/W | R/W |
+| `FileName` | property | String | R | — |
+
+`Pattern` is one or more patterns separated by `;`, such as `*.bas;*.oxproj`.
+Each is `*.ext` (names ending in `ext`) or an exact name, ignoring case. An
+empty pattern lists every file. Setting `Path` or `Pattern` reloads the list.
+A `Path` that isn't a folder raises 76.
+
+`FileName` is the selected file's full path (`Path` and the file's name), or
+an empty string when nothing is selected. The same pattern rule is what the
+file dialogs use (see `OpenFileDialog` in the README).
+
 ### Form
 Reached as `Me` or by its own name (`Form1.Caption`).
 
@@ -297,6 +382,12 @@ reference, as in VB: a handler may set `KeyAscii`, `KeyCode` or `Cancel`.
 | Frame | `Click`, `DblClick`, `Mouse*` |
 | Image | `Click`, `DblClick`, `Mouse*` |
 | ListBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Scroll` |
+| VolumeListBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
+| DirListBox | `Change`, `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
+| FileListBox | `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
+| HScrollBar | `Change`, `GotFocus`, `LostFocus`, `Mouse*` |
+| VScrollBar | `Change`, `GotFocus`, `LostFocus`, `Mouse*` |
+| Line, Shape | `Mouse*` |
 | ComboBox | `Change`, `Click`, `DblClick`, `DropDown`, `GotFocus`, `Key*`, `LostFocus`, `Scroll` |
 | PictureBox | `Change`, `Click`, `DblClick`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*`, `Paint`, `Resize` |
 | CheckBox, OptionButton | `Click`, `GotFocus`, `Key*`, `LostFocus`, `Mouse*` |
@@ -374,7 +465,8 @@ an element that doesn't exist 340; `Load` of something that isn't an array
 | 343 | Not an array (`Label1(0)`, `Cmd.Caption` on an array, `Index` of a plain control, `Load Label1(1)`) |
 | 360 | `Load` of an array element that is loaded already |
 | 362 | `Unload` of an array element placed in the designer |
-| 380 | Invalid property value (size/colour/`Value`/`Style`/`Interval`/`TabIndex`/`MousePointer`/`SelStart` out of range, a `Container` that can't hold the control) |
+| 76 | `Path` of a DirListBox or FileListBox that isn't a folder |
+| 380 | Invalid property value (size/colour/`Value`/`Min`/`Max`/`SmallChange`/`Style`/`Interval`/`TabIndex`/`MousePointer`/`SelStart`/`Shape`/`FillStyle` out of range, a `Container` that can't hold the control) |
 | 381 | Invalid list index |
 | 382 | Read-only property assigned (`ListBox.Text`; `MultiLine`, `ScrollBars` and `MultiSelect` at run time) |
 | 424 | Unknown object |
@@ -384,10 +476,12 @@ an element that doesn't exist 340; `Load` of something that isn't an array
 ## Not supported yet
 
 Drawing on the form itself, a Frame or an Image; `DrawWidth`, `DrawStyle`,
-`FillColor`, `FillStyle`, `ScaleMode` and `Point()`; `Print` onto a
+`FillColor`, `ScaleMode` and `Point()`; `Print` onto a
 PictureBox. Checkbox-style lists (`ListBox.Style` 1), `Sorted`,
 `ItemData`, `TopIndex`, `ListBox.Columns`. `DragDrop`/`OLEDrag`. Animated
 or `.cur` cursors (a `MouseIcon` is a still image). On a platform other
 than macOS the waiting cursor and `MouseIcon` show the arrow and the
-pointing hand.
+pointing hand. Shapes are not clamped to the form, so a Shape or Line sized
+past the form's edge is drawn past it. `FileListBox.Pattern` raises no
+`Change`, and `FileName` can't be set. Choosing a file doesn't open it.
 
