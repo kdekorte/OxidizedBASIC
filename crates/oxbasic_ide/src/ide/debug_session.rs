@@ -3,7 +3,7 @@
 //! IDE over channels — pause/step/continue commands in, output and
 //! pause notifications out.
 
-use oxbasic_runtime::{DebugAction, Interpreter, Output, PausedInfo};
+use oxbasic_runtime::{DebugAction, Interpreter, ObjectHost, Output, PausedInfo};
 use oxbasic_ui::host::{FormSnapshot, UserEdit};
 use oxbasic_ui::project_host::{handler_for, FormCommand, ProjectHost};
 use oxbasic_ui::FormSpec;
@@ -106,6 +106,13 @@ pub struct KeyInput {
 pub enum DebugEvent {
     Paused(PausedInfo),
     Output(String),
+    /// The program calls `OpenFileDialog` / `SaveFileDialog`: show the native
+    /// picker and send the chosen path (or `None`) on `reply`.
+    ChooseFile {
+        filter: String,
+        save: bool,
+        reply: Sender<Option<String>>,
+    },
     /// The program changed a form (`Label1.Caption = "x"`, `AddItem`...);
     /// `FormSnapshot::form_index` says which.
     Form(FormSnapshot),
@@ -238,6 +245,17 @@ impl Output for ChannelOutput {
     fn write(&mut self, s: &str) {
         let _ = self.tx.send(DebugEvent::Output(s.to_string()));
     }
+    /// Ask the IDE (or the packaged app) for a file: the UI shows the native
+    /// picker and answers on `reply`. The program waits for that answer.
+    fn choose_file(&mut self, filter: &str, save: bool) -> Option<String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel::<Option<String>>();
+        let _ = self.tx.send(DebugEvent::ChooseFile {
+            filter: filter.to_string(),
+            save,
+            reply: reply_tx,
+        });
+        reply_rx.recv().ok().flatten()
+    }
 }
 
 type Host = Rc<RefCell<ProjectHost>>;
@@ -255,6 +273,15 @@ fn publish(host: &Option<Host>, tx: &Sender<DebugEvent>) {
 fn apply_edit(host: &Option<Host>, form: usize, edit: UserEdit) {
     if let Some(h) = host {
         h.borrow_mut().apply_edit(form, edit);
+    }
+}
+
+/// The events the last user edit raised on the program's copy of the forms
+/// (a scrollbar's `Change`), taken so they run once.
+fn take_edit_raised(host: &Option<Host>) -> Vec<oxbasic_runtime::RaisedEvent> {
+    match host {
+        Some(h) => h.borrow_mut().take_raised(),
+        None => Vec::new(),
     }
 }
 
@@ -764,7 +791,22 @@ fn serve(
                     }
                 }
             }
-            Ok(DebugCommand::Edit(form, e)) => apply_edit(host, form, e),
+            Ok(DebugCommand::Edit(form, e)) => {
+                // the control the edit is for, so its event is raised on it
+                let control = match &e {
+                    UserEdit::Scroll { control, .. } | UserEdit::Value { control, .. } => {
+                        Some(*control)
+                    }
+                    _ => None,
+                };
+                apply_edit(host, form, e);
+                // a user's edit can raise events (a scrollbar's Change):
+                // run their handlers now, as a key's are run
+                for ev in take_edit_raised(host) {
+                    let event = ev.handler.rsplit('_').next().unwrap_or("").to_string();
+                    let _ = s.raise(form, control, &event, ev.args);
+                }
+            }
             Ok(DebugCommand::Close(form)) => s.close(form),
             // the window is already gone: the form is unloaded without
             // asking (its handlers can't keep a window that isn't there)
@@ -909,7 +951,8 @@ mod tests {
                 | Ok(DebugEvent::FormClosed(_))
                 | Ok(DebugEvent::CloseRefused(_))
                 | Ok(DebugEvent::KeyResult { .. })
-                | Ok(DebugEvent::Handlers(_)) => {}
+                | Ok(DebugEvent::Handlers(_))
+                | Ok(DebugEvent::ChooseFile { .. }) => {}
                 Err(_) => {}
             }
         }
@@ -1056,6 +1099,7 @@ mod tests {
             match self {
                 DebugEvent::Paused(_) => "Paused",
                 DebugEvent::Output(_) => "Output",
+                DebugEvent::ChooseFile { .. } => "ChooseFile",
                 DebugEvent::Form(_) => "Form",
                 DebugEvent::FormShown(_) => "FormShown",
                 DebugEvent::FormHidden(_) => "FormHidden",

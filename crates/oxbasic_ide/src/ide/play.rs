@@ -12,6 +12,8 @@ use super::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+gpui::actions!(play, [AboutApp, QuitApp]);
+
 /// The run-only app's state: the running session and the form windows it has
 /// opened, by form index.
 pub(super) struct PlayApp {
@@ -69,6 +71,31 @@ pub fn run_play(file: &std::path::Path) {
         }
     };
     Application::new().run(move |cx: &mut App| {
+        // the app's menu bar: About and Quit, as any Mac app has
+        cx.on_action(|_: &AboutApp, cx| {
+            let version = env!("CARGO_PKG_VERSION");
+            let window = cx.active_window().or_else(|| cx.windows().into_iter().next());
+            if let Some(window) = window {
+                let _ = window.update(cx, |_, win, cx| {
+                    let _ = win.prompt(
+                        gpui::PromptLevel::Info,
+                        &format!("OxidizedBASIC {}", version),
+                        Some("A Rust-native classic BASIC suite."),
+                        &["OK"],
+                        cx,
+                    );
+                });
+            }
+        });
+        cx.on_action(|_: &QuitApp, cx| cx.quit());
+        cx.set_menus(vec![gpui::Menu {
+            name: "App".into(),
+            items: vec![
+                gpui::MenuItem::action("About", AboutApp),
+                gpui::MenuItem::separator(),
+                gpui::MenuItem::action("Quit", QuitApp),
+            ],
+        }]);
         let app = Rc::new(RefCell::new(app));
         // poll the program's events and act on them, as the IDE does
         cx.spawn(async move |cx| loop {
@@ -112,6 +139,11 @@ pub fn run_play(file: &std::path::Path) {
                 }
             }
             DebugEvent::Output(text) => eprint!("{}", text),
+            DebugEvent::ChooseFile {
+                filter,
+                save,
+                reply,
+            } => super::choose_file::show_file_dialog(filter, save, reply, cx),
             DebugEvent::Failed(msg) => {
                 eprintln!("oxbasic play: {}", msg);
                 finish(app, cx);

@@ -432,7 +432,7 @@ impl Render for FormRunner {
             .on_mouse_move(cx.listener(
                 |this: &mut FormRunner, ev: &gpui::MouseMoveEvent, win, cx| {
                     this.mouse_move(ev);
-                    if this.drag_selection(ev.position, win) {
+                    if this.drag_selection(ev.position, win) || this.drag_scroll(ev.position, win) {
                         cx.notify();
                     }
                 },
@@ -440,6 +440,8 @@ impl Render for FormRunner {
             .capture_any_mouse_up(cx.listener(
                 |this: &mut FormRunner, ev: &gpui::MouseUpEvent, _w, cx| {
                     this.text_drag = None;
+                    this.scroll_drag = None;
+                    this.scroll_start = None;
                     this.release(ev);
                     cx.notify();
                 },
@@ -554,6 +556,12 @@ impl FormRunner {
         if left {
             self.act_on_press(idx, part);
         }
+        // a press on a scrollbar starts a drag from the value it has: each
+        // move adds the pointer's travel, so the window's offset cancels
+        if left && self.form.controls[idx].kind.is_scroll() && self.form.controls[idx].enabled {
+            self.scroll_drag = Some(idx);
+            self.scroll_start = Some((ev.position, self.state[idx].value));
+        }
         // a click in a text field puts the caret under the pointer (measured
         // in the field's font); Shift-click selects up to there, a double
         // click selects the word, a triple click the whole line or text; the
@@ -618,6 +626,43 @@ impl FormRunner {
 
     /// The pointer moved with the button held in a text field: the selection
     /// grows to the character under it. Returns whether it changed.
+    /// Set the scrollbar being dragged from the pointer's movement along its
+    /// track. A press on the thumb or track starts the drag at the value it
+    /// had; each move adds the pointer's travel, scaled to the track's length
+    /// and the range. Both points are window positions, so the window's own
+    /// offset cancels out. Tells the program only when the value changes.
+    pub(super) fn drag_scroll(&mut self, pos: gpui::Point<gpui::Pixels>, _win: &Window) -> bool {
+        let Some(idx) = self.scroll_drag else {
+            return false;
+        };
+        let Some(c) = self.form.controls.get(idx).cloned() else {
+            self.scroll_drag = None;
+            return false;
+        };
+        let Some(start) = self.scroll_start else {
+            return false;
+        };
+        let horizontal = c.kind == ControlKind::HScrollBar;
+        let (travel, length) = if horizontal {
+            (f32::from(pos.x) - f32::from(start.0.x), c.rect.width)
+        } else {
+            (f32::from(pos.y) - f32::from(start.0.y), c.rect.height)
+        };
+        let range = (c.scroll_max - c.scroll_min) as f32;
+        let value = (start.1 as f32 + travel / length.max(1.0) * range)
+            .round()
+            .clamp(c.scroll_min as f32, c.scroll_max as f32) as i32;
+        if self.state[idx].value == value {
+            return false;
+        }
+        self.state[idx].value = value;
+        self.tell(UserEdit::Scroll {
+            control: idx,
+            value,
+        });
+        true
+    }
+
     pub(super) fn drag_selection(&mut self, pos: gpui::Point<gpui::Pixels>, win: &Window) -> bool {
         let Some(idx) = self.text_drag else {
             return false;

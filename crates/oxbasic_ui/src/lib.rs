@@ -19,6 +19,11 @@
 //!   from GPUI input/timer events.
 
 mod form;
+
+#[cfg(test)]
+mod dir_tests;
+#[cfg(test)]
+mod file_tests;
 #[cfg(feature = "gpui")]
 pub mod gpui_backend;
 #[cfg(feature = "gpui")]

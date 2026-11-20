@@ -50,9 +50,9 @@ mod tests {
     }
 
     #[test]
-    fn the_showcase_builds_a_two_form_program_with_form1_at_start() {
+    fn the_showcase_builds_a_multi_form_program_with_form1_at_start() {
         let (spec, program) = project_program(&example("showcase/showcase.oxproj")).expect("opens");
-        assert_eq!(spec.forms.len(), 2, "Form1 and frmAbout");
+        assert_eq!(spec.forms.len(), 4, "Form1, frmAbout, frmDrawing and frmFiles");
         assert_eq!(spec.startup, 0, "Form1 is the start-up form");
         assert!(!spec.bare);
         assert!(program.source.contains("cmdGreet_Click") || program.source.contains("Form1__"));

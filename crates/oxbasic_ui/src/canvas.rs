@@ -220,6 +220,62 @@ impl Canvas {
     }
 }
 
+/// The shape a `Line` or `Shape` control draws, in its own pixels (the
+/// control's `width` by `height`). A Line runs corner to corner, `diagonal`
+/// picking the other diagonal. A Shape is a rectangle (`shape_type` 0), a
+/// square (1, the shorter side), an oval (2) or a circle (3, the shorter
+/// side); `fill_style` 0 fills it solid, anything else leaves it outlined.
+pub fn control_shape(
+    kind: crate::ControlKind,
+    width: f32,
+    height: f32,
+    color: u32,
+    shape_type: u8,
+    fill_style: u8,
+    diagonal: bool,
+) -> Option<Shape> {
+    use crate::ControlKind;
+    let (w, h) = (width.max(0.0), height.max(0.0));
+    match kind {
+        ControlKind::Line => Some(if diagonal {
+            Shape::Line {
+                from: (0.0, h),
+                to: (w, 0.0),
+                color,
+            }
+        } else {
+            Shape::Line {
+                from: (0.0, 0.0),
+                to: (w, h),
+                color,
+            }
+        }),
+        ControlKind::Shape => {
+            let side = w.min(h);
+            let square = matches!(shape_type, 1 | 3);
+            let (rw, rh) = if square { (side, side) } else { (w, h) };
+            let (cx, cy) = (w / 2.0, h / 2.0);
+            match shape_type {
+                2 | 3 => Some(Shape::Ellipse {
+                    center: (cx, cy),
+                    radius: rw.max(rh) / 2.0,
+                    aspect: if rw == 0.0 { 1.0 } else { rh / rw },
+                    color,
+                    arc: None,
+                    spokes: (false, false),
+                }),
+                _ => Some(Shape::Rect {
+                    from: (cx - rw / 2.0, cy - rh / 2.0),
+                    to: (cx + rw / 2.0, cy + rh / 2.0),
+                    color,
+                    filled: fill_style == 0,
+                }),
+            }
+        }
+        _ => None,
+    }
+}
+
 /// The points of an ellipse (or arc of it) as a polyline for the window to
 /// stroke. Angles run counter-clockwise from 3 o'clock, as in VB. `aspect`
 /// is height over width, as in VB: under 1 the ellipse is wider than tall,
@@ -490,5 +546,83 @@ mod tests {
         let tall = ellipse_points((0.0, 0.0), 10.0, 2.0, None, (false, false));
         let right = tall.iter().map(|p| p.0).fold(f32::MIN, f32::max);
         assert!((right - 5.0).abs() < 0.2, "{}", right);
+    }
+
+    #[test]
+    fn a_line_runs_corner_to_corner_and_diagonal_the_other_way() {
+        use crate::ControlKind;
+        let plain = control_shape(ControlKind::Line, 100.0, 40.0, 0, 0, 1, false);
+        assert_eq!(
+            plain,
+            Some(Shape::Line {
+                from: (0.0, 0.0),
+                to: (100.0, 40.0),
+                color: 0
+            })
+        );
+        let slash = control_shape(ControlKind::Line, 100.0, 40.0, 0, 0, 1, true);
+        assert_eq!(
+            slash,
+            Some(Shape::Line {
+                from: (0.0, 40.0),
+                to: (100.0, 0.0),
+                color: 0
+            })
+        );
+    }
+
+    #[test]
+    fn a_shape_is_a_rectangle_square_oval_or_circle_filling_or_not() {
+        use crate::ControlKind;
+        // a rectangle filling 100 by 40, centred on (50, 20)
+        let rect = control_shape(ControlKind::Shape, 100.0, 40.0, 7, 0, 0, false);
+        assert_eq!(
+            rect,
+            Some(Shape::Rect {
+                from: (0.0, 0.0),
+                to: (100.0, 40.0),
+                color: 7,
+                filled: true
+            })
+        );
+        // a square takes the shorter side, and is outlined when FillStyle is 1
+        let square = control_shape(ControlKind::Shape, 100.0, 40.0, 7, 1, 1, false);
+        assert_eq!(
+            square,
+            Some(Shape::Rect {
+                from: (30.0, 0.0),
+                to: (70.0, 40.0),
+                color: 7,
+                filled: false
+            })
+        );
+        // an oval is an ellipse of the control's size: longer radius, aspect h/w
+        match control_shape(ControlKind::Shape, 100.0, 40.0, 7, 2, 1, false) {
+            Some(Shape::Ellipse {
+                center,
+                radius,
+                aspect,
+                ..
+            }) => {
+                assert_eq!(center, (50.0, 20.0));
+                assert!((radius - 50.0).abs() < 1e-4, "{}", radius);
+                assert!((aspect - 0.4).abs() < 1e-4, "{}", aspect);
+            }
+            other => panic!("expected an oval, got {:?}", other),
+        }
+        // a circle is round, at the shorter side's size
+        match control_shape(ControlKind::Shape, 100.0, 40.0, 7, 3, 1, false) {
+            Some(Shape::Ellipse { radius, aspect, .. }) => {
+                assert!((radius - 20.0).abs() < 1e-4, "{}", radius);
+                assert!((aspect - 1.0).abs() < 1e-4, "{}", aspect);
+            }
+            other => panic!("expected a circle, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn other_kinds_draw_no_figure() {
+        use crate::ControlKind;
+        assert_eq!(control_shape(ControlKind::Label, 10.0, 10.0, 0, 0, 1, false), None);
     }
 }

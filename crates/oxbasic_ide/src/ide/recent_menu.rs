@@ -67,5 +67,37 @@ pub(super) fn file_menu_bar(recent: &recent::RecentList) -> Vec<gpui::Menu> {
             name: "File".into(),
             items: file_menu(recent),
         },
+        gpui::Menu {
+            name: "Edit".into(),
+            items: vec![
+                gpui::MenuItem::action("Undo", EditUndo),
+                gpui::MenuItem::action("Redo", EditRedo),
+                gpui::MenuItem::separator(),
+                gpui::MenuItem::action("Cut", EditCut),
+                gpui::MenuItem::action("Copy", EditCopy),
+                gpui::MenuItem::action("Paste", EditPaste),
+                gpui::MenuItem::action("Select All", EditSelectAll),
+                gpui::MenuItem::separator(),
+                gpui::MenuItem::action("Find…", EditFind),
+                gpui::MenuItem::action("Replace…", EditReplace),
+                gpui::MenuItem::action("Find Next", EditFindNext),
+                gpui::MenuItem::action("Find Previous", EditFindPrevious),
+            ],
+        },
+        gpui::Menu {
+            name: "View".into(),
+            items: vec![
+                gpui::MenuItem::action("Code", ViewCode),
+                gpui::MenuItem::action("Object", ViewObject),
+            ],
+        },
+        gpui::Menu {
+            name: "Run".into(),
+            items: vec![
+                gpui::MenuItem::action("Run / Continue", RunProgram),
+                gpui::MenuItem::action("Step Over", StepProgram),
+                gpui::MenuItem::action("Stop", StopProgram),
+            ],
+        },
     ]
 }

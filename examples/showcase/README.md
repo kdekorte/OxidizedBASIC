@@ -20,6 +20,9 @@ Then press **Run** (⌘R). The project panel lists `Form1` (the start-up form),
 | **About…** | A second form: `frmAbout.Show`, writing to its controls, its own `Form_Load` |
 | About's **Hide** / **Close** | `Me.Hide` keeps the form's state; `Unload Me` drops it |
 | **Quit** | `End` finishes the whole program |
+| Drag the **width** and **height** scrollbars | HScrollBar / VScrollBar `Value` and `Change`; the Shape's and Line's `Width` and `Height` follow |
+| Pick a **volume**, then a **folder** | VolumeListBox `Text`, DirListBox `Path` (a `Change` when it moves) |
+| Pick a **file** in the list | FileListBox `Pattern` (`*.bas;*.oxproj`), `ListIndex`, and `FileName` (the full path) |
 
 `Module1.bas` holds `Plural` and `Describe`, which both forms can call.
 Each form's own handlers and `Dim` variables are private to it, so two forms can

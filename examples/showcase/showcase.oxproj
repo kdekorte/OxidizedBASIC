@@ -11,6 +11,16 @@
       "name": "frmAbout",
       "layout": "frmAbout.oxform",
       "code": "frmAbout.bas"
+    },
+    {
+      "name": "frmDrawing",
+      "layout": "frmDrawing.oxform",
+      "code": "frmDrawing.bas"
+    },
+    {
+      "name": "frmFiles",
+      "layout": "frmFiles.oxform",
+      "code": "frmFiles.bas"
     }
   ],
   "modules": [
@@ -18,5 +28,8 @@
       "name": "Module1",
       "code": "Module1.bas"
     }
-  ]
+  ],
+  "version": "1.0.0",
+  "icon": "",
+  "bundleId": ""
 }

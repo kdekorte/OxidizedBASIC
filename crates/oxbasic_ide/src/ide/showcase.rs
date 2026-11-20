@@ -39,7 +39,7 @@ fn items(name: &str, kind: ControlKind, rect: (f32, f32, f32, f32), list: &[&str
 /// Form1: one of each control, and the code that drives them.
 fn main_form() -> FormSpec {
     use ControlKind::*;
-    let mut f = FormSpec::new("Form1", "OxidizedBASIC Control Showcase", 620.0, 470.0);
+    let mut f = FormSpec::new("Form1", "OxidizedBASIC Control Showcase", 620.0, 480.0);
 
     // -- left column: text -------------------------------------------------
     let mut title = captioned(
@@ -202,6 +202,94 @@ fn main_form() -> FormSpec {
     let mut status = captioned("lblStatus", Label, "Ready", (16.0, 400.0, 590.0, 22.0));
     status.fore_color = Some(0x555555);
     f.control(status);
+    // the drawing and file browser each have their own form, opened from here
+    f.control(captioned("cmdDrawing", CommandButton, "Drawing…", (16.0, 430.0, 140.0, 30.0)));
+    f.control(captioned("cmdFiles", CommandButton, "Files…", (170.0, 430.0, 140.0, 30.0)));
+    f
+}
+
+/// frmDrawing: two scrollbars that set a shape's and a line's size, with a
+/// readout that follows the thumbs. Opened from Form1's "Drawing…" button.
+fn drawing_form() -> FormSpec {
+    use ControlKind::*;
+    let mut f = FormSpec::new("frmDrawing", "Scrollbars and Shape", 520.0, 360.0);
+    f.control(captioned(
+        "lblReadout",
+        Label,
+        "Drag a scrollbar.",
+        (20.0, 16.0, 480.0, 22.0),
+    ));
+    // the horizontal bar sets the shape's width; the vertical one its height
+    f.control(captioned(
+        "lblWidth",
+        Label,
+        "Width",
+        (20.0, 52.0, 120.0, 20.0),
+    ));
+    let mut across = control("hsbWidth", HScrollBar, (20.0, 74.0, 320.0, 17.0));
+    across.scroll_min = 20;
+    across.scroll_max = 300;
+    across.value = 100;
+    across.large_change = 20;
+    f.control(across);
+    f.control(captioned(
+        "lblHeight",
+        Label,
+        "Height",
+        (20.0, 104.0, 120.0, 20.0),
+    ));
+    let mut down = control("vsbHeight", VScrollBar, (20.0, 126.0, 17.0, 150.0));
+    down.scroll_min = 20;
+    down.scroll_max = 150;
+    down.value = 60;
+    down.large_change = 10;
+    f.control(down);
+    // the shape and the line sit to the right, clear of the scrollbars
+    let mut box_shape = control("shpBox", Shape, (200.0, 126.0, 100.0, 60.0));
+    box_shape.fore_color = Some(0x0A3D91);
+    f.control(box_shape);
+    let mut ruler = control("lneRule", Line, (200.0, 240.0, 240.0, 40.0));
+    ruler.fore_color = Some(0x555555);
+    f.control(ruler);
+    f
+}
+
+/// frmFiles: the file browser (volumes, folders, files) and the path of the
+/// file picked. Opened from Form1's "Files…" button.
+fn files_form() -> FormSpec {
+    use ControlKind::*;
+    let mut f = FormSpec::new("frmFiles", "Browse Files", 620.0, 360.0);
+    f.control(captioned(
+        "lblVolumes",
+        Label,
+        "Volumes",
+        (20.0, 16.0, 160.0, 20.0),
+    ));
+    f.control(control("volVolume", VolumeListBox, (20.0, 40.0, 160.0, 200.0)));
+    f.control(captioned(
+        "lblFolders",
+        Label,
+        "Folders",
+        (200.0, 16.0, 160.0, 20.0),
+    ));
+    let mut folders = control("dirFolder", DirListBox, (200.0, 40.0, 160.0, 200.0));
+    folders.path = "/Volumes".into();
+    f.control(folders);
+    f.control(captioned(
+        "lblFiles",
+        Label,
+        "Files (*.bas;*.oxproj)",
+        (380.0, 16.0, 220.0, 20.0),
+    ));
+    let mut files = control("filFile", FileListBox, (380.0, 40.0, 220.0, 200.0));
+    files.pattern = "*.bas;*.oxproj".into();
+    f.control(files);
+    f.control(captioned(
+        "lblChosen",
+        Label,
+        "Pick a file to see its full path.",
+        (20.0, 270.0, 580.0, 22.0),
+    ));
     f
 }
 
@@ -240,7 +328,12 @@ fn about_form() -> FormSpec {
 /// The showcase as a workspace: two forms and a module, with the code in
 /// `examples/showcase/*.bas`.
 pub fn showcase(code: impl Fn(&str) -> String) -> Workspace {
-    let mut forms = [("Form1", main_form()), ("frmAbout", about_form())];
+    let mut forms = [
+        ("Form1", main_form()),
+        ("frmAbout", about_form()),
+        ("frmDrawing", drawing_form()),
+        ("frmFiles", files_form()),
+    ];
     let mut docs = Vec::new();
     for (name, form) in forms.iter_mut() {
         docs.push(Doc::saved(
@@ -342,6 +435,13 @@ mod tests {
             ControlKind::Timer,
             ControlKind::CheckBox,
             ControlKind::OptionButton,
+            ControlKind::HScrollBar,
+            ControlKind::VScrollBar,
+            ControlKind::Shape,
+            ControlKind::Line,
+            ControlKind::VolumeListBox,
+            ControlKind::DirListBox,
+            ControlKind::FileListBox,
         ];
         for k in want {
             assert!(kinds.contains(&k), "the showcase has no {:?}", k);

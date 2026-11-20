@@ -8,6 +8,8 @@
 mod fastmap;
 mod stdlib;
 
+pub use stdlib::pattern_matches;
+
 use fastmap::{Lowered, NameMap};
 use oxbasic_ast::*;
 use std::cell::{Cell, RefCell};
@@ -103,6 +105,12 @@ pub struct VbError {
 pub trait Output {
     fn write(&mut self, s: &str);
     fn read_line(&mut self) -> Option<String> {
+        None
+    }
+    /// The native file dialog behind `OpenFileDialog` / `SaveFileDialog`:
+    /// the path chosen, or `None` when cancelled (or no dialog is shown).
+    /// `filter` is a semicolon list of patterns such as `*.bas;*.oxproj`.
+    fn choose_file(&mut self, _filter: &str, _save: bool) -> Option<String> {
         None
     }
 }

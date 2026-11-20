@@ -8,7 +8,7 @@
 //!
 //! No GUI is needed here, so this module is usable and tested headless.
 
-use crate::{ControlKind, ControlSpec, FormSpec};
+use crate::{form::{list_items, volume_names}, ControlKind, ControlSpec, FormSpec};
 use oxbasic_runtime::{ExecResult, ObjectHost, ObjectRef, RaisedEvent, Variant, VbError};
 
 /// A control's run-time state: the text of a TextBox or ComboBox, the
@@ -355,6 +355,8 @@ impl FormSnapshot {
 /// Something the user did in the live window that the program must see.
 #[derive(Clone, Debug)]
 pub enum UserEdit {
+    /// A scrollbar dragged to `value` (clamped to its `Min`..`Max`).
+    Scroll { control: usize, value: i32 },
     /// The field's whole text after a keystroke.
     Text { control: usize, text: String },
     /// The user picked row `index` of a list or combo box.
@@ -431,6 +433,7 @@ pub(crate) struct Watched {
     list_index: Option<usize>,
     value: i32,
     size: (f32, f32),
+    path: String,
 }
 
 /// The live form, owned by the program's side. The interpreter reads and
@@ -456,7 +459,23 @@ pub struct FormHost {
 }
 
 impl FormHost {
-    pub fn new(form: FormSpec) -> FormHost {
+    pub fn new(mut form: FormSpec) -> FormHost {
+        // a volume list shows the disks mounted now; a directory list the
+        // folders in its Path, a file list the files in it that match its
+        // Pattern (the first volume when Path is empty)
+        let volumes = volume_names();
+        for c in form.controls.iter_mut() {
+            if c.kind == ControlKind::VolumeListBox {
+                c.items = volumes.clone();
+            } else if c.kind == ControlKind::DirListBox || c.kind == ControlKind::FileListBox {
+                let path = if c.path.is_empty() {
+                    volumes.first().map(|v| format!("/Volumes/{}", v)).unwrap_or_default()
+                } else {
+                    c.path.clone()
+                };
+                c.items = list_items(c.kind, &path, &c.pattern);
+            }
+        }
         let state = form.controls.iter().map(ControlState::new).collect();
         let touched = vec![false; form.controls.len()];
         let designed = form
@@ -486,6 +505,7 @@ impl FormHost {
             list_index: s.list_index,
             value: s.value,
             size: (c.rect.width, c.rect.height),
+            path: c.path.clone(),
         }
     }
 
@@ -526,7 +546,13 @@ impl FormHost {
                 }
             }
             ControlKind::ListBox if after.list_index != before.list_index => self.raise(i, "Click"),
+            // a DirListBox's Path changing lists another folder: VB's Change
+            ControlKind::DirListBox if after.path != before.path => self.raise(i, "Change"),
             ControlKind::CheckBox if after.value != before.value => self.raise(i, "Click"),
+            // a scrollbar's Value changing raises Change, as VB does
+            ControlKind::HScrollBar | ControlKind::VScrollBar if after.value != before.value => {
+                self.raise(i, "Change")
+            }
             // setting an option button True clicks it; the others it clears
             // raise nothing
             ControlKind::OptionButton if after.value != 0 && before.value == 0 => {
@@ -567,6 +593,11 @@ impl FormHost {
     }
 
     /// What the program changed since the last call, else `None`.
+    /// The handler names queued by events raised so far (`Dir1_Change`...).
+    pub(crate) fn raised_handlers(&self) -> Vec<String> {
+        self.raised.iter().map(|e| e.handler.clone()).collect()
+    }
+
     pub fn take_changes(&mut self) -> Option<FormSnapshot> {
         if !std::mem::take(&mut self.changed) {
             return None;
@@ -635,6 +666,22 @@ impl FormHost {
                     set_value(&self.form, &mut self.state, control, value);
                 }
             }
+            // a scrollbar dragged to a new Value, kept within its range
+            UserEdit::Scroll { control, value } => {
+                if control < self.state.len() && self.form.controls[control].kind.is_scroll() {
+                    let before = self.watched(control);
+                    let c = &self.form.controls[control];
+                    let v = value.clamp(c.scroll_min, c.scroll_max);
+                    if self.state[control].value != v {
+                        self.state[control].value = v;
+                        self.changed = true;
+                        self.touched[control] = true;
+                        // the drag is a change of Value, so the program's
+                        // Change handler runs, as it does for a set in code
+                        self.raise_changes(control, &before);
+                    }
+                }
+            }
             UserEdit::FormSize { width, height } => {
                 if width > 0.0 && height > 0.0 {
                     self.form.width = width;
@@ -685,7 +732,7 @@ impl FormHost {
     fn get_control(&self, i: usize, p: &str, args: &[Variant]) -> ExecResult<Variant> {
         let c = &self.form.controls[i];
         let s = &self.state[i];
-        let is_list = matches!(c.kind, ControlKind::ListBox | ControlKind::ComboBox);
+        let is_list = matches!(c.kind, ControlKind::ListBox | ControlKind::ComboBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox);
         if let Some(fp) = p.strip_prefix("font.") {
             return self.get_font(i, fp);
         }
@@ -693,7 +740,7 @@ impl FormHost {
             "caption" if c.kind.has_caption() => Variant::String(c.caption.clone()),
             "text" if c.kind.has_text() => Variant::String(s.text.clone()),
             // a ListBox's Text is its selected row
-            "text" if c.kind == ControlKind::ListBox => Variant::String(
+            "text" if is_list && c.kind != ControlKind::ComboBox => Variant::String(
                 s.list_index
                     .and_then(|li| c.items.get(li))
                     .cloned()
@@ -747,7 +794,36 @@ impl FormHost {
             "selcount" if c.kind == ControlKind::ListBox => Variant::Long(s.selected.len() as i32),
             "enabled" => Variant::Boolean(c.enabled),
             "interval" if c.kind == ControlKind::Timer => Variant::Long(c.interval_ms as i32),
+            // a scrollbar's range and its Value (kept within Min..Max)
+            "min" if c.kind.is_scroll() => Variant::Long(c.scroll_min),
+            "max" if c.kind.is_scroll() => Variant::Long(c.scroll_max),
+            "smallchange" if c.kind.is_scroll() => Variant::Long(c.small_change),
+            "largechange" if c.kind.is_scroll() => Variant::Long(c.large_change),
+            "value" if c.kind.is_scroll() => Variant::Long(s.value),
             "style" if c.kind == ControlKind::ComboBox => Variant::Integer(c.style as i16),
+            "shape" if c.kind == ControlKind::Shape => Variant::Integer(c.shape_type as i16),
+            "fillstyle" if c.kind == ControlKind::Shape => Variant::Integer(c.fill_style as i16),
+            "diagonal" if c.kind == ControlKind::Line => Variant::Boolean(c.diagonal),
+            "path" if matches!(c.kind, ControlKind::DirListBox | ControlKind::FileListBox) => {
+                Variant::String(c.path.clone())
+            }
+            "pattern" if c.kind == ControlKind::FileListBox => Variant::String(c.pattern.clone()),
+            // FileName: the selected file's path (Path and the file's name); "" when none is selected
+            "filename" if c.kind == ControlKind::FileListBox => Variant::String(
+                s.list_index
+                    .and_then(|n| c.items.get(n))
+                    .map(|name| {
+                        if c.path.is_empty() {
+                            name.clone()
+                        } else {
+                            std::path::Path::new(&c.path)
+                                .join(name)
+                                .to_string_lossy()
+                                .into_owned()
+                        }
+                    })
+                    .unwrap_or_default(),
+            ),
             // a CheckBox's Value is 0/1/2; an OptionButton's is a Boolean
             "value" if c.kind == ControlKind::CheckBox => Variant::Integer(s.value as i16),
             "value" if c.kind == ControlKind::OptionButton => Variant::Boolean(s.value != 0),
@@ -856,7 +932,7 @@ impl FormHost {
         value: &Variant,
     ) -> ExecResult<()> {
         let kind = self.form.controls[i].kind;
-        let is_list = matches!(kind, ControlKind::ListBox | ControlKind::ComboBox);
+        let is_list = matches!(kind, ControlKind::ListBox | ControlKind::ComboBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox);
         match p {
             "caption" if kind.has_caption() => {
                 self.form.controls[i].caption = value.as_string()?;
@@ -972,7 +1048,7 @@ impl FormHost {
                 self.auto_size_to_picture(i, base.as_deref());
             }
             "container" => return self.set_container(i, value),
-            "text" if kind == ControlKind::ListBox => return err(382, "Property is read-only"),
+            "text" if is_list && kind != ControlKind::ComboBox => return err(382, "Property is read-only"),
             "left" => self.form.controls[i].rect.left = coord(value)?,
             "top" => self.form.controls[i].rect.top = coord(value)?,
             "width" | "height" => {
@@ -1003,12 +1079,93 @@ impl FormHost {
                 }
                 self.form.controls[i].interval_ms = n as u64;
             }
+            // a scrollbar's range: Min must stay below Max; Value is kept
+            // within the range, as VB does
+            "min" if kind.is_scroll() => {
+                let n = value.as_i64()? as i32;
+                let c = &mut self.form.controls[i];
+                if n >= c.scroll_max {
+                    return err(380, "Invalid property value");
+                }
+                c.scroll_min = n;
+                self.state[i].value = self.state[i].value.clamp(n, c.scroll_max);
+            }
+            "max" if kind.is_scroll() => {
+                let n = value.as_i64()? as i32;
+                let c = &mut self.form.controls[i];
+                if n <= c.scroll_min {
+                    return err(380, "Invalid property value");
+                }
+                c.scroll_max = n;
+                self.state[i].value = self.state[i].value.clamp(c.scroll_min, n);
+            }
+            "smallchange" if kind.is_scroll() => {
+                let n = value.as_i64()? as i32;
+                if n < 1 {
+                    return err(380, "Invalid property value");
+                }
+                self.form.controls[i].small_change = n;
+            }
+            "largechange" if kind.is_scroll() => {
+                let n = value.as_i64()? as i32;
+                if n < 1 {
+                    return err(380, "Invalid property value");
+                }
+                self.form.controls[i].large_change = n;
+            }
+            "value" if kind.is_scroll() => {
+                let n = value.as_i64()? as i32;
+                let c = &self.form.controls[i];
+                if n < c.scroll_min || n > c.scroll_max {
+                    return err(380, "Invalid property value");
+                }
+                self.state[i].value = n;
+            }
             "style" if kind == ControlKind::ComboBox => {
                 let n = value.as_i64()?;
                 if !(0..=2).contains(&n) {
                     return err(380, "Invalid property value");
                 }
                 self.form.controls[i].style = n as u8;
+            }
+            // Shape: 0 rectangle, 1 square, 2 oval, 3 circle; FillStyle 0 solid, 1 transparent
+            "shape" if kind == ControlKind::Shape => {
+                let n = value.as_i64()?;
+                if !(0..=3).contains(&n) {
+                    return err(380, "Invalid property value");
+                }
+                self.form.controls[i].shape_type = n as u8;
+            }
+            "fillstyle" if kind == ControlKind::Shape => {
+                let n = value.as_i64()?;
+                if !(0..=1).contains(&n) {
+                    return err(380, "Invalid property value");
+                }
+                self.form.controls[i].fill_style = n as u8;
+            }
+            "diagonal" if kind == ControlKind::Line => {
+                self.form.controls[i].diagonal = value.as_bool()?;
+            }
+            // DirListBox / FileListBox Path: the folder listed. A path that
+            // isn't a folder is VB's error 76; setting it reloads the list.
+            "path" if matches!(kind, ControlKind::DirListBox | ControlKind::FileListBox) => {
+                let path = value.as_string()?;
+                if !std::path::Path::new(&path).is_dir() {
+                    return err(76, "Path not found");
+                }
+                let c = &mut self.form.controls[i];
+                c.path = path.clone();
+                c.items = list_items(kind, &path, &c.pattern.clone());
+                self.state[i].list_index = None;
+            }
+            // FileListBox.Pattern: which files it lists; the list is reloaded
+            "pattern" if kind == ControlKind::FileListBox => {
+                let pattern = value.as_string()?;
+                let c = &mut self.form.controls[i];
+                c.pattern = pattern.clone();
+                let path = if c.path.is_empty() { String::new() } else { c.path.clone() };
+                c.items = list_items(kind, &path, &pattern);
+                self.state[i].list_index = None;
             }
             // CheckBox: 0, 1 or 2 (grayed). OptionButton: True/False; a
             // True clears the form's other OptionButtons, as a click does.
@@ -1102,11 +1259,19 @@ pub const DEFAULT_FONT_NAME: &str = "MS Sans Serif";
 /// The text colour a control has unless `ForeColor` is set.
 pub const DEFAULT_FORE: u32 = 0x1D1D1F;
 
+/// Whether `kind` is a scrollbar (`Min`, `Max`, `Value`, `SmallChange`...).
+fn is_scroll(kind: ControlKind) -> bool {
+    kind.is_scroll()
+}
+
 /// The background a kind of control has unless `BackColor` is set.
 fn default_back(kind: ControlKind) -> u32 {
     match kind {
         ControlKind::TextBox
         | ControlKind::ListBox
+        | ControlKind::VolumeListBox
+        | ControlKind::DirListBox
+        | ControlKind::FileListBox
         | ControlKind::ComboBox
         | ControlKind::PictureBox => 0xFFFFFF,
         ControlKind::CommandButton => 0xF6F6F8,
@@ -1299,7 +1464,7 @@ impl ObjectHost for FormHost {
             Target::Control(i)
                 if matches!(
                     self.form.controls[i].kind,
-                    ControlKind::ListBox | ControlKind::ComboBox
+                    ControlKind::ListBox | ControlKind::ComboBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox
                 ) =>
             {
                 i
@@ -1378,13 +1543,12 @@ impl ObjectHost for FormHost {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::Rect;
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    /// Output sink for the test programs.
     struct Buf(String);
 
     impl oxbasic_runtime::Output for Buf {
@@ -1446,7 +1610,7 @@ mod tests {
 
     /// Run `src` with `host` as its object host; returns the printed
     /// output, or the error text.
-    pub(super) fn run(src: &str, host: &Rc<RefCell<FormHost>>) -> Result<String, String> {
+    pub(crate) fn run(src: &str, host: &Rc<RefCell<FormHost>>) -> Result<String, String> {
         let prog = oxbasic_parser::parse(src)?;
         let mut out = Buf(String::new());
         {
@@ -2438,5 +2602,168 @@ mod mouse_icon_member {
         f.controls[0].mouse_icon = "a.png".into();
         let back = crate::FormSpec::from_oxform(&f.to_oxform()).unwrap();
         assert_eq!(back.controls[0].mouse_icon, "a.png");
+    }
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+    use crate::Rect;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Form1 with HScroll1 (0..100) and VScroll1 (10..20, Value 10).
+    fn host() -> Rc<RefCell<FormHost>> {
+        let mut f = FormSpec::new("Form1", "Scroll", 400.0, 300.0);
+        f.control(ControlSpec::new(
+            "HScroll1",
+            ControlKind::HScrollBar,
+            Rect::new(0.0, 0.0, 120.0, 17.0),
+        ));
+        f.controls[0].scroll_max = 100;
+        let mut v = ControlSpec::new("VScroll1", ControlKind::VScrollBar, Rect::new(0.0, 30.0, 17.0, 120.0));
+        v.scroll_min = 10;
+        v.scroll_max = 20;
+        v.value = 10;
+        f.control(v);
+        Rc::new(RefCell::new(FormHost::new(f)))
+    }
+
+    #[test]
+    fn a_scrollbar_has_vb_defaults_and_its_range_is_settable() {
+        let h = host();
+        let out = tests::run(
+            "Print HScroll1.Min; HScroll1.Max; HScroll1.SmallChange; HScroll1.LargeChange\n\
+             HScroll1.Max = 50\nHScroll1.Value = 25\nPrint HScroll1.Value; HScroll1.Max\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, " 0  100  1  1 \n 25  50 \n");
+    }
+
+    #[test]
+    fn value_outside_min_and_max_is_an_error_380() {
+        let h = host();
+        for src in [
+            "VScroll1.Value = 21",
+            "VScroll1.Value = 9",
+            "VScroll1.Min = 20",
+            "VScroll1.Max = 10",
+            "VScroll1.SmallChange = 0",
+        ] {
+            assert!(tests::run(src, &h).unwrap_err().contains("380"), "{}", src);
+        }
+    }
+
+    #[test]
+    fn narrowing_the_range_keeps_value_inside_it() {
+        let h = host();
+        tests::run("VScroll1.Max = 15\nPrint VScroll1.Value\n", &h).unwrap();
+        let out = tests::run("VScroll1.Min = 12\nPrint VScroll1.Value\n", &h).unwrap();
+        assert_eq!(out, " 12 \n", "the Min change moved Value up to 12");
+    }
+
+    #[test]
+    fn a_drag_edit_is_clamped_to_the_range_and_reported() {
+        let h = host();
+        h.borrow_mut().apply_edit(UserEdit::Scroll {
+            control: 0,
+            value: 500,
+        });
+        assert_eq!(h.borrow().state[0].value, 100, "clamped to Max");
+        h.borrow_mut().apply_edit(UserEdit::Scroll {
+            control: 1,
+            value: 99,
+        });
+        assert_eq!(h.borrow().state[1].value, 20, "99 is clamped to Max 20");
+        let out = tests::run("Print HScroll1.Value; VScroll1.Value\n", &h).unwrap();
+        assert_eq!(out, " 100  20 \n", "{}", out);
+    }
+}
+
+#[cfg(test)]
+mod volume_tests {
+    use super::*;
+    use crate::Rect;
+
+    #[test]
+    fn a_volume_list_holds_the_mounted_volumes_in_order() {
+        let mut f = FormSpec::new("Form1", "Volumes", 400.0, 300.0);
+        f.control(ControlSpec::new(
+            "Volume1",
+            ControlKind::VolumeListBox,
+            Rect::new(0.0, 0.0, 120.0, 84.0),
+        ));
+        let h = FormHost::new(f);
+        let items = &h.form.controls[0].items;
+        assert_eq!(items, &volume_names(), "the list is the volumes now");
+        assert!(items.windows(2).all(|w| w[0] <= w[1]), "sorted");
+        assert!(items.iter().all(|n| !n.starts_with('.')), "no hidden entries");
+    }
+
+    #[test]
+    fn a_volume_list_is_read_by_basic_like_any_list() {
+        let mut f = FormSpec::new("Form1", "Volumes", 400.0, 300.0);
+        f.control(ControlSpec::new(
+            "Volume1",
+            ControlKind::VolumeListBox,
+            Rect::new(0.0, 0.0, 120.0, 84.0),
+        ));
+        let h = std::rc::Rc::new(std::cell::RefCell::new(FormHost::new(f)));
+        let out = tests::run("Print Volume1.ListCount\n", &h).unwrap();
+        assert_eq!(out, format!(" {} \n", volume_names().len()));
+    }
+}
+
+#[cfg(test)]
+mod figure_tests {
+    use super::*;
+    use crate::Rect;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    fn host() -> Rc<RefCell<FormHost>> {
+        let mut f = FormSpec::new("Form1", "Figures", 400.0, 300.0);
+        f.control(ControlSpec::new(
+            "Shape1",
+            ControlKind::Shape,
+            Rect::new(0.0, 0.0, 100.0, 60.0),
+        ));
+        f.control(ControlSpec::new(
+            "Line1",
+            ControlKind::Line,
+            Rect::new(0.0, 80.0, 120.0, 40.0),
+        ));
+        Rc::new(RefCell::new(FormHost::new(f)))
+    }
+
+    #[test]
+    fn a_shape_and_its_fill_style_are_settable_with_vb_defaults() {
+        let h = host();
+        let out = tests::run(
+            "Print Shape1.Shape; Shape1.FillStyle\nShape1.Shape = 3\nShape1.FillStyle = 0\nPrint Shape1.Shape; Shape1.FillStyle\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, " 0  1 \n 3  0 \n");
+    }
+
+    #[test]
+    fn an_out_of_range_shape_or_fill_style_is_an_error_380() {
+        let h = host();
+        for src in ["Shape1.Shape = 4", "Shape1.FillStyle = 2"] {
+            assert!(tests::run(src, &h).unwrap_err().contains("380"), "{}", src);
+        }
+    }
+
+    #[test]
+    fn a_line_can_be_set_diagonal() {
+        let h = host();
+        let out = tests::run(
+            "Print Line1.Diagonal\nLine1.Diagonal = True\nPrint Line1.Diagonal\n",
+            &h,
+        )
+        .unwrap();
+        assert_eq!(out, "False\nTrue\n");
     }
 }

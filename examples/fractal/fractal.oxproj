@@ -8,5 +8,8 @@
       "code": "Form1.bas"
     }
   ],
-  "modules": []
+  "modules": [],
+  "version": "1.0.0",
+  "icon": "",
+  "bundleId": ""
 }

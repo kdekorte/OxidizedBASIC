@@ -34,12 +34,17 @@ mod recent_tests;
 #[cfg(test)]
 pub mod showcase;
 #[cfg(test)]
+mod scroll_drag_tests;
+#[cfg(test)]
+mod showcase_control_tests;
+#[cfg(test)]
 mod showcase_flow_tests;
 #[cfg(test)]
 mod showcase_form_tests;
 #[cfg(test)]
 mod showcase_run;
 pub mod splitters;
+pub mod choose_file;
 pub mod text_field;
 pub mod toolbar;
 pub mod workspace;
@@ -262,48 +267,7 @@ pub fn run_ide(bas_path: Option<&str>, oxform_path: Option<&str>) {
         bind_shortcuts(cx);
         // the File menu lists the projects kept from earlier runs
         let recent_at_start = recent_store::load(&recent_store::default_file());
-        cx.set_menus(vec![
-            gpui::Menu {
-                name: "OxidizedBASIC".into(),
-                items: vec![gpui::MenuItem::action("Quit OxidizedBASIC", Quit)],
-            },
-            gpui::Menu {
-                name: "File".into(),
-                items: file_menu(&recent_at_start),
-            },
-            gpui::Menu {
-                name: "Edit".into(),
-                items: vec![
-                    gpui::MenuItem::action("Undo", EditUndo),
-                    gpui::MenuItem::action("Redo", EditRedo),
-                    gpui::MenuItem::separator(),
-                    gpui::MenuItem::action("Cut", EditCut),
-                    gpui::MenuItem::action("Copy", EditCopy),
-                    gpui::MenuItem::action("Paste", EditPaste),
-                    gpui::MenuItem::action("Select All", EditSelectAll),
-                    gpui::MenuItem::separator(),
-                    gpui::MenuItem::action("Find…", EditFind),
-                    gpui::MenuItem::action("Replace…", EditReplace),
-                    gpui::MenuItem::action("Find Next", EditFindNext),
-                    gpui::MenuItem::action("Find Previous", EditFindPrevious),
-                ],
-            },
-            gpui::Menu {
-                name: "View".into(),
-                items: vec![
-                    gpui::MenuItem::action("Code", ViewCode),
-                    gpui::MenuItem::action("Object", ViewObject),
-                ],
-            },
-            gpui::Menu {
-                name: "Run".into(),
-                items: vec![
-                    gpui::MenuItem::action("Run / Continue", RunProgram),
-                    gpui::MenuItem::action("Step Over", StepProgram),
-                    gpui::MenuItem::action("Stop", StopProgram),
-                ],
-            },
-        ]);
+        cx.set_menus(recent_menu::file_menu_bar(&recent_at_start));
         let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
         cx.open_window(
             WindowOptions {
@@ -642,6 +606,11 @@ Print \"Total = \" & CStr(Total)
                     self.status = "Running".into();
                 }
             }
+            DebugEvent::ChooseFile {
+                filter,
+                save,
+                reply,
+            } => choose_file::show_file_dialog(filter, save, reply, cx),
             DebugEvent::Form(snap) => self.on_form_changed(snap, cx),
             DebugEvent::FormShown(snap) => self.open_form_window(snap, cx),
             DebugEvent::FormHidden(i) => self.close_form_window_at(i, false, cx),
@@ -784,6 +753,13 @@ impl Ide {
             ControlKind::CheckBox => "Check",
             ControlKind::OptionButton => "Option",
             ControlKind::Image => "Image",
+            ControlKind::HScrollBar => "HScroll",
+            ControlKind::VScrollBar => "VScroll",
+            ControlKind::Line => "Line",
+            ControlKind::Shape => "Shape",
+            ControlKind::VolumeListBox => "Volume",
+            ControlKind::DirListBox => "Dir",
+            ControlKind::FileListBox => "File",
         };
         // The first free `<Prefix><n>` — renamed controls can leave gaps or
         // already hold the next number.
@@ -1646,12 +1622,19 @@ impl Ide {
                     .child(self.toolbox_button("OK CommandButton", ControlKind::CommandButton, cx))
                     .child(self.toolbox_button("☐ Frame", ControlKind::Frame, cx))
                     .child(self.toolbox_button("≡ ListBox", ControlKind::ListBox, cx))
+                    .child(self.toolbox_button("▤ VolumeListBox", ControlKind::VolumeListBox, cx))
+                    .child(self.toolbox_button("▥ DirListBox", ControlKind::DirListBox, cx))
+                    .child(self.toolbox_button("▦ FileListBox", ControlKind::FileListBox, cx))
                     .child(self.toolbox_button("⌄ ComboBox", ControlKind::ComboBox, cx))
                     .child(self.toolbox_button("▧ PictureBox", ControlKind::PictureBox, cx))
                     .child(self.toolbox_button("☑ CheckBox", ControlKind::CheckBox, cx))
                     .child(self.toolbox_button("◉ OptionButton", ControlKind::OptionButton, cx))
                     .child(self.toolbox_button("▣ Image", ControlKind::Image, cx))
-                    .child(self.toolbox_button("◷ Timer", ControlKind::Timer, cx)),
+                    .child(self.toolbox_button("◷ Timer", ControlKind::Timer, cx))
+                    .child(self.toolbox_button("↔ HScrollBar", ControlKind::HScrollBar, cx))
+                    .child(self.toolbox_button("↕ VScrollBar", ControlKind::VScrollBar, cx))
+                    .child(self.toolbox_button("╱ Line", ControlKind::Line, cx))
+                    .child(self.toolbox_button("▭ Shape", ControlKind::Shape, cx)),
             )
     }
 
@@ -2472,6 +2455,11 @@ struct FormRunner {
     /// The text field a button went down in: moving with it held extends
     /// its selection.
     text_drag: Option<usize>,
+    /// The scrollbar a button went down on: moving with it held sets its
+    /// `Value` from the pointer's place along the track.
+    scroll_drag: Option<usize>,
+    /// Where the scrollbar drag began (window position, the value then).
+    scroll_start: Option<(gpui::Point<gpui::Pixels>, i32)>,
     /// The events the program has handlers for, as `(object, event)` in
     /// lower case: events nobody handles aren't sent. `None` until the
     /// program says (then every event VB raises is sent).
@@ -2521,6 +2509,8 @@ impl FormRunner {
             base_dir: None,
             press_mods: gpui::Modifiers::none(),
             text_drag: None,
+            scroll_drag: None,
+            scroll_start: None,
             handlers: None,
             form_focus: cx.focus_handle(),
             pressed: None,

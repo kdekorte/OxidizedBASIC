@@ -80,6 +80,8 @@ pub(crate) fn is_builtin(name: &str) -> bool {
             | "dateadd"
             | "msgbox"
             | "inputbox"
+            | "openfiledialog"
+            | "savefiledialog"
             | "beep"
             | "doevents"
             | "iif"
@@ -562,6 +564,21 @@ impl<'out> Interpreter<'out> {
                 let line = self.out.read_line().unwrap_or_default();
                 Ok(Variant::String(line))
             }
+            // a cancelled dialog, or a filter that rejects the choice, gives ""
+            "openfiledialog" | "savefiledialog" => {
+                let filter = if args.is_empty() {
+                    String::new()
+                } else {
+                    want_str(args, 0)?
+                };
+                let save = name == "savefiledialog";
+                let chosen = self.out.choose_file(&filter, save).unwrap_or_default();
+                Ok(Variant::String(if matches_filter(&chosen, &filter) {
+                    chosen
+                } else {
+                    String::new()
+                }))
+            }
             "beep" => Ok(Variant::Empty),
             "doevents" => {
                 self.do_events()?;
@@ -581,6 +598,40 @@ impl<'out> Interpreter<'out> {
             _ => err(35, &format!("Sub or Function not defined: {}", name)),
         }
     }
+}
+
+/// Whether `path`'s file name matches one of the semicolon-separated patterns
+/// in `filter` (`*.bas;*.oxproj`), by [`oxbasic_runtime::pattern_matches`].
+/// An empty filter accepts any file, and an empty path (a cancelled dialog)
+/// is passed through as it is.
+fn matches_filter(path: &str, filter: &str) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    pattern_matches(&name, filter)
+}
+
+/// Whether a file name matches a `;`-separated pattern list (`*.bas;*.oxproj`):
+/// each is `*.ext` (ends with that) or an exact name, ignoring case. An empty
+/// list matches every name. The one rule the file dialogs and file lists share.
+pub fn pattern_matches(name: &str, patterns: &str) -> bool {
+    let list: Vec<String> = patterns
+        .split(';')
+        .map(|p| p.trim().to_ascii_lowercase())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if list.is_empty() {
+        return true;
+    }
+    let name = name.to_ascii_lowercase();
+    list.iter().any(|p| match p.strip_prefix('*') {
+        Some(ext) => name.ends_with(ext),
+        None => name == *p,
+    })
 }
 
 /// Minimal `Format` implementation: date tokens (yyyy/mm/dd/hh/nn/ss) and

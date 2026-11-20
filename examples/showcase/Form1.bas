@@ -124,3 +124,12 @@ End Sub
 Sub cmdQuit_Click()
     End
 End Sub
+
+' ---- The two new forms, opened from here --------------------------------------
+Sub cmdDrawing_Click()
+    frmDrawing.Show
+End Sub
+
+Sub cmdFiles_Click()
+    frmFiles.Show
+End Sub

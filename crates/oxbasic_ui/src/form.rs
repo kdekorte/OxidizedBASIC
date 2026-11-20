@@ -4,6 +4,7 @@
 //! events to BASIC subroutines (spec §5.1).
 
 use crate::{handler_name, EventDispatcher, EventRegistry};
+use oxbasic_runtime::pattern_matches;
 use serde::{Deserialize, Serialize};
 
 /// Classic BASIC control kinds (spec §5 mapping table).
@@ -22,6 +23,27 @@ pub enum ControlKind {
     /// VB's Image: a picture that can stretch to its size (no focus, no
     /// children).
     Image,
+    /// VB's HScrollBar / VScrollBar: a horizontal or vertical slider over
+    /// `Min`..`Max`, read and set through `Value`.
+    HScrollBar,
+    VScrollBar,
+    /// VB's Line: a straight line from the control's top-left to its
+    /// bottom-right (or, when `diagonal` is set, bottom-left to top-right).
+    /// Its colour is `ForeColor`.
+    Line,
+    /// VB's Shape: a rectangle, square, oval or circle (`shape_type`),
+    /// outlined in `ForeColor` and filled when `fill_style` is 0 (solid).
+    Shape,
+    /// A macOS volume list: a ListBox whose items are the mounted volumes
+    /// (what `/Volumes` lists), read when the form loads. Used in place of
+    /// VB's DriveListBox.
+    VolumeListBox,
+    /// VB's DirListBox: a list of the folders in `Path` (its sub-folders),
+    /// read when the form loads and whenever `Path` changes.
+    DirListBox,
+    /// VB's FileListBox: the files in `Path` whose names match `Pattern`
+    /// (`*.*` by default), read when the form loads and when either changes.
+    FileListBox,
 }
 
 impl ControlKind {
@@ -39,6 +61,13 @@ impl ControlKind {
             ControlKind::CheckBox => "CheckBox",
             ControlKind::OptionButton => "OptionButton",
             ControlKind::Image => "Image",
+            ControlKind::HScrollBar => "HScrollBar",
+            ControlKind::VScrollBar => "VScrollBar",
+            ControlKind::Line => "Line",
+            ControlKind::Shape => "Shape",
+            ControlKind::VolumeListBox => "VolumeListBox",
+            ControlKind::DirListBox => "DirListBox",
+            ControlKind::FileListBox => "FileListBox",
         }
     }
 
@@ -53,6 +82,13 @@ impl ControlKind {
             "combobox" | "combo" => ControlKind::ComboBox,
             "picturebox" | "picture" => ControlKind::PictureBox,
             "image" => ControlKind::Image,
+            "hscrollbar" => ControlKind::HScrollBar,
+            "vscrollbar" => ControlKind::VScrollBar,
+            "line" => ControlKind::Line,
+            "shape" => ControlKind::Shape,
+            "volumelistbox" | "volumelist" => ControlKind::VolumeListBox,
+            "dirlistbox" | "dirlist" => ControlKind::DirListBox,
+            "filelistbox" | "filelist" => ControlKind::FileListBox,
             "timer" => ControlKind::Timer,
             "checkbox" | "check" => ControlKind::CheckBox,
             "optionbutton" | "option" | "radio" => ControlKind::OptionButton,
@@ -107,6 +143,33 @@ pub struct ControlSpec {
     /// Timer interval in milliseconds (Timer only).
     #[serde(default)]
     pub interval_ms: u64,
+    /// `Min`, `Max`, `SmallChange` and `LargeChange` of a scrollbar. VB's
+    /// defaults: 0, 32767, 1 and 1.
+    #[serde(default)]
+    pub scroll_min: i32,
+    #[serde(default = "default_scroll_max")]
+    pub scroll_max: i32,
+    #[serde(default = "default_one")]
+    pub small_change: i32,
+    #[serde(default = "default_one")]
+    pub large_change: i32,
+    /// `Shape` (Shape control): 0 rectangle, 1 square, 2 oval, 3 circle.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub shape_type: u8,
+    /// `FillStyle` (Shape control): 0 solid, 1 transparent (VB's default).
+    #[serde(default = "default_one_u8")]
+    pub fill_style: u8,
+    /// A Line control drawn from bottom-left to top-right instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub diagonal: bool,
+    /// `Path` of a DirListBox / FileListBox: the folder whose entries it
+    /// lists. Empty means the first mounted volume.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    /// `Pattern` of a FileListBox: which file names it lists (`*.bas;*.oxproj`).
+    /// Empty lists every file (`*.*`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pattern: String,
     /// `BackColor`, as 0xRRGGBB (`None`: the control's usual background).
     /// Named `color` in `.oxform` files, from when it was PictureBox-only.
     #[serde(default)]
@@ -244,6 +307,18 @@ fn default_true() -> bool {
     true
 }
 
+fn default_scroll_max() -> i32 {
+    32767
+}
+
+fn default_one() -> i32 {
+    1
+}
+
+fn default_one_u8() -> u8 {
+    1
+}
+
 impl ControlKind {
     /// Size in pixels a control gets when dropped from the toolbox, close
     /// to VB6's defaults (a Timer has no size: it is invisible at run time).
@@ -259,6 +334,13 @@ impl ControlKind {
             ControlKind::Timer => (0.0, 0.0),
             ControlKind::CheckBox | ControlKind::OptionButton => (110.0, 22.0),
             ControlKind::Image => (100.0, 100.0),
+            ControlKind::HScrollBar => (120.0, 17.0),
+            ControlKind::VScrollBar => (17.0, 120.0),
+            ControlKind::Line => (120.0, 60.0),
+            ControlKind::Shape => (100.0, 60.0),
+            ControlKind::VolumeListBox => (120.0, 84.0),
+            ControlKind::DirListBox => (120.0, 84.0),
+            ControlKind::FileListBox => (120.0, 84.0),
         }
     }
 
@@ -292,6 +374,11 @@ impl ControlKind {
         )
     }
 
+    /// Whether the control is a scrollbar (`Min`, `Max`, `Value`...).
+    pub fn is_scroll(&self) -> bool {
+        matches!(self, ControlKind::HScrollBar | ControlKind::VScrollBar)
+    }
+
     /// Whether the control shows a `Picture`.
     pub fn has_picture(&self) -> bool {
         matches!(self, ControlKind::PictureBox | ControlKind::Image)
@@ -316,9 +403,69 @@ impl ControlKind {
         )
     }
 }
+/// The names of the mounted volumes, as `/Volumes` lists them, in order.
+/// Hidden entries are left out; a `/Volumes` that can't be read gives none.
+pub fn volume_names() -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir("/Volumes")
+        .map(|dir| {
+            dir.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| !n.starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// The sub-folders of `path`, sorted, hidden ones left out. A folder that
+/// can't be read has none.
+pub fn folder_names(path: &str) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(path)
+        .map(|dir| {
+            dir.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| !n.starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// What a directory or file list shows: the folders of `path` for a
+/// DirListBox, the files matching `pattern` for a FileListBox. Other kinds
+/// show nothing.
+pub fn list_items(kind: ControlKind, path: &str, pattern: &str) -> Vec<String> {
+    match kind {
+        ControlKind::DirListBox => folder_names(path),
+        ControlKind::FileListBox => file_names(path, pattern),
+        _ => Vec::new(),
+    }
+}
+
+
+/// The regular files in `path` whose names match `pattern` (see
+/// [`pattern_matches`]), sorted, hidden ones left out. A folder that can't be
+/// read has none.
+pub fn file_names(path: &str, pattern: &str) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(path)
+        .map(|dir| {
+            dir.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| !n.starts_with('.') && pattern_matches(n, pattern))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+
 
 impl ControlSpec {
-    /// A control with VB6's defaults for everything but its name, kind and
     /// place: enabled, visible, no caption or text, no items.
     pub fn new(name: &str, kind: ControlKind, rect: Rect) -> ControlSpec {
         ControlSpec {
@@ -331,6 +478,15 @@ impl ControlSpec {
             enabled: true,
             visible: true,
             interval_ms: 0,
+            scroll_min: 0,
+            scroll_max: 32767,
+            small_change: 1,
+            large_change: 1,
+            shape_type: 0,
+            fill_style: 1,
+            diagonal: false,
+            path: String::new(),
+            pattern: String::new(),
             color: None,
             style: 0,
             index: None,

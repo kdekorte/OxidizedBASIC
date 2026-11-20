@@ -15,8 +15,8 @@
 
 use crate::{ControlKind, ControlSpec, FormSpec, DEFAULT_FONT_SIZE};
 use gpui::{
-    deferred, div, img, prelude::*, px, rgb, AnyElement, Context, CursorStyle, Div, FontWeight,
-    Keystroke, ObjectFit, SharedString, Stateful,
+    deferred, div, img, prelude::*, px, relative, rgb, AnyElement, Context, CursorStyle, Div,
+    FontWeight, Keystroke, ObjectFit, SharedString, Stateful,
 };
 
 pub use crate::FORM_BACK;
@@ -683,7 +683,7 @@ pub fn paint_control<V: 'static>(
             }
             hook(Part::Body, body, cx)
         }
-        ControlKind::ListBox => {
+        ControlKind::ListBox | ControlKind::VolumeListBox | ControlKind::DirListBox | ControlKind::FileListBox => {
             let rows = list_rows(
                 SharedString::from(format!("{}-list", c.name)),
                 c,
@@ -782,6 +782,60 @@ pub fn paint_control<V: 'static>(
                 body = body.cursor_pointer();
             }
             hook(Part::Body, body, cx)
+        }
+        // VB's scrollbars: a track with a thumb at `Value` within
+        // `Min`..`Max`. The thumb's position is the spec's value here; the
+        // live window moves it as the program sets `Value`.
+        ControlKind::HScrollBar | ControlKind::VScrollBar => {
+            let horizontal = c.kind == ControlKind::HScrollBar;
+            let span = (c.scroll_max - c.scroll_min).max(1) as f32;
+            // the running window's live Value (look.value), or the spec's in the designer
+            let value = if look.design { c.value } else { look.value };
+            let frac = ((value - c.scroll_min) as f32 / span).clamp(0.0, 1.0);
+            let track = base
+                .overflow_hidden()
+                .bg(rgb(BUTTON_FACE))
+                .border_1()
+                .border_color(rgb(BUTTON_BORDER));
+            let thumb = div()
+                .absolute()
+                .bg(rgb(BUTTON_BORDER))
+                .rounded_sm();
+            let thumb = if horizontal {
+                thumb
+                    .top_0()
+                    .bottom_0()
+                    .w(px(12.0))
+                    .left(relative(frac))
+            } else {
+                thumb
+                    .left_0()
+                    .right_0()
+                    .h(px(12.0))
+                    .top(relative(frac))
+            };
+            hook(Part::Body, track.child(thumb), cx)
+        }
+        // VB's Line and Shape: one drawn figure filling the control, painted
+        // by the same code that paints a PictureBox's drawing
+        ControlKind::Line | ControlKind::Shape => {
+            let mut canvas = crate::canvas::Canvas::default();
+            if let Some(shape) = crate::canvas::control_shape(
+                c.kind,
+                c.rect.width,
+                c.rect.height,
+                c.fore_color.unwrap_or(TEXT),
+                c.shape_type,
+                c.fill_style,
+                c.diagonal,
+            ) {
+                canvas.shapes.push(shape);
+            }
+            hook(
+                Part::Body,
+                base.overflow_hidden().child(draw_canvas(&canvas)),
+                cx,
+            )
         }
         // Invisible at run time; the designer shows an icon to grab.
         ControlKind::Timer => {
