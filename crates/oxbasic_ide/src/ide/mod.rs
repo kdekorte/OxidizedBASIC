@@ -31,6 +31,7 @@ mod showcase_form_tests;
 #[cfg(test)]
 mod showcase_run;
 pub mod splitters;
+pub mod text_field;
 pub mod toolbar;
 pub mod workspace;
 

@@ -21,6 +21,7 @@ impl Ide {
         let replace_has_focus = self.replace_focus.is_focused(win);
         let box_ = |id: &'static str,
                     text: String,
+                    caret: usize,
                     focused: bool,
                     replace: bool,
                     cx: &mut Context<Self>| {
@@ -46,19 +47,7 @@ impl Ide {
                 .border_color(rgb(if focused { ACCENT } else { BORDER }))
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .child(SharedString::from(text))
-                .when(focused, |s| {
-                    s.child(
-                        div()
-                            .debug_selector(move || {
-                                format!("{}-caret", id.trim_end_matches("-text"))
-                            })
-                            .flex_none()
-                            .w(px(1.5))
-                            .h(px(14.0))
-                            .bg(rgb(ACCENT)),
-                    )
-                })
+                .child(text_with_caret(&text, focused.then_some(caret), id))
                 .on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(move |_this: &mut Ide, _ev: &MouseDownEvent, win, cx| {
@@ -117,6 +106,7 @@ impl Ide {
                 .child(box_(
                     "find-text",
                     bar.find.clone(),
+                    bar.find_caret,
                     find_has_focus,
                     false,
                     cx,
@@ -148,6 +138,7 @@ impl Ide {
                     .child(box_(
                         "replace-text",
                         bar.replace.clone(),
+                        bar.replace_caret,
                         replace_has_focus,
                         true,
                         cx,
@@ -179,4 +170,29 @@ impl Ide {
             .child(rows)
             .into_any_element()
     }
+}
+
+/// A text box's text with its caret drawn at character `caret` (when the box
+/// has the focus). The caret is a thin accent bar between the two halves, and
+/// its test selector is `<box>-caret`.
+fn text_with_caret(text: &str, caret: Option<usize>, id: &'static str) -> gpui::Div {
+    let Some(at) = caret else {
+        return div().child(SharedString::from(text.to_string()));
+    };
+    let at = at.min(text.chars().count());
+    let before: String = text.chars().take(at).collect();
+    let after: String = text.chars().skip(at).collect();
+    div()
+        .flex()
+        .items_center()
+        .child(SharedString::from(before))
+        .child(
+            div()
+                .debug_selector(move || format!("{}-caret", id.trim_end_matches("-text")))
+                .flex_none()
+                .w(px(1.5))
+                .h(px(14.0))
+                .bg(rgb(ACCENT)),
+        )
+        .child(SharedString::from(after))
 }

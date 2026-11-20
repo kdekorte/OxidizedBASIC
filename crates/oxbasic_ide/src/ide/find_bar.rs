@@ -5,6 +5,7 @@
 
 use super::editor::Pos;
 use super::find::{self, Search};
+use super::text_field;
 use super::*;
 
 /// The find bar's state.
@@ -23,6 +24,10 @@ pub(super) struct FindBar {
     /// Where the search began (the caret when the bar opened); typing
     /// searches from here.
     pub from: Pos,
+    /// The caret in the Find box and in the Replace box, as character
+    /// indexes into their text.
+    pub find_caret: usize,
+    pub replace_caret: usize,
 }
 
 impl FindBar {
@@ -63,6 +68,9 @@ impl Ide {
         if !selected.is_empty() {
             bar.find = selected;
         }
+        // the caret goes to the end of the text it was given
+        bar.find_caret = bar.find.chars().count();
+        bar.replace_caret = bar.replace.chars().count();
         self.refresh_matches();
         win.focus(&self.find_focus);
     }
@@ -158,21 +166,39 @@ impl Ide {
         let Some(bar) = self.find.as_mut() else {
             return false;
         };
-        let buf = if replace {
-            &mut bar.replace
+        // the box's text and caret
+        let (text, caret) = if replace {
+            (&mut bar.replace, &mut bar.replace_caret)
         } else {
-            &mut bar.find
+            (&mut bar.find, &mut bar.find_caret)
         };
-        if ks.key == "backspace" {
-            buf.pop();
+        let mv = match ks.key.as_str() {
+            "left" => Some(text_field::Move::Left),
+            "right" => Some(text_field::Move::Right),
+            "home" => Some(text_field::Move::Home),
+            "end" => Some(text_field::Move::End),
+            _ => None,
+        };
+        if let Some(m) = mv {
+            // ⌥ moves by word
+            let m = match (m, ks.modifiers.alt) {
+                (text_field::Move::Left, true) => text_field::Move::WordLeft,
+                (text_field::Move::Right, true) => text_field::Move::WordRight,
+                (m, _) => m,
+            };
+            *caret = text_field::moved(text, *caret, m);
+        } else if ks.key == "backspace" {
+            *caret = text_field::backspace(text, *caret);
+        } else if ks.key == "delete" {
+            *caret = text_field::delete_forward(text, *caret);
         } else if let Some(s) = typed_text(ev) {
-            buf.push_str(&s);
+            *caret = text_field::insert(text, *caret, &s);
         } else {
             return false;
         }
         if !replace {
-            // typing selects the first match from the caret (refresh_matches
-            // sets it); it doesn't step past that one
+            // the matches follow the Find text; typing selects the first
+            // match from where the search began
             self.refresh_matches();
             if let Some(i) = self.find.as_ref().and_then(|b| b.current) {
                 let r = self.find.as_ref().unwrap().found[i];

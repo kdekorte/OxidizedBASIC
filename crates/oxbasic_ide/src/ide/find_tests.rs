@@ -239,3 +239,93 @@ fn the_focused_box_shows_a_caret(cx: &mut gpui::TestAppContext) {
     assert!(code.debug_bounds(sel("replace-caret".into())).is_some());
     assert!(code.debug_bounds(sel("find-caret".into())).is_none());
 }
+
+#[gpui::test]
+fn arrows_home_and_end_move_the_caret_in_the_find_box(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let mut code = code_window_with(&ide, cx, "abc");
+    code.simulate_keystrokes("cmd-f");
+    code.simulate_input("ac");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(
+            ide.find.as_ref().unwrap().find_caret,
+            2,
+            "typing leaves the caret at the end"
+        );
+    });
+    code.simulate_keystrokes("left");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.find.as_ref().unwrap().find_caret, 1, "← moves back");
+    });
+    // typing now goes in at the caret: "a" + "b" + "c" -> "abc"
+    code.simulate_input("b");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        let bar = ide.find.as_ref().unwrap();
+        assert_eq!(bar.find, "abc", "the text was typed at the caret");
+        assert_eq!(bar.find_caret, 2);
+        assert_eq!(bar.found.len(), 1, "the matches follow the edited text");
+    });
+    code.simulate_keystrokes("home");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.find.as_ref().unwrap().find_caret, 0, "Home")
+    });
+    code.simulate_keystrokes("end");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.find.as_ref().unwrap().find_caret, 3, "End")
+    });
+}
+
+#[gpui::test]
+fn delete_and_backspace_edit_at_the_caret(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let mut code = code_window_with(&ide, cx, "abc");
+    code.simulate_keystrokes("cmd-f");
+    code.simulate_input("abcd");
+    code.run_until_parked();
+    code.simulate_keystrokes("home right");
+    code.run_until_parked();
+    code.simulate_keystrokes("delete");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        let bar = ide.find.as_ref().unwrap();
+        assert_eq!(
+            bar.find, "acd",
+            "Delete removes the character after the caret"
+        );
+        assert_eq!(bar.find_caret, 1);
+    });
+    code.simulate_keystrokes("backspace");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        let bar = ide.find.as_ref().unwrap();
+        assert_eq!(bar.find, "cd", "Backspace removes the character before it");
+        assert_eq!(bar.find_caret, 0);
+    });
+}
+
+#[gpui::test]
+fn option_arrows_move_by_word_in_the_replace_box(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let mut code = code_window_with(&ide, cx, "abc");
+    code.simulate_keystrokes("cmd-alt-f");
+    code.run_until_parked();
+    // the Replace box: click it, type two words, then ⌥← goes back a word
+    let replace = code
+        .debug_bounds(sel("replace-text".into()))
+        .expect("the Replace box");
+    code.simulate_click(replace.center(), gpui::Modifiers::none());
+    code.simulate_input("bird dog");
+    code.run_until_parked();
+    code.simulate_keystrokes("alt-left");
+    code.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        let bar = ide.find.as_ref().unwrap();
+        assert_eq!(bar.replace, "bird dog");
+        assert_eq!(bar.replace_caret, 5, "⌥← goes back to the start of dog");
+    });
+}
