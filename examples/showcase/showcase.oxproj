@@ -21,6 +21,11 @@
       "name": "frmFiles",
       "layout": "frmFiles.oxform",
       "code": "frmFiles.bas"
+    },
+    {
+      "name": "frmTabs",
+      "layout": "frmTabs.oxform",
+      "code": "frmTabs.bas"
     }
   ],
   "modules": [

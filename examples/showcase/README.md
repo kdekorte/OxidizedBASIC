@@ -28,6 +28,7 @@ Then press **Run** (⌘R). The project panel lists `Form1` (the start-up form),
 | **Slider** and **Progress** (opened from the toolbox in your own forms) | Slider `Value`, `Orientation`; ProgressBar `Value` set by the program |
 | **Tabs** (in your own forms) | TabControl `Tab`, with controls on each page shown only on the selected tab |
 | **Menu Editor…** (in a form's Properties) | Edit a form's menu: New, Delete, Indent, Outdent, Apply; closing the window keeps the menu |
+| **Tabs…** (button, or File > Tabs… ⌘T) | A TabControl with three pages: Next and Back move between them, a tab click changes the page, and the status names the page (`TabCaption`) |
 
 `Module1.bas` holds `Plural` and `Describe`, which both forms can call.
 Each form's own handlers and `Dim` variables are private to it, so two forms can

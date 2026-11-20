@@ -386,6 +386,7 @@ as one in a hidden Frame does.
 |---|---|---|---|---|
 | `Tab` | property | Integer | R/W | R/W |
 | `Tabs` | property | Integer | R (the number of tabs) | — |
+| `TabCaption` | property | String | R (the selected tab's caption, `""` if none) | — |
 
 `Tab` is the selected page, from 0 up to the last tab; other values raise 380.
 Setting `Tab` shows that page and raises `Click`, as VB's TabStrip does. The
@@ -400,6 +401,9 @@ under; none for the bar), a `shortcut` (`Ctrl+O`, `Ctrl+Shift+S`, `F5`), and
 
 - While the form's window is active, its menu is the application's menu bar,
   and the IDE's menu comes back when the window is not in front.
+- A menu's caption drops the `&` mnemonic marker, because a Mac menu has no
+  mnemonics: the shortcut is drawn to the right of the item instead. `&&` is a
+  literal ampersand.
 - Choosing an item runs its `Name_Click` handler in the program. A disabled
   item and a separator don't run.
 - A shortcut runs the item it belongs to. Ctrl and Cmd both mean Command on

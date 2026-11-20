@@ -180,3 +180,17 @@ fn outdent_moves_an_item_up_a_level_and_leaves_top_level_items_alone() {
     assert!(!outdent(&mut items, 0), "File is already top level");
     assert!(is_well_formed(&items));
 }
+
+#[test]
+fn a_mnemonic_is_not_shown_on_a_mac_menu_but_a_literal_ampersand_is() {
+    use crate::menu::display_caption;
+    assert_eq!(
+        display_caption("&File"),
+        "File",
+        "the mnemonic marker is dropped"
+    );
+    assert_eq!(display_caption("&Drawing…"), "Drawing…");
+    assert_eq!(display_caption("Q&&A"), "Q&A", "&& is a literal ampersand");
+    assert_eq!(display_caption("-"), "-");
+    assert_eq!(display_caption(""), "");
+}

@@ -215,6 +215,12 @@ fn main_form() -> FormSpec {
         "Files…",
         (170.0, 430.0, 140.0, 30.0),
     ));
+    f.control(captioned(
+        "cmdTabs",
+        CommandButton,
+        "Tabs…",
+        (324.0, 430.0, 140.0, 30.0),
+    ));
     // the menu bar: File (Drawing, Files, Quit) and Help (About)
     use oxbasic_ui::menu::MenuItem;
     let mut file = MenuItem::new("mnuFile", "&File", None);
@@ -226,6 +232,9 @@ fn main_form() -> FormSpec {
     let mut files = MenuItem::new("mnuFiles", "&Files…", Some(0));
     files.shortcut = "Ctrl+F".into();
     f.menus.push(files);
+    let mut tabs_item = MenuItem::new("mnuTabs", "&Tabs…", Some(0));
+    tabs_item.shortcut = "Ctrl+T".into();
+    f.menus.push(tabs_item);
     f.menus.push(MenuItem::new("mnuSep", "-", Some(0)));
     let mut quit = MenuItem::new("mnuQuit", "&Quit", Some(0));
     quit.shortcut = "Ctrl+Q".into();
@@ -233,7 +242,14 @@ fn main_form() -> FormSpec {
     // Help is item 5; About sits under it
     let help = MenuItem::new("mnuHelp", "&Help", None);
     f.menus.push(help);
-    f.menus.push(MenuItem::new("mnuAbout", "&About…", Some(5)));
+    // About sits under Help, wherever Help ended up in the list
+    let help_at = f
+        .menus
+        .iter()
+        .position(|m| m.name == "mnuHelp")
+        .expect("Help");
+    f.menus
+        .push(MenuItem::new("mnuAbout", "&About…", Some(help_at)));
     f
 }
 
@@ -282,7 +298,12 @@ fn drawing_form() -> FormSpec {
     f.control(ruler);
     // a Slider sets the shape's width (the same as the width bar), and a
     // ProgressBar shows that width across its range; the program fills it
-    f.control(captioned("lblSlider", Label, "Slider sets the width:", (20.0, 300.0, 200.0, 20.0)));
+    f.control(captioned(
+        "lblSlider",
+        Label,
+        "Slider sets the width:",
+        (20.0, 300.0, 200.0, 20.0),
+    ));
     let mut slider = control("sldWidth", Slider, (20.0, 322.0, 200.0, 30.0));
     slider.scroll_min = 20;
     slider.scroll_max = 300;
@@ -297,6 +318,114 @@ fn drawing_form() -> FormSpec {
 }
 
 /// frmFiles: the file browser (volumes, folders, files) and the path of the
+/// frmTabs: a TabControl with three pages, each holding its own controls: the
+/// General page has a name box, the Options page check boxes and option
+/// buttons, the Advanced page a range slider and a progress bar. Opened from
+/// Form1's "Tabs…" button; the Next and Back buttons also move the pages.
+fn tabs_form() -> FormSpec {
+    use ControlKind::*;
+    let mut f = FormSpec::new("frmTabs", "Tabs", 520.0, 360.0);
+    let mut tabs = control("tabSettings", TabControl, (16.0, 16.0, 488.0, 260.0));
+    tabs.tabs = vec!["General".into(), "Options".into(), "Advanced".into()];
+    f.control(tabs);
+    let tab = f.controls.len() - 1;
+
+    // page 0, General
+    f.control(captioned(
+        "lblName",
+        Label,
+        "Your name:",
+        (36.0, 56.0, 100.0, 20.0),
+    ));
+    let mut name = control("txtName", TextBox, (36.0, 80.0, 240.0, 24.0));
+    name.text = Some(String::new());
+    f.control(name);
+    f.control(captioned(
+        "lblPage",
+        Label,
+        "Page 1 of 3",
+        (36.0, 120.0, 240.0, 20.0),
+    ));
+
+    // page 1, Options
+    let mut shout = captioned("chkShout", CheckBox, "Shout it", (36.0, 56.0, 180.0, 22.0));
+    shout.page = 1;
+    f.control(shout);
+    let mut formal = captioned(
+        "optFormal",
+        OptionButton,
+        "Formal",
+        (36.0, 88.0, 180.0, 22.0),
+    );
+    formal.page = 1;
+    formal.value = 1;
+    f.control(formal);
+    let mut casual = captioned(
+        "optCasual",
+        OptionButton,
+        "Casual",
+        (36.0, 114.0, 180.0, 22.0),
+    );
+    casual.page = 1;
+    f.control(casual);
+
+    // page 2, Advanced
+    f.control(captioned(
+        "lblLevel",
+        Label,
+        "Level:",
+        (36.0, 56.0, 120.0, 20.0),
+    ));
+    let mut level = control("sldLevel", Slider, (36.0, 80.0, 240.0, 30.0));
+    level.scroll_min = 0;
+    level.scroll_max = 10;
+    level.value = 3;
+    level.page = 2;
+    f.control(level);
+    let mut bar = control("prgLevel", ProgressBar, (36.0, 124.0, 240.0, 16.0));
+    bar.scroll_min = 0;
+    bar.scroll_max = 10;
+    bar.value = 3;
+    bar.page = 2;
+    f.control(bar);
+
+    // the page controls sit inside the TabControl, so its page shows them
+    for (i, c) in f.controls.iter_mut().enumerate() {
+        if i != tab && c.kind != TabControl && c.container.is_none() {
+            c.container = Some("tabSettings".into());
+        }
+    }
+
+    // the buttons outside the tabs move the pages and show the page's name
+    f.control(captioned(
+        "cmdBack",
+        CommandButton,
+        "< Back",
+        (16.0, 290.0, 110.0, 28.0),
+    ));
+    f.control(captioned(
+        "cmdNext",
+        CommandButton,
+        "Next >",
+        (136.0, 290.0, 110.0, 28.0),
+    ));
+    f.control(captioned(
+        "cmdClose",
+        CommandButton,
+        "Close",
+        (392.0, 290.0, 112.0, 28.0),
+    ));
+    let mut status = captioned(
+        "lblStatus",
+        Label,
+        "Use Next and Back, or click a tab.",
+        (16.0, 326.0, 488.0, 20.0),
+    );
+    status.fore_color = Some(0x555555);
+    f.control(status);
+    f
+}
+
 /// file picked. Opened from Form1's "Files…" button.
 fn files_form() -> FormSpec {
     use ControlKind::*;
@@ -379,6 +508,7 @@ pub fn showcase(code: impl Fn(&str) -> String) -> Workspace {
         ("frmAbout", about_form()),
         ("frmDrawing", drawing_form()),
         ("frmFiles", files_form()),
+        ("frmTabs", tabs_form()),
     ];
     let mut docs = Vec::new();
     for (name, form) in forms.iter_mut() {

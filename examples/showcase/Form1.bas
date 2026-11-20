@@ -134,6 +134,14 @@ Sub cmdFiles_Click()
     frmFiles.Show
 End Sub
 
+Sub cmdTabs_Click()
+    frmTabs.Show
+End Sub
+
+Sub mnuTabs_Click()
+    frmTabs.Show
+End Sub
+
 ' ---- The menu bar: File and Help. Each item runs the same code as its button
 ' (the shortcuts are on the items: Ctrl+D, Ctrl+F, Ctrl+Q).
 

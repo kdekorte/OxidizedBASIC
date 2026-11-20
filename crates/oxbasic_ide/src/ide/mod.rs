@@ -336,6 +336,8 @@ pub struct Ide {
     designer_focus: FocusHandle,
     editor_scroll: ScrollHandle,
     designer_scroll: ScrollHandle,
+    /// The toolbox's buttons scroll when the window is too short for them.
+    toolbox_scroll: ScrollHandle,
     output_scroll: ScrollHandle,
     scrollbar_drag: Option<ScrollbarDrag>,
     /// The sizes of the main window's panes, set by dragging the bars
@@ -480,6 +482,7 @@ Print \"Total = \" & CStr(Total)
             designer_focus: cx.focus_handle(),
             editor_scroll: ScrollHandle::new(),
             designer_scroll: ScrollHandle::new(),
+            toolbox_scroll: ScrollHandle::new(),
             output_scroll: ScrollHandle::new(),
             scrollbar_drag: None,
             panes: splitters::Panes::default(),
@@ -1616,31 +1619,102 @@ impl Ide {
             .child(self.dock_title("Toolbox"))
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .content_start()
-                    .p_1()
-                    .child(self.toolbox_button("Aa Label", ControlKind::Label, cx))
-                    .child(self.toolbox_button("ab TextBox", ControlKind::TextBox, cx))
-                    .child(self.toolbox_button("OK CommandButton", ControlKind::CommandButton, cx))
-                    .child(self.toolbox_button("☐ Frame", ControlKind::Frame, cx))
-                    .child(self.toolbox_button("≡ ListBox", ControlKind::ListBox, cx))
-                    .child(self.toolbox_button("▤ VolumeListBox", ControlKind::VolumeListBox, cx))
-                    .child(self.toolbox_button("▥ DirListBox", ControlKind::DirListBox, cx))
-                    .child(self.toolbox_button("▦ FileListBox", ControlKind::FileListBox, cx))
-                    .child(self.toolbox_button("⇆ Slider", ControlKind::Slider, cx))
-                    .child(self.toolbox_button("▰ ProgressBar", ControlKind::ProgressBar, cx))
-                    .child(self.toolbox_button("▤ TabControl", ControlKind::TabControl, cx))
-                    .child(self.toolbox_button("⌄ ComboBox", ControlKind::ComboBox, cx))
-                    .child(self.toolbox_button("▧ PictureBox", ControlKind::PictureBox, cx))
-                    .child(self.toolbox_button("☑ CheckBox", ControlKind::CheckBox, cx))
-                    .child(self.toolbox_button("◉ OptionButton", ControlKind::OptionButton, cx))
-                    .child(self.toolbox_button("▣ Image", ControlKind::Image, cx))
-                    .child(self.toolbox_button("◷ Timer", ControlKind::Timer, cx))
-                    .child(self.toolbox_button("↔ HScrollBar", ControlKind::HScrollBar, cx))
-                    .child(self.toolbox_button("↕ VScrollBar", ControlKind::VScrollBar, cx))
-                    .child(self.toolbox_button("╱ Line", ControlKind::Line, cx))
-                    .child(self.toolbox_button("▭ Shape", ControlKind::Shape, cx)),
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        div()
+                            .id("toolbox-viewport")
+                            .size_full()
+                            .overflow_scroll()
+                            .scrollbar_width(px(8.0))
+                            .track_scroll(&self.toolbox_scroll)
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .content_start()
+                                    .p_1()
+                                    .child(self.toolbox_button("Aa Label", ControlKind::Label, cx))
+                                    .child(self.toolbox_button(
+                                        "ab TextBox",
+                                        ControlKind::TextBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "OK CommandButton",
+                                        ControlKind::CommandButton,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button("☐ Frame", ControlKind::Frame, cx))
+                                    .child(self.toolbox_button(
+                                        "≡ ListBox",
+                                        ControlKind::ListBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "▤ VolumeListBox",
+                                        ControlKind::VolumeListBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "▥ DirListBox",
+                                        ControlKind::DirListBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "▦ FileListBox",
+                                        ControlKind::FileListBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button("⇆ Slider", ControlKind::Slider, cx))
+                                    .child(self.toolbox_button(
+                                        "▰ ProgressBar",
+                                        ControlKind::ProgressBar,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "▤ TabControl",
+                                        ControlKind::TabControl,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "⌄ ComboBox",
+                                        ControlKind::ComboBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "▧ PictureBox",
+                                        ControlKind::PictureBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "☑ CheckBox",
+                                        ControlKind::CheckBox,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "◉ OptionButton",
+                                        ControlKind::OptionButton,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button("▣ Image", ControlKind::Image, cx))
+                                    .child(self.toolbox_button("◷ Timer", ControlKind::Timer, cx))
+                                    .child(self.toolbox_button(
+                                        "↔ HScrollBar",
+                                        ControlKind::HScrollBar,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button(
+                                        "↕ VScrollBar",
+                                        ControlKind::VScrollBar,
+                                        cx,
+                                    ))
+                                    .child(self.toolbox_button("╱ Line", ControlKind::Line, cx))
+                                    .child(self.toolbox_button("▭ Shape", ControlKind::Shape, cx)),
+                            ),
+                    )
+                    .child(self.scrollbar_overlays("toolbox", &self.toolbox_scroll, cx)),
             )
     }
 
@@ -1809,6 +1883,7 @@ impl Ide {
         let handle = match drag.pane {
             "editor" => self.editor_scroll.clone(),
             "designer" => self.designer_scroll.clone(),
+            "toolbox" => self.toolbox_scroll.clone(),
             _ => self.output_scroll.clone(),
         };
         let mut position = handle.offset();

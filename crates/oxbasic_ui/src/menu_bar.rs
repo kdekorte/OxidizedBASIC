@@ -4,7 +4,7 @@
 //!
 //! Built only with the `gpui` feature, since the bar is GPUI's.
 
-use crate::menu::{bar, children, MenuItem};
+use crate::menu::{bar, children, display_caption, MenuItem};
 use gpui::{Action, App, KeyBinding, Menu, MenuItem as GpuiMenuItem};
 
 /// A form menu item was chosen: `index` is its position in the form's `menus`.
@@ -54,10 +54,10 @@ fn entries(items: &[MenuItem], parent: Option<usize>) -> Vec<GpuiMenuItem> {
                 return GpuiMenuItem::separator();
             }
             if children(items, Some(i)).is_empty() {
-                GpuiMenuItem::action(m.caption.clone(), FormMenuClick { index: i })
+                GpuiMenuItem::action(display_caption(&m.caption), FormMenuClick { index: i })
             } else {
                 GpuiMenuItem::submenu(gpui::Menu {
-                    name: m.caption.clone().into(),
+                    name: display_caption(&m.caption).into(),
                     items: entries(items, Some(i)),
                 })
             }

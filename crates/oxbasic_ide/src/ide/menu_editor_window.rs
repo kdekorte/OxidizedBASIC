@@ -4,7 +4,7 @@
 
 use super::text_field;
 use super::*;
-use oxbasic_ui::menu::MenuItem;
+use oxbasic_ui::menu::{display_caption, MenuItem};
 use oxbasic_ui::menu_editor::MenuEditor;
 
 /// The Menu Editor's view: the items being edited and the Caption box.
@@ -33,7 +33,7 @@ impl MenuEditorView {
         let label = if item.is_separator() {
             "────".to_string()
         } else {
-            item.caption.replace('&', "")
+            display_caption(&item.caption)
         };
         format!("{}{}", "    ".repeat(depth), label)
     }
@@ -74,7 +74,7 @@ impl MenuEditorView {
     pub fn select(&mut self, i: Option<usize>) {
         self.editor.select(i);
         if let Some(k) = self.editor.selected {
-            self.caption = self.editor.items[k].caption.replace('&', "");
+            self.caption = display_caption(&self.editor.items[k].caption);
             self.caret = self.caption.chars().count();
         }
     }

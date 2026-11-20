@@ -80,6 +80,25 @@ pub fn is_well_formed(items: &[MenuItem]) -> bool {
         true
     })
 }
+/// The caption a menu shows. The `&` marks a mnemonic in VB's captions; a Mac
+/// menu has no mnemonics (its shortcut is drawn to the right of the item), so
+/// the `&` is dropped. A doubled `&&` is a literal ampersand.
+pub fn display_caption(caption: &str) -> String {
+    let mut out = String::with_capacity(caption.len());
+    let mut chars = caption.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                out.push('&');
+                chars.next();
+            }
+            // a single & is only a mnemonic marker: drop it
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
 
 /// The name a menu item's click is known by, for `Name_Click`.
 pub fn click_handler(item: &MenuItem) -> String {

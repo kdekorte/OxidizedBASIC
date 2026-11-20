@@ -54,8 +54,8 @@ mod tests {
         let (spec, program) = project_program(&example("showcase/showcase.oxproj")).expect("opens");
         assert_eq!(
             spec.forms.len(),
-            4,
-            "Form1, frmAbout, frmDrawing and frmFiles"
+            5,
+            "Form1, frmAbout, frmDrawing, frmFiles and frmTabs"
         );
         assert_eq!(spec.startup, 0, "Form1 is the start-up form");
         assert!(!spec.bare);

@@ -90,7 +90,48 @@ fn the_slider_and_the_width_bar_move_together() {
     ));
     let snap = run.call(DRAWING, "sldWidth_Change", &[]);
     let bar = run.control(DRAWING, "hsbWidth", None);
-    assert_eq!(snap.state[bar].value, 180, "the width bar follows the slider");
+    assert_eq!(
+        snap.state[bar].value, 180,
+        "the width bar follows the slider"
+    );
     let shape = run.control(DRAWING, "shpBox", None);
     assert_eq!(snap.form.controls[shape].rect.width, 180.0);
+}
+
+/// frmTabs' index in the showcase (after Form1, frmAbout, frmDrawing, frmFiles).
+const TABS: usize = 4;
+
+#[test]
+fn next_and_back_move_the_tabs_page_and_the_status_names_it() {
+    let run = Run::start();
+    open(&run, "cmdTabs_Click", TABS);
+    // the first page, General, is selected
+    let snap = run.call(TABS, "cmdNext_Click", &[]);
+    let tabs = run.control(TABS, "tabSettings", None);
+    assert_eq!(snap.state[tabs].tab, 1, "Next moves to Options");
+    assert_eq!(caption(&snap, "lblStatus"), "Page 2 of 3: Options");
+    let snap = run.call(TABS, "cmdBack_Click", &[]);
+    assert_eq!(snap.state[tabs].tab, 0, "Back returns to General");
+    assert_eq!(caption(&snap, "lblStatus"), "Page 1 of 3: General");
+}
+
+#[test]
+fn back_on_the_first_page_and_next_on_the_last_stay_put() {
+    let run = Run::start();
+    open(&run, "cmdTabs_Click", TABS);
+    let snap = run.call(TABS, "cmdBack_Click", &[]);
+    let tabs = run.control(TABS, "tabSettings", None);
+    assert_eq!(snap.state[tabs].tab, 0, "there is no page before the first");
+    run.call(TABS, "cmdNext_Click", &[]);
+    run.call(TABS, "cmdNext_Click", &[]);
+    let snap = run.call(TABS, "cmdNext_Click", &[]);
+    assert_eq!(snap.state[tabs].tab, 2, "the last page stays the last");
+}
+
+#[test]
+fn choosing_a_tab_by_the_menu_opens_the_tabs_form() {
+    let run = Run::start();
+    run.session
+        .send(DebugCommand::Call(0, "mnuTabs_Click".into(), Vec::new()));
+    run.until(|e| matches!(e, DebugEvent::FormShown(s) if s.form_index == TABS));
 }

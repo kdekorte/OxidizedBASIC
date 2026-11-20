@@ -827,6 +827,11 @@ impl FormHost {
                 Variant::Integer(c.orientation as i16)
             }
             "tab" if c.kind == ControlKind::TabControl => Variant::Integer(s.tab as i16),
+            // the caption of the selected tab ("" when there are no tabs)
+            "tabcaption" if c.kind == ControlKind::TabControl => {
+                Variant::String(c.tabs.get(s.tab as usize).cloned().unwrap_or_default())
+            }
+
             "tabs" if c.kind == ControlKind::TabControl => Variant::Integer(c.tabs.len() as i16),
             "value" if c.kind.is_scroll() => Variant::Long(s.value),
             "style" if c.kind == ControlKind::ComboBox => Variant::Integer(c.style as i16),

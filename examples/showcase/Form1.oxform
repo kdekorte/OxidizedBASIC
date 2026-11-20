@@ -998,6 +998,40 @@
         "underline": false,
         "strikethrough": false
       }
+    },
+    {
+      "name": "cmdTabs",
+      "kind": "CommandButton",
+      "rect": {
+        "left": 324.0,
+        "top": 430.0,
+        "width": 140.0,
+        "height": 30.0
+      },
+      "caption": "Tabs…",
+      "text": null,
+      "items": [],
+      "enabled": true,
+      "visible": true,
+      "intervalMs": 0,
+      "scrollMin": 0,
+      "scrollMax": 32767,
+      "smallChange": 1,
+      "largeChange": 1,
+      "fillStyle": 1,
+      "color": null,
+      "style": 0,
+      "index": null,
+      "value": 0,
+      "foreColor": null,
+      "font": {
+        "name": "",
+        "size": 10.5,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false
+      }
     }
   ],
   "menus": [
@@ -1021,6 +1055,13 @@
       "enabled": true
     },
     {
+      "name": "mnuTabs",
+      "caption": "&Tabs…",
+      "parent": 0,
+      "shortcut": "Ctrl+T",
+      "enabled": true
+    },
+    {
       "name": "mnuSep",
       "caption": "-",
       "parent": 0,
@@ -1041,7 +1082,7 @@
     {
       "name": "mnuAbout",
       "caption": "&About…",
-      "parent": 5,
+      "parent": 6,
       "enabled": true
     }
   ]
