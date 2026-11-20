@@ -762,6 +762,7 @@ impl Ide {
             ControlKind::FileListBox => "File",
             ControlKind::Slider => "Slider",
             ControlKind::ProgressBar => "Progress",
+            ControlKind::TabControl => "Tab",
         };
         // The first free `<Prefix><n>` — renamed controls can leave gaps or
         // already hold the next number.
@@ -1629,6 +1630,7 @@ impl Ide {
                     .child(self.toolbox_button("▦ FileListBox", ControlKind::FileListBox, cx))
                     .child(self.toolbox_button("⇆ Slider", ControlKind::Slider, cx))
                     .child(self.toolbox_button("▰ ProgressBar", ControlKind::ProgressBar, cx))
+                    .child(self.toolbox_button("▤ TabControl", ControlKind::TabControl, cx))
                     .child(self.toolbox_button("⌄ ComboBox", ControlKind::ComboBox, cx))
                     .child(self.toolbox_button("▧ PictureBox", ControlKind::PictureBox, cx))
                     .child(self.toolbox_button("☑ CheckBox", ControlKind::CheckBox, cx))

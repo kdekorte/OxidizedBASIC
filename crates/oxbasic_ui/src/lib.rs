@@ -26,6 +26,8 @@ mod dir_tests;
 mod file_tests;
 #[cfg(test)]
 mod range_tests;
+#[cfg(test)]
+mod tab_tests;
 #[cfg(feature = "gpui")]
 pub mod gpui_backend;
 #[cfg(feature = "gpui")]

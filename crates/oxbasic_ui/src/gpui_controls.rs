@@ -65,6 +65,8 @@ pub struct ControlLook {
     pub focused: bool,
     /// `Value` of a CheckBox (0, 1, 2) or OptionButton (0, 1).
     pub value: i32,
+    /// The selected tab of a TabControl (`Tab`).
+    pub tab: u8,
     /// Where the control is on the form (its `Left`/`Top` plus those of the
     /// containers around it); `None` is its own `Left`/`Top`.
     pub origin: Option<(f32, f32)>,
@@ -100,6 +102,7 @@ impl ControlLook {
             dropped: state.dropped,
             focused,
             value: state.value,
+            tab: state.tab,
             origin: Some(origin),
             caret: state.caret,
             anchor: state.anchor,
@@ -627,6 +630,39 @@ pub fn paint_control<V: 'static>(
             hook(Part::Body, body, cx)
         }
         ControlKind::TextBox => hook(Part::Body, text_field(base, c, look).bg(back(0xFFFFFF)), cx),
+        // VB's TabControl: a strip of tabs across the top, the selected one
+        // raised; the page below is the control's body (its controls draw on it)
+        ControlKind::TabControl => {
+            const STRIP: f32 = 24.0;
+            let mut strip = div().absolute().left_0().top_0().right_0().h(px(STRIP)).flex();
+            for (i, caption) in c.tabs.iter().enumerate() {
+                let selected = i as u8 == look.tab;
+                let mut tab = div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .px_2()
+                    .whitespace_nowrap()
+                    .border_1()
+                    .border_color(rgb(BUTTON_BORDER))
+                    .bg(rgb(if selected { FORM_BACK } else { BUTTON_FACE }))
+                    .child(SharedString::from(caption.clone()));
+                if selected {
+                    tab = tab.font_weight(FontWeight::BOLD);
+                }
+                strip = strip.child(tab);
+            }
+            let page = div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(STRIP))
+                .bottom_0()
+                .border_1()
+                .border_color(rgb(BUTTON_BORDER))
+                .bg(rgb(FORM_BACK));
+            hook(Part::Body, base.child(strip).child(page), cx)
+        }
         // VB6 Frame: a group box. The caption interrupts the top border.
         ControlKind::Frame => {
             let outline = div()

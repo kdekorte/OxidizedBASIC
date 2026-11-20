@@ -50,6 +50,9 @@ pub enum ControlKind {
     /// VB's ProgressBar: a bar filled to `Value` over `Min`..`Max`. The
     /// program sets it; the user can't drag it.
     ProgressBar,
+    /// VB's TabStrip-style TabControl: a row of tabs, each a page that holds
+    /// the controls whose `tab` is its index. `Tab` is the selected page.
+    TabControl,
 }
 
 impl ControlKind {
@@ -76,6 +79,7 @@ impl ControlKind {
             ControlKind::FileListBox => "FileListBox",
             ControlKind::Slider => "Slider",
             ControlKind::ProgressBar => "ProgressBar",
+            ControlKind::TabControl => "TabControl",
         }
     }
 
@@ -99,6 +103,7 @@ impl ControlKind {
             "filelistbox" | "filelist" => ControlKind::FileListBox,
             "slider" | "trackbar" => ControlKind::Slider,
             "progressbar" | "progress" => ControlKind::ProgressBar,
+            "tabcontrol" | "tabstrip" | "tab" => ControlKind::TabControl,
             "timer" => ControlKind::Timer,
             "checkbox" | "check" => ControlKind::CheckBox,
             "optionbutton" | "option" | "radio" => ControlKind::OptionButton,
@@ -169,6 +174,17 @@ pub struct ControlSpec {
     /// `Orientation` (Slider): 0 horizontal (the default), 1 vertical.
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub orientation: u8,
+    /// `Tab` of a TabControl: the selected page (0 is the first). Ignored
+    /// by other kinds.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub tab: u8,
+    /// `Tabs` of a TabControl: the caption of each page, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<String>,
+    /// The page a control sits on, when its container is a TabControl: it
+    /// shows only while that page is selected. Zero for every other control.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub page: u8,
     /// `FillStyle` (Shape control): 0 solid, 1 transparent (VB's default).
     #[serde(default = "default_one_u8")]
     pub fill_style: u8,
@@ -356,6 +372,7 @@ impl ControlKind {
             ControlKind::FileListBox => (120.0, 84.0),
             ControlKind::Slider => (160.0, 40.0),
             ControlKind::ProgressBar => (200.0, 20.0),
+            ControlKind::TabControl => (320.0, 200.0),
         }
     }
 
@@ -416,7 +433,10 @@ impl ControlKind {
 
     /// Whether other controls can sit inside it (`Container`).
     pub fn is_container(&self) -> bool {
-        matches!(self, ControlKind::Frame | ControlKind::PictureBox)
+        matches!(
+            self,
+            ControlKind::Frame | ControlKind::PictureBox | ControlKind::TabControl
+        )
     }
 
     /// Whether the control can take the keyboard focus (`SetFocus`, Tab).
@@ -514,6 +534,9 @@ impl ControlSpec {
             large_change: 1,
             shape_type: 0,
             orientation: 0,
+            tab: 0,
+            tabs: Vec::new(),
+            page: 0,
             fill_style: 1,
             diagonal: false,
             path: String::new(),
@@ -728,7 +751,7 @@ impl FormSpec {
         let mut at = Some(i);
         let mut steps = 0;
         while let Some(c) = at {
-            if !self.controls[c].visible {
+            if !self.controls[c].visible || !self.on_selected_page(c) {
                 return false;
             }
             steps += 1;
@@ -740,13 +763,25 @@ impl FormSpec {
         true
     }
 
+    /// Whether control `c` is on the page its TabControl has selected (or has
+    /// no TabControl around it). A control on another page is hidden and takes
+    /// no input, as one in a hidden Frame is.
+    pub fn on_selected_page(&self, c: usize) -> bool {
+        match self.container_of(c) {
+            Some(t) if self.controls[t].kind == ControlKind::TabControl => {
+                self.controls[c].page == self.controls[t].tab
+            }
+            _ => true,
+        }
+    }
+
     /// Whether control `i` takes input: it and its containers are enabled
     /// (a disabled frame disables what is in it, as in VB).
     pub fn usable(&self, i: usize) -> bool {
         let mut at = Some(i);
         let mut steps = 0;
         while let Some(c) = at {
-            if !self.controls[c].enabled {
+            if !self.controls[c].enabled || !self.on_selected_page(c) {
                 return false;
             }
             steps += 1;

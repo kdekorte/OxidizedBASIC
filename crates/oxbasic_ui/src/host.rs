@@ -19,6 +19,8 @@ pub struct ControlState {
     pub list_index: Option<usize>,
     pub dropped: bool,
     pub value: i32,
+    /// `Tab` of a TabControl: the selected page, as the program has it.
+    pub tab: u8,
     /// The caret in `text`, in characters (`SelStart` + `SelLength` is
     /// where it is when a selection was made rightwards).
     pub caret: usize,
@@ -92,6 +94,7 @@ impl ControlState {
             list_index: None,
             dropped: false,
             value: c.value,
+            tab: c.tab,
             anchor: None,
             selected: Vec::new(),
             canvas: Default::default(),
@@ -434,6 +437,7 @@ pub(crate) struct Watched {
     value: i32,
     size: (f32, f32),
     path: String,
+    tab: u8,
 }
 
 /// The live form, owned by the program's side. The interpreter reads and
@@ -506,6 +510,7 @@ impl FormHost {
             value: s.value,
             size: (c.rect.width, c.rect.height),
             path: c.path.clone(),
+            tab: s.tab,
         }
     }
 
@@ -546,6 +551,8 @@ impl FormHost {
                 }
             }
             ControlKind::ListBox if after.list_index != before.list_index => self.raise(i, "Click"),
+            // a TabControl's Tab changing shows another page: VB's Click
+            ControlKind::TabControl if after.tab != before.tab => self.raise(i, "Click"),
             // a DirListBox's Path changing lists another folder: VB's Change
             ControlKind::DirListBox if after.path != before.path => self.raise(i, "Change"),
             ControlKind::CheckBox if after.value != before.value => self.raise(i, "Click"),
@@ -803,6 +810,8 @@ impl FormHost {
             "smallchange" if c.kind.is_scroll() => Variant::Long(c.small_change),
             "largechange" if c.kind.is_scroll() => Variant::Long(c.large_change),
             "orientation" if c.kind == ControlKind::Slider => Variant::Integer(c.orientation as i16),
+            "tab" if c.kind == ControlKind::TabControl => Variant::Integer(s.tab as i16),
+            "tabs" if c.kind == ControlKind::TabControl => Variant::Integer(c.tabs.len() as i16),
             "value" if c.kind.is_scroll() => Variant::Long(s.value),
             "style" if c.kind == ControlKind::ComboBox => Variant::Integer(c.style as i16),
             "shape" if c.kind == ControlKind::Shape => Variant::Integer(c.shape_type as i16),
@@ -1116,6 +1125,18 @@ impl FormHost {
                     return err(380, "Invalid property value");
                 }
                 self.form.controls[i].orientation = n as u8;
+            }
+            // TabControl.Tab: the selected page, 0 up to the last tab. Setting
+            // it shows that page and raises Click, as VB's TabStrip does.
+            "tab" if kind == ControlKind::TabControl => {
+                let n = value.as_i64()?;
+                let count = self.form.controls[i].tabs.len() as i64;
+                if n < 0 || n >= count {
+                    return err(380, "Invalid property value");
+                }
+                self.state[i].tab = n as u8;
+                // the form's own copy too: shown and usable read it there
+                self.form.controls[i].tab = n as u8;
             }
             "largechange" if kind.is_scroll() => {
                 let n = value.as_i64()? as i32;
