@@ -147,6 +147,25 @@ The `gpui` feature needs Xcode's Metal toolchain once:
 ```sh
 xcodebuild -downloadComponent MetalToolchain
 ```
+## macOS application bundle
+
+`scripts/make_app.sh` builds the release IDE and packages it as
+`dist/OxidizedBASIC.app`, a double-clickable application with the app icon:
+
+```sh
+./scripts/make_app.sh            # build dist/OxidizedBASIC.app
+./scripts/make_app.sh --open     # build, then open it
+```
+
+Run it again whenever the IDE changes. The bundle takes its version from
+`Cargo.toml` and its build from the git commit. The icon comes from
+`packaging/icons` (the Icon Package): the `.iconset` is the source, and the
+`.icns` is rebuilt from it with `iconutil` when the iconset is newer.
+
+The app is ad-hoc signed, so it runs on this Mac. Giving it to another Mac
+needs a Developer ID signature and notarisation, which the script does not do.
+
+
 
 ## Known limitations
 
