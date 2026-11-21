@@ -205,6 +205,36 @@ pub fn edit_text(text: &mut String, ks: &Keystroke) -> bool {
 /// the end, on top, or the start), except that a container is drawn before
 /// what it contains, so what is in a Frame is never hidden by it. Frames on
 /// the form are drawn first, as VB's designer puts them behind the rest.
+/// The width of one tab caption in a TabControl's strip, in pixels: the
+/// caption's characters at the strip's text size, plus padding. Drawing and
+/// the click that picks a tab both use this, so they always agree.
+pub const TAB_CHAR_W: f32 = 8.0;
+pub const TAB_PAD: f32 = 16.0;
+/// The height of a TabControl's tab strip, in pixels.
+pub const TAB_STRIP_H: f32 = 24.0;
+
+pub fn tab_width(caption: &str) -> f32 {
+    caption.chars().count() as f32 * TAB_CHAR_W + TAB_PAD
+}
+
+/// The tab a press at `x` (relative to the control's left edge) lands on, or
+/// `None` when it is past the last tab. `captions` are the tabs' captions in
+/// order.
+pub fn tab_at(captions: &[String], x: f32) -> Option<usize> {
+    if x < 0.0 {
+        return None;
+    }
+    let mut left = 0.0;
+    for (i, c) in captions.iter().enumerate() {
+        let right = left + tab_width(c);
+        if x < right {
+            return Some(i);
+        }
+        left = right;
+    }
+    None
+}
+
 pub fn z_order(form: &FormSpec) -> Vec<usize> {
     let mut out = Vec::with_capacity(form.controls.len());
     // the form's own controls, frames first, then each one's contents
@@ -633,7 +663,7 @@ pub fn paint_control<V: 'static>(
         // VB's TabControl: a strip of tabs across the top, the selected one
         // raised; the page below is the control's body (its controls draw on it)
         ControlKind::TabControl => {
-            const STRIP: f32 = 24.0;
+            const STRIP: f32 = TAB_STRIP_H;
             let mut strip = div()
                 .absolute()
                 .left_0()
@@ -647,7 +677,7 @@ pub fn paint_control<V: 'static>(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .px_2()
+                    .w(px(tab_width(caption)))
                     .whitespace_nowrap()
                     .border_1()
                     .border_color(rgb(BUTTON_BORDER))

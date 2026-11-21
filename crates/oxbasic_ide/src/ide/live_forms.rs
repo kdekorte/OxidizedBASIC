@@ -156,12 +156,15 @@ impl Ide {
         }
     }
 
-    /// Take down every window (program finished, failed, or was stopped).
+    /// Take down every window (program finished, failed, or was stopped). The
+    /// IDE's own menu bar comes back: a form's bar is the application's only
+    /// while its window is in front, and a window removed here never deactivates.
     pub(super) fn close_form_window(&mut self, cx: &mut Context<Self>) {
         self.live_forms.clear();
         for (_, handle) in std::mem::take(&mut self.form_windows) {
             let _ = handle.update(cx, |_, win, _| win.remove_window());
         }
+        self.refresh_file_menu(cx);
     }
 
     /// The program answered a key sent from one of the form windows.

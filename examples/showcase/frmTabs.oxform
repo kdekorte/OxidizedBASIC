@@ -275,6 +275,7 @@
       "scrollMax": 32767,
       "smallChange": 1,
       "largeChange": 1,
+      "page": 2,
       "fillStyle": 1,
       "color": null,
       "style": 0,

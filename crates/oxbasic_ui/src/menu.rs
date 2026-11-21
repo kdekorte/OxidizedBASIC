@@ -138,6 +138,82 @@ pub fn shortcut_is_valid(text: &str) -> bool {
     mods_ok && (plain_key || function_key)
 }
 
+/// The modifier keys of a shortcut, as the Menu Editor's toggles show them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Modifiers {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub cmd: bool,
+}
+
+/// Build a `Shortcut` string from the modifier toggles and the key. An empty
+/// key means no shortcut, whatever the toggles say.
+pub fn shortcut_from(mods: Modifiers, key: &str) -> String {
+    let key = key.trim();
+    if key.is_empty() {
+        return String::new();
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    if mods.ctrl {
+        parts.push("Ctrl");
+    }
+    if mods.cmd {
+        parts.push("Cmd");
+    }
+    if mods.alt {
+        parts.push("Alt");
+    }
+    if mods.shift {
+        parts.push("Shift");
+    }
+    let mut out = parts.join("+");
+    if !out.is_empty() {
+        out.push('+');
+    }
+    out.push_str(&key.to_ascii_uppercase());
+    out
+}
+
+/// The key a typed text means in a Shortcut: one letter or digit, or a function
+/// key F1–F12 (`f5` or `F5`). `None` for anything else.
+pub fn key_from_text(text: &str) -> Option<String> {
+    let t = text.trim();
+    if t.len() == 1 && t.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Some(t.to_ascii_uppercase());
+    }
+    let upper = t.to_ascii_uppercase();
+    let f_key = upper.strip_prefix('F').and_then(|n| n.parse::<u8>().ok());
+    match f_key {
+        Some(n) if (1..=12).contains(&n) => Some(format!("F{}", n)),
+        _ => None,
+    }
+}
+
+/// Split a `Shortcut` string into its modifier toggles and key, so the editor
+/// can show an existing shortcut. Text that doesn't parse gives no toggles and
+/// the whole text as the key.
+pub fn shortcut_parts(text: &str) -> (Modifiers, String) {
+    let mut mods = Modifiers::default();
+    if text.trim().is_empty() {
+        return (mods, String::new());
+    }
+    let parts: Vec<&str> = text.split('+').map(|p| p.trim()).collect();
+    let Some((key, rest)) = parts.split_last() else {
+        return (mods, String::new());
+    };
+    for m in rest {
+        match m.to_ascii_lowercase().as_str() {
+            "ctrl" => mods.ctrl = true,
+            "cmd" => mods.cmd = true,
+            "alt" => mods.alt = true,
+            "shift" => mods.shift = true,
+            _ => return (Modifiers::default(), text.trim().to_string()),
+        }
+    }
+    (mods, key.to_string())
+}
+
 /// The keystroke GPUI binds for a shortcut: Ctrl and Cmd both mean Command on
 /// the Mac, as the IDE's own bindings use it. `None` when the text is empty or
 /// not a valid shortcut.

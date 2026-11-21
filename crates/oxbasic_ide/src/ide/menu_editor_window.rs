@@ -15,6 +15,12 @@ pub struct MenuEditorView {
     pub caret: usize,
     /// The keyboard focus of the window's content (the Caption box types here).
     pub focus: gpui::FocusHandle,
+    /// The shortcut's modifier toggles and its key (empty: no shortcut).
+    pub mods: oxbasic_ui::menu::Modifiers,
+    pub key: String,
+    /// True while the key box has the keyboard (set by clicking it), so typing
+    /// goes to the key rather than the caption.
+    pub key_focus: bool,
 }
 
 impl MenuEditorView {
@@ -24,6 +30,36 @@ impl MenuEditorView {
             caption: "New item".into(),
             caret: "New item".chars().count(),
             focus: cx.focus_handle(),
+            mods: Default::default(),
+            key: String::new(),
+            key_focus: false,
+        }
+    }
+
+    /// The shortcut the toggles and key make now (`""` when the key is empty).
+    pub fn shortcut(&self) -> String {
+        oxbasic_ui::menu::shortcut_from(self.mods, &self.key)
+    }
+
+    /// Flip one modifier toggle: 0 Ctrl, 1 Cmd, 2 Alt, 3 Shift.
+    pub fn toggle(&mut self, which: usize) {
+        match which {
+            0 => self.mods.ctrl = !self.mods.ctrl,
+            1 => self.mods.cmd = !self.mods.cmd,
+            2 => self.mods.alt = !self.mods.alt,
+            3 => self.mods.shift = !self.mods.shift,
+            _ => {}
+        }
+    }
+
+    /// Type a letter or digit into the key box (one key only).
+    /// Type a letter, digit, or (with the key box focused) a function key name
+    /// into the key box. A whole word such as `F5` is taken from the typed text
+    /// when it is an F1–F12 key; otherwise one letter or digit is taken.
+    pub fn type_key(&mut self, s: &str) {
+        let s = s.trim();
+        if let Some(key) = oxbasic_ui::menu::key_from_text(s) {
+            self.key = key;
         }
     }
 
@@ -58,24 +94,31 @@ impl MenuEditorView {
         Some(self.editor.add(text))
     }
 
-    /// The caption "Apply" writes to the selected item.
+    /// What "Apply" writes to the selected item: its caption and its shortcut
+    /// (from the toggles and key; an empty key clears the shortcut).
     pub fn apply_caption(&mut self) -> bool {
         let text = self.caption.trim().to_string();
         match self.editor.selected {
             Some(i) if !text.is_empty() => {
                 self.editor.items[i].caption = text;
+                self.editor.items[i].shortcut = self.shortcut();
                 true
             }
             _ => false,
         }
     }
 
-    /// Selecting a row fills the Caption box with that item's caption.
+    /// Selecting a row fills the Caption box, the toggles and the key with that
+    /// item's caption and shortcut.
     pub fn select(&mut self, i: Option<usize>) {
         self.editor.select(i);
+        self.key_focus = false;
         if let Some(k) = self.editor.selected {
             self.caption = display_caption(&self.editor.items[k].caption);
             self.caret = self.caption.chars().count();
+            let (mods, key) = oxbasic_ui::menu::shortcut_parts(&self.editor.items[k].shortcut);
+            self.mods = mods;
+            self.key = key;
         }
     }
 }
@@ -116,14 +159,24 @@ impl gpui::Render for MenuEditorView {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, _win, cx| {
                 match ev.keystroke.key.as_str() {
-                    "backspace" => this.backspace_caption(),
+                    "backspace" => {
+                        if this.key_focus {
+                            this.key.clear();
+                        } else {
+                            this.backspace_caption();
+                        }
+                    }
                     "enter" => {
                         this.apply_caption();
                     }
                     _ => {
                         if let Some(text) = ev.keystroke.key_char.as_deref() {
                             if !ev.keystroke.modifiers.platform && !ev.keystroke.modifiers.control {
-                                this.type_caption(text);
+                                if this.key_focus {
+                                    this.type_key(text);
+                                } else {
+                                    this.type_caption(text);
+                                }
                             }
                         }
                     }
@@ -144,6 +197,60 @@ impl gpui::Render for MenuEditorView {
                     .children(rows),
             )
             .child(div().child(format!("Caption: {}|", self.caption)))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .items_center()
+                    .child(div().child("Shortcut:"))
+                    .child(modifier_toggle("mod-ctrl", "⌃ Ctrl", self.mods.ctrl).on_click(
+                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                            this.toggle(0);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(modifier_toggle("mod-cmd", "⌘ Cmd", self.mods.cmd).on_click(
+                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                            this.toggle(1);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(modifier_toggle("mod-alt", "⌥ Alt", self.mods.alt).on_click(
+                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                            this.toggle(2);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(modifier_toggle("mod-shift", "⇧ Shift", self.mods.shift).on_click(
+                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                            this.toggle(3);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .id("menu-key")
+                            .px_2()
+                            .w(px(60.))
+                            .border_1()
+                            .border_color(if self.key_focus { rgb(0x3478F6) } else { rgb(0xBBBBBB) })
+                            .bg(rgb(0xFFFFFF))
+                            .cursor_text()
+                            .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                this.key_focus = true;
+                                cx.notify();
+                            }))
+                            .child(format!(
+                                "{}",
+                                if self.key.is_empty() { "none" } else { &self.key }
+                            )),
+                    ),
+            )
+            .child(div().child(format!(
+                "Shortcut shown: {}",
+                if self.shortcut().is_empty() { "(none)".to_string() } else { self.shortcut() }
+            )))
             .child(
                 div()
                     .flex()
@@ -189,6 +296,20 @@ impl gpui::Render for MenuEditorView {
                     .child("Closing the window keeps the menu with the form."),
             )
     }
+}
+
+/// A modifier toggle: a bordered label, filled when the modifier is on.
+fn modifier_toggle(id: &'static str, label: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .px_2()
+        .py_1()
+        .border_1()
+        .border_color(rgb(0xBBBBBB))
+        .rounded_md()
+        .cursor_pointer()
+        .when(on, |d| d.bg(rgb(0xCFE3FF)))
+        .child(label)
 }
 
 /// One of the Menu Editor's buttons: a bordered, clickable label.

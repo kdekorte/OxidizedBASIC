@@ -1610,6 +1610,10 @@ impl Ide {
             .flex_none()
             .w(px(self.panes.toolbox_w))
             .min_w_0()
+            // the column takes no more height than the row it sits in, so the
+            // scrolling buttons stay above the Immediate pane instead of under it
+            .min_h_0()
+            .overflow_hidden()
             .rounded_lg()
             .border_1()
             .border_color(rgb(BORDER))
@@ -1622,6 +1626,7 @@ impl Ide {
                     .relative()
                     .flex_1()
                     .min_h_0()
+                    .overflow_hidden()
                     .child(
                         div()
                             .id("toolbox-viewport")

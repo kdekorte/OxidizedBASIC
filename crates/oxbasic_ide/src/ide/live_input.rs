@@ -168,7 +168,21 @@ impl FormRunner {
         let old_focus = std::mem::replace(&mut self.focused, new_focus);
         let button = button_of(ev.button);
         let (x, y) = self.local(target, ev.position);
-        // VB's double click: MouseDown, MouseUp, Click — then DblClick and
+        // a press on a TabControl's strip selects the tab under it, as VB does
+        if let (Some(i), ev::LEFT_BUTTON) = (target, button) {
+            if self.form.controls[i].kind == oxbasic_ui::ControlKind::TabControl
+                && y < oxbasic_ui::gpui_controls::TAB_STRIP_H
+            {
+                if let Some(tab) =
+                    oxbasic_ui::gpui_controls::tab_at(&self.form.controls[i].tabs, x)
+                {
+                    self.tell(UserEdit::Tab {
+                        control: i,
+                        tab: tab as u8,
+                    });
+                }
+            }
+        }
         // MouseUp for the second press, which clicks no more. Windows sends
         // a double click only for the second click of a burst (the third
         // starts a single again, the fourth is a double), while the count

@@ -376,6 +376,8 @@ fn tabs_form() -> FormSpec {
         "Level:",
         (36.0, 56.0, 120.0, 20.0),
     ));
+    let last = f.controls.len() - 1;
+    f.controls[last].page = 2;
     let mut level = control("sldLevel", Slider, (36.0, 80.0, 240.0, 30.0));
     level.scroll_min = 0;
     level.scroll_max = 10;

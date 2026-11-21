@@ -794,9 +794,9 @@ fn serve(
             Ok(DebugCommand::Edit(form, e)) => {
                 // the control the edit is for, so its event is raised on it
                 let control = match &e {
-                    UserEdit::Scroll { control, .. } | UserEdit::Value { control, .. } => {
-                        Some(*control)
-                    }
+                    UserEdit::Scroll { control, .. }
+                    | UserEdit::Value { control, .. }
+                    | UserEdit::Tab { control, .. } => Some(*control),
                     _ => None,
                 };
                 apply_edit(host, form, e);

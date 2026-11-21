@@ -87,3 +87,46 @@ fn a_tab_change_raises_click() {
         h.borrow().raised_handlers()
     );
 }
+
+#[test]
+fn a_press_on_the_strip_picks_the_tab_under_it() {
+    use crate::gpui_controls::{tab_at, tab_width};
+    let tabs: Vec<String> = vec!["General".into(), "Options".into(), "Advanced".into()];
+    let first = tab_width("General");
+    assert_eq!(tab_at(&tabs, 0.0), Some(0));
+    assert_eq!(tab_at(&tabs, first - 1.0), Some(0));
+    assert_eq!(tab_at(&tabs, first + 1.0), Some(1));
+    let past_last = tab_width("General") + tab_width("Options") + tab_width("Advanced");
+    assert_eq!(tab_at(&tabs, past_last + 1.0), None, "past the last tab");
+    assert_eq!(tab_at(&tabs, -1.0), None, "left of the control");
+}
+
+#[test]
+fn a_tab_press_selects_that_page_and_raises_click() {
+    let h = host();
+    h.borrow_mut().apply_edit(crate::host::UserEdit::Tab {
+        control: 0,
+        tab: 1,
+    });
+    assert_eq!(h.borrow().state[0].tab, 1);
+    assert!(h
+        .borrow()
+        .raised_handlers()
+        .iter()
+        .any(|e| e == "Tab1_Click"));
+}
+
+#[test]
+fn a_tab_press_on_the_selected_or_a_missing_page_does_nothing() {
+    let h = host();
+    h.borrow_mut().apply_edit(crate::host::UserEdit::Tab {
+        control: 0,
+        tab: 0,
+    });
+    h.borrow_mut().apply_edit(crate::host::UserEdit::Tab {
+        control: 0,
+        tab: 9,
+    });
+    assert_eq!(h.borrow().state[0].tab, 0);
+    assert!(h.borrow().raised_handlers().is_empty());
+}

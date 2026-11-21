@@ -249,8 +249,8 @@ needs a Developer ID signature and notarisation, which the script does not do.
   every file; a file the filter rejects comes back as `""`.
 - Shapes and Lines aren't clamped to the form, and choosing a file in a
   FileListBox doesn't open it.
-- The Menu Editor window and its designer button aren't built yet; menus
-  are written in the `.oxform` file for now.
+- Menus are edited in the Menu Editor (Properties → Menu Editor…), with
+  shortcuts set from modifier toggles and a key box.
 - `Resume`/`Resume Next` resume precisely when the handler sits at the
   same block level as the failing statement (the common VB idiom).
 - No `ReDim`, file I/O, or `Mid`-statement yet.

@@ -363,6 +363,8 @@ impl FormSnapshot {
 pub enum UserEdit {
     /// A scrollbar dragged to `value` (clamped to its `Min`..`Max`).
     Scroll { control: usize, value: i32 },
+    /// A press on a TabControl's strip selects tab `tab` (VB's Click).
+    Tab { control: usize, tab: u8 },
     /// The field's whole text after a keystroke.
     Text { control: usize, text: String },
     /// The user picked row `index` of a list or combo box.
@@ -680,6 +682,22 @@ impl FormHost {
             UserEdit::Value { control, value } => {
                 if control < self.state.len() {
                     set_value(&self.form, &mut self.state, control, value);
+                }
+            }
+            // a press on a TabControl's strip: the same as code setting Tab,
+            // so the page changes and Click runs
+            UserEdit::Tab { control, tab } => {
+                if control < self.state.len()
+                    && self.form.controls[control].kind == ControlKind::TabControl
+                    && (tab as usize) < self.form.controls[control].tabs.len()
+                    && self.state[control].tab != tab
+                {
+                    let before = self.watched(control);
+                    self.state[control].tab = tab;
+                    self.form.controls[control].tab = tab;
+                    self.changed = true;
+                    self.touched[control] = true;
+                    self.raise_changes(control, &before);
                 }
             }
             // a scrollbar dragged to a new Value, kept within its range

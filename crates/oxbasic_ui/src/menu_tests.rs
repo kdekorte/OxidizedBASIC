@@ -194,3 +194,75 @@ fn a_mnemonic_is_not_shown_on_a_mac_menu_but_a_literal_ampersand_is() {
     assert_eq!(display_caption("-"), "-");
     assert_eq!(display_caption(""), "");
 }
+
+#[test]
+fn toggles_and_key_make_a_shortcut() {
+    use crate::menu::{shortcut_from, Modifiers};
+    let ctrl_shift = Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Default::default()
+    };
+    assert_eq!(shortcut_from(ctrl_shift, "s"), "Ctrl+Shift+S");
+    let cmd_alt = Modifiers {
+        alt: true,
+        cmd: true,
+        ..Default::default()
+    };
+    assert_eq!(shortcut_from(cmd_alt, "x"), "Cmd+Alt+X");
+    assert_eq!(shortcut_from(Modifiers::default(), "F5"), "F5");
+}
+
+#[test]
+fn an_empty_key_means_no_shortcut_whatever_the_toggles() {
+    use crate::menu::{shortcut_from, Modifiers};
+    let all = Modifiers {
+        ctrl: true,
+        cmd: true,
+        alt: true,
+        shift: true,
+    };
+    assert_eq!(shortcut_from(all, ""), "");
+    assert_eq!(shortcut_from(all, "  "), "");
+}
+
+#[test]
+fn a_shortcut_splits_back_into_toggles_and_key() {
+    use crate::menu::{shortcut_parts, Modifiers};
+    let (mods, key) = shortcut_parts("Ctrl+Shift+S");
+    assert_eq!(
+        mods,
+        Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        }
+    );
+    assert_eq!(key, "S");
+    assert_eq!(shortcut_parts(""), (Modifiers::default(), String::new()));
+}
+
+#[test]
+fn every_built_shortcut_is_one_the_module_can_bind() {
+    use crate::menu::{shortcut_from, shortcut_is_valid, Modifiers};
+    let m = Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Default::default()
+    };
+    assert!(shortcut_is_valid(&shortcut_from(m, "d")));
+    assert!(shortcut_is_valid(&shortcut_from(m, "F12")));
+}
+
+
+#[test]
+fn the_key_box_takes_one_letter_digit_or_function_key() {
+    use crate::menu::key_from_text;
+    assert_eq!(key_from_text("s").as_deref(), Some("S"));
+    assert_eq!(key_from_text("7").as_deref(), Some("7"));
+    assert_eq!(key_from_text("f5").as_deref(), Some("F5"));
+    assert_eq!(key_from_text("F12").as_deref(), Some("F12"));
+    assert_eq!(key_from_text("F13"), None, "only F1 to F12");
+    assert_eq!(key_from_text("ab"), None);
+    assert_eq!(key_from_text("+"), None);
+}

@@ -135,3 +135,20 @@ fn choosing_a_tab_by_the_menu_opens_the_tabs_form() {
         .send(DebugCommand::Call(0, "mnuTabs_Click".into(), Vec::new()));
     run.until(|e| matches!(e, DebugEvent::FormShown(s) if s.form_index == TABS));
 }
+
+#[test]
+fn the_advanced_page_shows_only_its_own_controls() {
+    let run = Run::start();
+    open(&run, "cmdTabs_Click", TABS);
+    let tabs = run.control(TABS, "tabSettings", None);
+    let level = run.control(TABS, "lblLevel", None);
+    // Back to General: the Advanced page's Level label is not shown
+    let snap = run.call(TABS, "cmdBack_Click", &[]);
+    assert_eq!(snap.state[tabs].tab, 0);
+    assert!(!snap.form.shown(level), "Level belongs to the Advanced page");
+    // on to Advanced: the label shows
+    run.call(TABS, "cmdNext_Click", &[]);
+    let snap = run.call(TABS, "cmdNext_Click", &[]);
+    assert_eq!(snap.state[tabs].tab, 2);
+    assert!(snap.form.shown(level), "Level shows on the Advanced page");
+}

@@ -542,8 +542,8 @@ PictureBox. Checkbox-style lists (`ListBox.Style` 1), `Sorted`,
 `ItemData`, `TopIndex`, `ListBox.Columns`. `DragDrop`/`OLEDrag`. Animated
 or `.cur` cursors (a `MouseIcon` is a still image). On a platform other
 than macOS the waiting cursor and `MouseIcon` show the arrow and the
-pointing hand. The Menu Editor window and its designer button aren't built yet:
-menus are written in the `.oxform` file (the rules are in place and tested).
+pointing hand. The Menu Editor (Properties → Menu Editor…) edits the items,
+their shortcuts (modifier toggles and a key, F1–F12 included), and their order.
 Shapes are not clamped to the form, so a Shape or Line sized
 past the form's edge is drawn past it. `FileListBox.Pattern` raises no
 `Change`, and `FileName` can't be set. Choosing a file doesn't open it.
