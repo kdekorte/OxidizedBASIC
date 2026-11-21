@@ -92,29 +92,45 @@ pub enum Variant {
 
 ## 5. Visual Component Engine (GPUI & GPUI Kit Mapping)
 
-Classic Visual BASIC controls are mapped directly to high-performance GPU-rendered **GPUI Kit** components:
+Classic Visual BASIC controls are drawn directly by `oxbasic_ui`'s `paint_control`
+(`crates/oxbasic_ui/src/gpui_controls.rs`) as GPUI `div()` elements positioned
+from the form's coordinates. Each kind is one control in the form model
+(`ControlKind`), and the same drawing serves the designer, the IDE's live form
+windows and the packaged app.
 
-| Classic BASIC Control | GPUI Kit / GPUI Equivalent | Description & Behavior |
+| Classic BASIC Control | GPUI Equivalent | Description & Behavior |
 | :--- | :--- | :--- |
-| `Form` | `gpui::Window` / `Root` | Top-level GPU window with Flex layout engine |
-| `CommandButton` | `gpui_kit::component::button::Button` | Interactive button with hover/active/focus states |
-| `TextBox` | `gpui_kit::component::input::Input` / Rope Editor | High-performance text edit field |
-| `Label` | `gpui::elements::Label` / `Text` | GPU text-shapen static text display |
-| `Frame` | `gpui::div().border()` | Flexbox container with customizable border/padding |
-| `ListBox` | `gpui_kit::component::table` / Virtualized List | Virtual-scrolled list item view |
-| `ComboBox` | `gpui_kit::component::select` | Dropdown select component |
-| `PictureBox` / `Image` | `gpui::img()` | Accelerated image loader & canvas frame |
-| `Timer` | `gpui::Context::spawn` / Async Timer | Non-blocking async loop timer thread |
+| `Form` | `gpui::Window` | Top-level GPU window; its menu bar is the application's menu while it is in front |
+| `CommandButton` | `div()` with hover/active states | Interactive button; `Click` runs its handler |
+| `TextBox` | Text field with caret and selection | Editable text; `Change` on each edit |
+| `Label` | Text `div()` | Static text, on the form background or its `BackColor` |
+| `Frame` | Bordered `div()` with a caption | Container: its controls move and disable with it |
+| `ListBox` / `ComboBox` | Virtual-scrolled list / drop-down list | Selection, `Click` / `Change`; `ComboBox` `Style` gives an editable or drop-down field |
+| `CheckBox` / `OptionButton` | Box or circle with a label | `Value` 0 / 1 / 2 (CheckBox) or 0 / 1 (OptionButton) |
+| `PictureBox` / `Image` | `gpui::img()` and a drawn canvas | `Picture`, `Stretch`, and `Line`/`Circle`/`PSet` drawn into the box |
+| `HScrollBar` / `VScrollBar` | Track with a draggable thumb | `Value` within `Min`..`Max`; `Change` and `Scroll` |
+| `Slider` | Track with a thumb | A draggable range, `Orientation` horizontal or vertical |
+| `ProgressBar` | Track filled to `Value` | Set by the program; it takes no input |
+| `TabControl` | A strip of tabs over a page | `Tab` is the selected page; the controls with `Container` = the tab's control and `Page` = its index show only on that page; a tab press or `Tab` raises `Click` |
+| `Shape` / `Line` | Painted rectangle, oval or line | Drawn no further than the form's edge |
+| `VolumeListBox` / `DirListBox` / `FileListBox` | List of volumes / folders / files | `Text`, `Path`, `Pattern`, `FileName`; `DblClick` on a file |
+| `Timer` | Async timer task | Not drawn; `Timer` event at `Interval` |
 
 ### 5.1 Event Dispatcher Engine
-The GPUI event model communicates with the BASIC runtime through Rust channel message passing (`async_trait` and GPUI `Context` emitters):
+Events travel from the window to the BASIC runtime through the debug session:
+the window sends a `UserEdit` (a click, a value, a tab) to the program, and the
+program's changes come back as a `FormSnapshot` (the form, its per-control state,
+and which controls the program touched). `FormSnapshot::apply_to` applies the
+program's copy of each touched control to the window, so keystrokes typed while
+a snapshot is in flight are kept. Handlers are named `<Control>_<Event>` and run
+in the program; `wire()` attaches the pointer, focus and key handlers to each part
+of a control.
 
-```rust
-// Standard CommandButton Click Bridge Example
-button.on_click(cx.listener(|this, _event, window_cx| {
-    this.runtime.evaluate_sub("Command1_Click", vec![]);
-}));
-```
+Menu items (`Menu` on a form) are GPUI actions. A menu item is enabled only while
+its form's window holds the focus, because the action's handler sits on the
+focus path; a form window therefore focuses its form when it opens and when it
+becomes active.
+
 
 ---
 
@@ -126,6 +142,14 @@ The OxidizedBASIC IDE is a native GPUI application providing sub-millisecond edi
 2. **Code Editor:** Utilizes Tree-sitter for instant syntax highlighting, diagnostics, and code folding backed by a fast Rope data structure.
 3. **Property Inspector:** Reactive side panel rendering active widget properties (Colors, Dimensions, Captions, Events).
 4. **Immediate Window / REPL:** Interactive execution window connected directly to the `oxbasic_runtime` environment context.
+5. **Menu Editor:** Properties → Menu Editor… edits a form's `menus` list (New, Delete, Indent, Outdent, Apply, and shortcuts from modifier toggles and a key box). Closing the window keeps the menu.
+6. **Form windows:** Each form the program shows opens its own window (`FormRunner` in the IDE, the same runner in a packaged app). The form's menu becomes the application's menu bar while its window is in front; the IDE's Edit, View and Run stay in the bar.
+
+### 6.1 Packaged Apps
+- `scripts/make_app.sh` builds the release `oxbasic` binary and packages it as `dist/OxidizedBASIC.app` (the IDE, started with `ide`), with the app icon and an ad-hoc signature.
+- `oxbasic play <project.oxproj>` runs a project as an app with no editor or designer: it starts the program on the IDE's debug session and opens a window for each form the program shows. The app ends when the program ends or its last form window closes. Its own menu bar holds About and Quit.
+- A notarised, Developer ID-signed copy for another Mac is not produced yet.
+
 
 ---
 
@@ -147,4 +171,4 @@ The OxidizedBASIC IDE is a native GPUI application providing sub-millisecond edi
 
 ### Phase 4: JIT Codegen & Packaging (Months 10–12)
 - Integrate Cranelift JIT backend for compiling BASIC routines directly to native assembly.
-- Package bundle generator producing self-contained native binaries for macOS (`.app`).
+- Packaging: `scripts/make_app.sh` produces the macOS `.app` (done for the IDE and for `oxbasic play`); a Developer ID-signed and notarised build for other Macs is still to do.
