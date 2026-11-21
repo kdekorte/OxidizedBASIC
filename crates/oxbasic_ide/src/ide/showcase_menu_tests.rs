@@ -29,14 +29,14 @@ fn index_of(menus: &[MenuItem], name: &str) -> usize {
 }
 
 #[test]
-fn the_menu_has_file_and_help_with_the_items_under_them() {
+fn the_menu_has_the_app_menu_and_file_and_no_help() {
     let menus = form1_menus();
     let tops: Vec<&str> = menus
         .iter()
-        .filter(|m| m.parent.is_none())
+        .filter(|m| m.parent.is_none() && !m.app_menu && !m.is_separator())
         .map(|m| m.caption.as_str())
         .collect();
-    assert_eq!(tops, vec!["&File", "&Help"]);
+    assert_eq!(tops, vec!["&File"], "Help is gone");
     let drawing = &menus[index_of(&menus, "mnuDrawing")];
     assert_eq!(drawing.shortcut, "Ctrl+D");
     assert!(oxbasic_ui::menu::shortcut_is_valid(&drawing.shortcut));
@@ -49,11 +49,11 @@ fn a_separator_is_not_a_command() {
 }
 
 #[test]
-fn about_is_under_help() {
+fn about_and_quit_are_under_the_app_menu() {
     let menus = form1_menus();
-    let about = index_of(&menus, "mnuAbout");
-    let parent = menus[about].parent.expect("About has a parent");
-    assert_eq!(menus[parent].caption, "&Help");
+    assert!(menus[index_of(&menus, "mnuAbout")].app_menu);
+    assert!(menus[index_of(&menus, "mnuQuit")].app_menu);
+    assert!(menus.iter().all(|m| m.caption != "&Help"));
 }
 
 #[test]

@@ -88,6 +88,24 @@ fn a_tab_change_raises_click() {
     );
 }
 
+/// The program's `Tab` reaches the window's copy of the form: the strip
+/// (its state) and the pages (the form) agree, as a window that was already
+/// open shows them after the program's change.
+#[test]
+fn a_program_tab_change_reaches_an_open_windows_strip() {
+    let h = three_page_host();
+    // the window opened on General, as the user sees it
+    let mut form = h.borrow().form.clone();
+    let mut state = h.borrow().state.clone();
+    assert_eq!(state[0].tab, 0);
+    crate::host::tests::run("Tab1.Tab = 2\n", &h).unwrap();
+    let snap = h.borrow_mut().take_changes().unwrap();
+    snap.apply_to(&mut form, &mut state);
+    assert_eq!(state[0].tab, 2, "the strip shows the program's page");
+    assert_eq!(form.controls[0].tab, 2, "and the pages agree with it");
+    assert!(form.shown(3), "Adv (page 2) shows");
+}
+
 #[test]
 fn a_press_on_the_strip_picks_the_tab_under_it() {
     use crate::gpui_controls::{tab_at, tab_width};
@@ -129,4 +147,35 @@ fn a_tab_press_on_the_selected_or_a_missing_page_does_nothing() {
     });
     assert_eq!(h.borrow().state[0].tab, 0);
     assert!(h.borrow().raised_handlers().is_empty());
+}
+
+/// Three pages, as the showcase's Tabs form has them: a control on each.
+fn three_page_host() -> Rc<RefCell<FormHost>> {
+    let mut f = FormSpec::new("Form1", "Tabs", 400.0, 300.0);
+    let mut t = ControlSpec::new(
+        "Tab1",
+        ControlKind::TabControl,
+        Rect::new(0.0, 0.0, 320.0, 200.0),
+    );
+    t.tabs = vec!["General".into(), "Options".into(), "Advanced".into()];
+    f.control(t);
+    for (name, page) in [("Lvl", 0u8), ("Opt", 1), ("Adv", 2)] {
+        let mut c = ControlSpec::new(name, ControlKind::Label, Rect::new(10.0, 40.0, 120.0, 24.0));
+        c.container = Some("Tab1".into());
+        c.page = page;
+        f.control(c);
+    }
+    Rc::new(RefCell::new(FormHost::new(f)))
+}
+
+#[test]
+fn the_window_snapshot_shows_the_page_the_program_selected() {
+    let h = three_page_host();
+    crate::host::tests::run("Tab1.Tab = 2\n", &h).unwrap();
+    let snap = h.borrow().snapshot();
+    assert_eq!(snap.state[0].tab, 2, "the program's Tab is page 3");
+    assert_eq!(snap.form.controls[0].tab, 2, "the form's copy agrees");
+    assert!(!snap.form.shown(1), "Lvl hidden");
+    assert!(!snap.form.shown(2), "Opt hidden");
+    assert!(snap.form.shown(3), "Adv shows on the selected page");
 }

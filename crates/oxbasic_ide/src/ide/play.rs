@@ -14,6 +14,19 @@ use std::rc::Rc;
 
 gpui::actions!(play, [AboutApp, QuitApp]);
 
+/// The packaged app's own menu bar: About, a separator and Quit. Shown at
+/// start-up, and again when a form window is not in front.
+fn set_app_menus(cx: &mut App) {
+    cx.set_menus(vec![gpui::Menu {
+        name: "App".into(),
+        items: vec![
+            gpui::MenuItem::action("About", AboutApp),
+            gpui::MenuItem::separator(),
+            gpui::MenuItem::action("Quit", QuitApp),
+        ],
+    }]);
+}
+
 /// The run-only app's state: the running session and the form windows it has
 /// opened, by form index.
 pub(super) struct PlayApp {
@@ -90,14 +103,7 @@ pub fn run_play(file: &std::path::Path) {
             }
         });
         cx.on_action(|_: &QuitApp, cx| cx.quit());
-        cx.set_menus(vec![gpui::Menu {
-            name: "App".into(),
-            items: vec![
-                gpui::MenuItem::action("About", AboutApp),
-                gpui::MenuItem::separator(),
-                gpui::MenuItem::action("Quit", QuitApp),
-            ],
-        }]);
+        set_app_menus(cx);
         let app = Rc::new(RefCell::new(app));
         // poll the program's events and act on them, as the IDE does
         cx.spawn(async move |cx| loop {
@@ -188,16 +194,36 @@ pub fn run_play(file: &std::path::Path) {
                 }),
                 ..Default::default()
             },
-            move |_win, cx| {
+            move |win, cx| {
                 cx.new(|cx| {
                     let mut runner = FormRunner::new(form.clone(), index, session.clone(), cx);
                     runner.state = state.clone();
+                    // the form's menu is the application's bar while its window
+                    // is in front (as in the IDE); otherwise the app's own bar
+                    // (About and Quit) shows
+                    let menus = form.menus.clone();
+                    let sub = cx.observe_window_activation(win, move |runner, win, cx| {
+                        if win.is_window_active() {
+                            oxbasic_ui::menu_bar::install(&menus, cx);
+                            // the menu's items are enabled only while the form
+                            // holds the focus: its handler is on that path
+                            win.focus(&runner.form_focus);
+                        } else {
+                            set_app_menus(cx);
+                        }
+                    });
+                    runner._subscriptions.push(sub);
                     runner
                 })
             },
         );
         match opened {
             Ok(handle) => {
+                // the new window starts with its form focused, so its menu
+                // items are enabled (activation alone doesn't focus the form)
+                let _ = handle.update(cx, |runner, win, _| {
+                    win.focus(&runner.form_focus);
+                });
                 app.borrow_mut().windows.insert(index, handle);
             }
             Err(e) => eprintln!("oxbasic play: form window failed: {}", e),

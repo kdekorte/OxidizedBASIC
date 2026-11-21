@@ -1,3 +1,4 @@
+
 //! The Menu Editor window, opened from the designer's Properties for a form. It
 //! edits a copy of the form's menu; Done (or closing the window) writes the
 //! copy back into the designer's working form, which saves with the project.
@@ -65,6 +66,7 @@ impl MenuEditorView {
 
     /// The row's text: its caption at its depth, with `&` mnemonics hidden and
     /// a separator drawn as a rule.
+    #[cfg(test)]
     pub fn row_label(item: &MenuItem, depth: usize) -> String {
         let label = if item.is_separator() {
             "────".to_string()
@@ -123,38 +125,85 @@ impl MenuEditorView {
     }
 }
 
+impl MenuEditorView {
+    /// "Delete": remove the selected item and its submenu.
+    pub fn delete_selected(&mut self) -> bool {
+        let done = self.editor.delete();
+        if done {
+            self.caption.clear();
+            self.caret = 0;
+        }
+        done
+    }
+}
+
 impl gpui::Render for MenuEditorView {
     fn render(&mut self, _win: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected_row = self.editor.selected;
         let rows: Vec<gpui::Stateful<gpui::Div>> = self
             .editor
             .rows()
             .into_iter()
             .map(|(i, depth)| {
-                let selected = self.editor.selected == Some(i);
-                div()
+                let item = &self.editor.items[i];
+                let selected = selected_row == Some(i);
+                let mut row = div()
                     .id(("menu-row", i))
-                    .px_2()
-                    .py_1()
+                    .h(px(24.))
+                    .flex()
+                    .items_center()
+                    .pl(px(8. + 18. * depth as f32))
+                    .pr_2()
                     .cursor_pointer()
-                    .when(selected, |d| d.bg(rgb(0xCFE3FF)))
-                    .child(SharedString::from(Self::row_label(
-                        &self.editor.items[i],
-                        depth,
-                    )))
-                    .on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _win, cx| {
-                        this.select(Some(i));
-                        cx.notify();
-                    }))
+                    .when(selected, |d| d.bg(rgb(0x3478F6)).text_color(rgb(0xFFFFFF)))
+                    .when(!selected, |d| d.hover(|d| d.bg(rgb(0xE5E5EA))));
+                if item.is_separator() {
+                    row = row.child(div().w_full().h(px(1.)).bg(rgb(0xB0B0B8)));
+                } else {
+                    let label = display_caption(&item.caption);
+                    let shortcut = item.shortcut.clone();
+                    row = row
+                        .child(div().flex_1().child(SharedString::from(label)))
+                        .when(!shortcut.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .text_color(if selected {
+                                        rgb(0xDDE8FF)
+                                    } else {
+                                        rgb(0x8E8E93)
+                                    })
+                                    .child(SharedString::from(shortcut)),
+                            )
+                        });
+                }
+                row.on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _win, cx| {
+                    this.select(Some(i));
+                    cx.notify();
+                }))
             })
             .collect();
+        let has_selection = self.editor.selected.is_some();
+        let app_item = self
+            .editor
+            .selected
+            .is_some_and(|i| self.editor.items[i].app_menu);
+        let key_text = if self.key.is_empty() {
+            "none".to_string()
+        } else {
+            self.key.clone()
+        };
+        let preview = match self.shortcut() {
+            s if s.is_empty() => "no shortcut".to_string(),
+            s => s,
+        };
         div()
             .size_full()
             .bg(rgb(0xF2F2F7))
             .text_color(rgb(0x1D1D1F))
             .flex()
             .flex_col()
-            .gap_2()
-            .p_3()
+            .gap_3()
+            .p_4()
             .key_context("MenuEditor")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, _win, cx| {
@@ -185,75 +234,131 @@ impl gpui::Render for MenuEditorView {
             }))
             .child(
                 div()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("Menu Editor"),
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child("Menu items"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x6E6E73))
+                            .child("Select an item to edit it. Indent makes it a submenu of the item above."),
+                    ),
             )
             .child(
                 div()
                     .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .py_1()
+                    .rounded_md()
                     .border_1()
-                    .border_color(rgb(0xBBBBBB))
+                    .border_color(rgb(0xC7C7CC))
+                    .bg(rgb(0xFFFFFF))
                     .overflow_hidden()
                     .children(rows),
             )
-            .child(div().child(format!("Caption: {}|", self.caption)))
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
-                    .gap_2()
                     .items_center()
-                    .child(div().child("Shortcut:"))
-                    .child(modifier_toggle("mod-ctrl", "⌃ Ctrl", self.mods.ctrl).on_click(
-                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
-                            this.toggle(0);
-                            cx.notify();
-                        }),
-                    ))
-                    .child(modifier_toggle("mod-cmd", "⌘ Cmd", self.mods.cmd).on_click(
-                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
-                            this.toggle(1);
-                            cx.notify();
-                        }),
-                    ))
-                    .child(modifier_toggle("mod-alt", "⌥ Alt", self.mods.alt).on_click(
-                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
-                            this.toggle(2);
-                            cx.notify();
-                        }),
-                    ))
-                    .child(modifier_toggle("mod-shift", "⇧ Shift", self.mods.shift).on_click(
-                        cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
-                            this.toggle(3);
-                            cx.notify();
-                        }),
-                    ))
+                    .gap_3()
+                    .child(div().w(px(70.)).child("Caption"))
                     .child(
                         div()
-                            .id("menu-key")
+                            .flex_1()
                             .px_2()
-                            .w(px(60.))
+                            .py_1()
+                            .rounded_md()
                             .border_1()
-                            .border_color(if self.key_focus { rgb(0x3478F6) } else { rgb(0xBBBBBB) })
+                            .border_color(if self.key_focus {
+                                rgb(0xC7C7CC)
+                            } else {
+                                rgb(0x3478F6)
+                            })
                             .bg(rgb(0xFFFFFF))
-                            .cursor_text()
-                            .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
-                                this.key_focus = true;
-                                cx.notify();
-                            }))
-                            .child(format!(
-                                "{}",
-                                if self.key.is_empty() { "none" } else { &self.key }
-                            )),
+                            .child(format!("{}|", self.caption)),
                     ),
             )
-            .child(div().child(format!(
-                "Shortcut shown: {}",
-                if self.shortcut().is_empty() { "(none)".to_string() } else { self.shortcut() }
-            )))
+
             .child(
                 div()
                     .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().w(px(70.)).child("Shortcut"))
+                            .child(modifier_toggle("mod-ctrl", "⌃ Ctrl", self.mods.ctrl).on_click(
+                                cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                    this.toggle(0);
+                                    cx.notify();
+                                }),
+                            ))
+                            .child(modifier_toggle("mod-cmd", "⌘ Cmd", self.mods.cmd).on_click(
+                                cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                    this.toggle(1);
+                                    cx.notify();
+                                }),
+                            ))
+                            .child(modifier_toggle("mod-alt", "⌥ Alt", self.mods.alt).on_click(
+                                cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                    this.toggle(2);
+                                    cx.notify();
+                                }),
+                            ))
+                            .child(
+                                modifier_toggle("mod-shift", "⇧ Shift", self.mods.shift).on_click(
+                                    cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                        this.toggle(3);
+                                        cx.notify();
+                                    }),
+                                ),
+                            )
+                            .child(
+                                div()
+                                    .id("menu-key")
+                                    .w(px(70.))
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(if self.key_focus {
+                                        rgb(0x3478F6)
+                                    } else {
+                                        rgb(0xC7C7CC)
+                                    })
+                                    .bg(rgb(0xFFFFFF))
+                                    .cursor_text()
+                                    .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                        this.key_focus = true;
+                                        cx.notify();
+                                    }))
+                                    .child(key_text),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .pl(px(78.))
+                            .text_sm()
+                            .text_color(rgb(0x6E6E73))
+                            .child(format!("Shows as: {}", preview)),
+                    ),
+            )
+
+            .child(
+                div()
+                    .flex()
+                    .items_center()
                     .flex_wrap()
                     .gap_2()
                     .child(menu_button("menu-new", "New").on_click(cx.listener(
@@ -262,37 +367,53 @@ impl gpui::Render for MenuEditorView {
                             cx.notify();
                         },
                     )))
-                    .child(menu_button("menu-delete", "Delete").on_click(cx.listener(
-                        |this, _ev: &gpui::ClickEvent, _win, cx| {
-                            this.delete_selected();
-                            cx.notify();
-                        },
-                    )))
-                    .child(menu_button("menu-indent", "Indent →").on_click(cx.listener(
-                        |this, _ev: &gpui::ClickEvent, _win, cx| {
-                            this.editor.indent();
-                            cx.notify();
-                        },
-                    )))
                     .child(
-                        menu_button("menu-outdent", "Outdent ←").on_click(cx.listener(
-                            |this, _ev: &gpui::ClickEvent, _win, cx| {
+                        menu_button("menu-delete", "Delete")
+                            .when(!has_selection, |d| d.opacity(0.4))
+                            .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                this.delete_selected();
+                                cx.notify();
+                            })),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        menu_button("menu-app", "App Menu")
+                            .when(!has_selection, |d| d.opacity(0.4))
+                            .when(app_item, |d| d.bg(rgb(0xCFE3FF)).border_color(rgb(0x3478F6)))
+                            .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                this.editor.toggle_app_menu();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        menu_button("menu-indent", "Indent →")
+                            .when(!has_selection, |d| d.opacity(0.4))
+                            .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                this.editor.indent();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        menu_button("menu-outdent", "Outdent ←")
+                            .when(!has_selection, |d| d.opacity(0.4))
+                            .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
                                 this.editor.outdent();
                                 cx.notify();
-                            },
-                        )),
+                            })),
                     )
-                    .child(menu_button("menu-apply", "Apply").on_click(cx.listener(
-                        |this, _ev: &gpui::ClickEvent, _win, cx| {
-                            this.apply_caption();
-                            cx.notify();
-                        },
-                    ))),
+                    .child(
+                        menu_button("menu-apply", "Apply")
+                            .when(!has_selection, |d| d.opacity(0.4))
+                            .on_click(cx.listener(|this, _ev: &gpui::ClickEvent, _win, cx| {
+                                this.apply_caption();
+                                cx.notify();
+                            })),
+                    ),
             )
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x555555))
+                    .text_color(rgb(0x6E6E73))
                     .child("Closing the window keeps the menu with the form."),
             )
     }
@@ -304,11 +425,11 @@ fn modifier_toggle(id: &'static str, label: &'static str, on: bool) -> gpui::Sta
         .id(id)
         .px_2()
         .py_1()
-        .border_1()
-        .border_color(rgb(0xBBBBBB))
         .rounded_md()
+        .border_1()
+        .border_color(if on { rgb(0x3478F6) } else { rgb(0xC7C7CC) })
+        .bg(if on { rgb(0xCFE3FF) } else { rgb(0xFFFFFF) })
         .cursor_pointer()
-        .when(on, |d| d.bg(rgb(0xCFE3FF)))
         .child(label)
 }
 
@@ -318,24 +439,14 @@ fn menu_button(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Di
         .id(id)
         .px_3()
         .py_1()
-        .border_1()
-        .border_color(rgb(0xBBBBBB))
         .rounded_md()
+        .border_1()
+        .border_color(rgb(0xC7C7CC))
+        .bg(rgb(0xFFFFFF))
         .cursor_pointer()
         .child(label)
 }
 
-impl MenuEditorView {
-    /// "Delete": remove the selected item and its submenu.
-    pub fn delete_selected(&mut self) -> bool {
-        let done = self.editor.delete();
-        if done {
-            self.caption.clear();
-            self.caret = 0;
-        }
-        done
-    }
-}
 
 impl Ide {
     /// Open the Menu Editor for the designer's form: a window on a copy of the

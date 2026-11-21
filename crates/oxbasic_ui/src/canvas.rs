@@ -225,6 +225,22 @@ impl Canvas {
 /// picking the other diagonal. A Shape is a rectangle (`shape_type` 0), a
 /// square (1, the shorter side), an oval (2) or a circle (3, the shorter
 /// side); `fill_style` 0 fills it solid, anything else leaves it outlined.
+/// The size a Shape or Line is drawn at: its own size, clamped so its far edge
+/// stays on the form. `left`/`top` are its origin on the form and
+/// `form_w`/`form_h` the form's size, all in pixels.
+pub fn clamped_size(
+    width: f32,
+    height: f32,
+    left: f32,
+    top: f32,
+    form_w: f32,
+    form_h: f32,
+) -> (f32, f32) {
+    let room_w = (form_w - left).max(0.0);
+    let room_h = (form_h - top).max(0.0);
+    (width.max(0.0).min(room_w), height.max(0.0).min(room_h))
+}
+
 pub fn control_shape(
     kind: crate::ControlKind,
     width: f32,

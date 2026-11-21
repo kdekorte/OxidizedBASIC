@@ -221,35 +221,29 @@ fn main_form() -> FormSpec {
         "Tabs…",
         (324.0, 430.0, 140.0, 30.0),
     ));
-    // the menu bar: File (Drawing, Files, Quit) and Help (About)
+    // the menu bar: the application menu (About, a separator, Quit) and File
+    // (Drawing, Files, Tabs). Help is not used.
     use oxbasic_ui::menu::MenuItem;
+    let mut about = MenuItem::new("mnuAbout", "&About…", None);
+    about.app_menu = true;
+    f.menus.push(about);
+    f.menus.push(MenuItem::new("mnuSep", "-", None));
+    let mut quit = MenuItem::new("mnuQuit", "&Quit", None);
+    quit.shortcut = "Ctrl+Q".into();
+    quit.app_menu = true;
+    f.menus.push(quit);
     let mut file = MenuItem::new("mnuFile", "&File", None);
     file.shortcut = String::new();
     f.menus.push(file);
-    let mut drawing = MenuItem::new("mnuDrawing", "&Drawing…", Some(0));
+    let mut drawing = MenuItem::new("mnuDrawing", "&Drawing…", Some(3));
     drawing.shortcut = "Ctrl+D".into();
     f.menus.push(drawing);
-    let mut files = MenuItem::new("mnuFiles", "&Files…", Some(0));
+    let mut files = MenuItem::new("mnuFiles", "&Files…", Some(3));
     files.shortcut = "Ctrl+F".into();
     f.menus.push(files);
-    let mut tabs_item = MenuItem::new("mnuTabs", "&Tabs…", Some(0));
+    let mut tabs_item = MenuItem::new("mnuTabs", "&Tabs…", Some(3));
     tabs_item.shortcut = "Ctrl+T".into();
     f.menus.push(tabs_item);
-    f.menus.push(MenuItem::new("mnuSep", "-", Some(0)));
-    let mut quit = MenuItem::new("mnuQuit", "&Quit", Some(0));
-    quit.shortcut = "Ctrl+Q".into();
-    f.menus.push(quit);
-    // Help is item 5; About sits under it
-    let help = MenuItem::new("mnuHelp", "&Help", None);
-    f.menus.push(help);
-    // About sits under Help, wherever Help ended up in the list
-    let help_at = f
-        .menus
-        .iter()
-        .position(|m| m.name == "mnuHelp")
-        .expect("Help");
-    f.menus
-        .push(MenuItem::new("mnuAbout", "&About…", Some(help_at)));
     f
 }
 

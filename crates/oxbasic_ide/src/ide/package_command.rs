@@ -100,7 +100,7 @@ fn app_name(bundle: &std::path::Path) -> String {
 /// own bundle (`Contents/Resources`), so that is looked at first; a development
 /// build (`cargo run`) finds it in the repo's packaging folder instead. Returns
 /// `None` when neither is there, and the package then has the default icon.
-fn app_icon() -> Option<std::path::PathBuf> {
+pub(super) fn app_icon() -> Option<std::path::PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         // Contents/MacOS/<exe> -> Contents/Resources/OxidizedBASIC.icns
         if let Some(contents) = exe.parent().and_then(|m| m.parent()) {

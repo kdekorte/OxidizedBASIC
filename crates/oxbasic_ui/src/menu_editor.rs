@@ -75,4 +75,16 @@ impl MenuEditor {
         self.selected
             .is_some_and(|i| menu::outdent(&mut self.items, i))
     }
+
+    /// Flip the selected top-level item's "App Menu" setting: it moves between
+    /// the application's menu and the bar. Nested items can't be app items.
+    pub fn toggle_app_menu(&mut self) -> bool {
+        match self.selected {
+            Some(i) if self.items[i].parent.is_none() && !self.items[i].is_separator() => {
+                self.items[i].app_menu = !self.items[i].app_menu;
+                true
+            }
+            _ => false,
+        }
+    }
 }

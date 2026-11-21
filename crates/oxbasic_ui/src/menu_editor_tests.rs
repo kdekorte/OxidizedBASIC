@@ -72,3 +72,25 @@ fn selecting_past_the_end_selects_nothing() {
     assert_eq!(ed.selected, None);
     assert!(!ed.indent() && !ed.outdent());
 }
+
+#[test]
+fn app_menu_toggles_a_top_level_item_only() {
+    let mut ed = MenuEditor::new(file_menu());
+    // File is top-level: it moves under the application menu and back
+    ed.select(Some(0));
+    assert!(ed.toggle_app_menu(), "a top-level item can be an app item");
+    assert!(ed.items[0].app_menu);
+    assert!(ed.toggle_app_menu());
+    assert!(!ed.items[0].app_menu);
+    // Open is nested: it can't be an app item
+    ed.select(Some(1));
+    assert!(!ed.toggle_app_menu(), "a nested item can't be an app item");
+    assert!(!ed.items[1].app_menu);
+}
+
+#[test]
+fn a_separator_cannot_be_an_app_item() {
+    let mut ed = MenuEditor::new(vec![MenuItem::new("mnuSep", "-", None)]);
+    ed.select(Some(0));
+    assert!(!ed.toggle_app_menu());
+}

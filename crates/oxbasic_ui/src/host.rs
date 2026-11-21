@@ -349,6 +349,8 @@ impl FormSnapshot {
                 state[i].text = mine.text.clone();
                 state[i].list_index = mine.list_index;
                 state[i].value = mine.value;
+                // a TabControl's page the program selected: the strip shows it
+                state[i].tab = mine.tab;
                 state[i].caret = mine.caret;
                 state[i].anchor = mine.anchor;
                 state[i].selected = mine.selected.clone();
@@ -442,6 +444,7 @@ pub(crate) struct Watched {
     value: i32,
     size: (f32, f32),
     path: String,
+    pattern: String,
     tab: u8,
 }
 
@@ -518,6 +521,7 @@ impl FormHost {
             value: s.value,
             size: (c.rect.width, c.rect.height),
             path: c.path.clone(),
+            pattern: c.pattern.clone(),
             tab: s.tab,
         }
     }
@@ -563,6 +567,8 @@ impl FormHost {
             ControlKind::TabControl if after.tab != before.tab => self.raise(i, "Click"),
             // a DirListBox's Path changing lists another folder: VB's Change
             ControlKind::DirListBox if after.path != before.path => self.raise(i, "Change"),
+            // a FileListBox's Pattern changing lists other files: VB's Change too
+            ControlKind::FileListBox if after.pattern != before.pattern => self.raise(i, "Change"),
             ControlKind::CheckBox if after.value != before.value => self.raise(i, "Click"),
             // a scrollbar's or slider's Value changing raises Change, as VB does
             ControlKind::HScrollBar | ControlKind::VScrollBar | ControlKind::Slider
@@ -1250,6 +1256,30 @@ impl FormHost {
                 };
                 c.items = list_items(kind, &path, &pattern);
                 self.state[i].list_index = None;
+            }
+            // FileListBox.FileName: select that file in the list. A name with a
+            // folder in it sets Path to that folder first. A name not in the
+            // list is VB's error 53 (File not found).
+            "filename" if kind == ControlKind::FileListBox => {
+                let text = value.as_string()?;
+                let p = std::path::Path::new(&text);
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if let Some(dir) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
+                    if dir.is_dir() {
+                        let c = &mut self.form.controls[i];
+                        c.path = dir.to_string_lossy().into_owned();
+                        let pattern = c.pattern.clone();
+                        c.items = list_items(kind, &c.path.clone(), &pattern);
+                    }
+                }
+                let c = &self.form.controls[i];
+                match c.items.iter().position(|n| *n == name) {
+                    Some(n) => self.state[i].list_index = Some(n),
+                    None => return err(53, "File not found"),
+                }
             }
             // CheckBox: 0, 1 or 2 (grayed). OptionButton: True/False; a
             // True clears the form's other OptionButtons, as a click does.

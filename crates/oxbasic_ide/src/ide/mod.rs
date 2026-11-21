@@ -6,6 +6,7 @@
 //! - an output / immediate pane,
 //! - debug controls (run, step-over, stop) with a variable watch pane.
 
+pub mod about_window;
 pub mod choose_file;
 pub mod code_model;
 pub mod code_window;
@@ -142,6 +143,7 @@ gpui::actions!(
     ide,
     [
         Quit,
+        AboutIde,
         SaveCode,
         SaveForm,
         NewProject,
@@ -1284,6 +1286,9 @@ impl Render for Ide {
             .on_action(cx.listener(|this, _: &Quit, win, cx| {
                 this.quit(win, cx);
             }))
+            .on_action(cx.listener(|this, _: &AboutIde, _win, cx| {
+                this.open_about(cx);
+            }))
             .on_action(cx.listener(|this, _: &NewProject, win, cx| {
                 this.new_project(win, cx);
             }))
@@ -2180,6 +2185,7 @@ impl Ide {
                 c.rect.height = 28.0;
             }
             let mut look = ControlLook::design(&c);
+            look.form_size = Some((self.form.width, self.form.height));
             look.base_dir = self
                 .workspace
                 .file

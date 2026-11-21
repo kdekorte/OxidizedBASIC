@@ -79,6 +79,9 @@ impl Ide {
                             runner.activation_changed(active);
                             if active {
                                 oxbasic_ui::menu_bar::install(&runner.form.menus, cx);
+                                // the menu's items are enabled only while the form
+                                // holds the focus: its handler is on that path
+                                win.focus(&runner.form_focus);
                             } else if let Some(ide) = ide.upgrade() {
                                 ide.update(cx, |ide, cx| ide.refresh_file_menu(cx));
                             }

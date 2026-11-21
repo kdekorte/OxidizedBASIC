@@ -61,7 +61,11 @@ pub(super) fn file_menu_bar(recent: &recent::RecentList) -> Vec<gpui::Menu> {
     vec![
         gpui::Menu {
             name: "OxidizedBASIC".into(),
-            items: vec![gpui::MenuItem::action("Quit OxidizedBASIC", Quit)],
+            items: vec![
+                gpui::MenuItem::action("About OxidizedBASIC", AboutIde),
+                gpui::MenuItem::separator(),
+                gpui::MenuItem::action("Quit OxidizedBASIC", Quit),
+            ],
         },
         gpui::Menu {
             name: "File".into(),

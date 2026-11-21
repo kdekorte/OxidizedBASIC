@@ -505,6 +505,7 @@ impl Render for FormRunner {
             let focus = self.focus.get(&idx).cloned();
             let focused = focus.as_ref().is_some_and(|f| f.contains_focused(win, cx));
             let mut look = ControlLook::running(&self.state[idx], form.form_origin(idx), focused);
+            look.form_size = Some((form.width, form.height));
             look.base_dir = self.base_dir.clone();
             // in a disabled frame, a control takes no input either
             let usable = form.usable(idx);

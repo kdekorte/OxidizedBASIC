@@ -23,8 +23,9 @@ Then press **Run** (⌘R). The project panel lists `Form1` (the start-up form),
 | Drag the **width** and **height** scrollbars | HScrollBar / VScrollBar `Value` and `Change`; the Shape's and Line's `Width` and `Height` follow |
 | Pick a **volume**, then a **folder** | VolumeListBox `Text`, DirListBox `Path` (a `Change` when it moves) |
 | Pick a **file** in the list | FileListBox `Pattern` (`*.bas;*.oxproj`), `ListIndex`, and `FileName` (the full path) |
-| **File > Drawing…** (⌘D), **File > Files…** (⌘F), **File > Quit** (⌘Q) | The menu bar: a menu item runs its `mnuName_Click` handler, and its shortcut runs the same item |
-| **Help > About…** | A submenu item: its handler opens the About form |
+| **Quit** (⌘Q) in the application menu | The application menu (named after the app) holds About, a separator, and Quit. A form's own Quit under it replaces the built-in one |
+| **File > Drawing…** (⌘D), **File > Files…** (⌘F), **File > Tabs…** (⌘T) | The menu bar: a menu item runs its `mnuName_Click` handler, and its shortcut runs the same item |
+| **About…** in the application menu | An application-menu item: its handler opens the About form |
 | **Slider** and **Progress** (opened from the toolbox in your own forms) | Slider `Value`, `Orientation`; ProgressBar `Value` set by the program |
 | **Tabs** (in your own forms) | TabControl `Tab`, with controls on each page shown only on the selected tab |
 | **Menu Editor…** (in a form's Properties) | Edit a form's menu: New, Delete, Indent, Outdent, Apply; closing the window keeps the menu |

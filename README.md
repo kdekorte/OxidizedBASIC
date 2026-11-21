@@ -79,11 +79,13 @@ Immediate pane below.*
     `Slider` (a draggable range, with `Orientation`), `ProgressBar` (a
     range the program fills) and `TabControl` (tabs with pages of
     controls). See `docs/controls.md`.
-  - **Menus**: a form's menu bar (File, Help and so on, with shortcuts).
-    While the form's window is in front its menu is the menu bar, and
-    choosing an item runs its `name_Click` handler. Edit, View and Run
-    stay in the IDE's menu bar when the File menu refreshes (Open Recent
-    changes, saves). A packaged app has an App menu with About and Quit.
+  - **Menus**: a form's menu bar (File and so on, with shortcuts). Items
+    marked as application-menu items (About, Quit) sit under the menu named
+    after the app, as on a Mac. While the form's window is in front its menu
+    is the menu bar, and choosing an item runs its `name_Click` handler. Edit,
+    View and Run stay in the IDE's menu bar when the File menu refreshes (Open
+    Recent changes, saves). The IDE and a packaged app both have About and Quit
+    under the app menu.
   - **Property inspector**: `(Name)` (renames the control and its
     `Name_Event` handlers and references in code), Caption, Text, Items,
     Left/Top/Width/Height, Timer interval; the form's own properties show
@@ -189,6 +191,12 @@ Run it again whenever the IDE changes. The bundle takes its version from
 The app is ad-hoc signed, so it runs on this Mac. Giving it to another Mac
 needs a Developer ID signature and notarisation, which the script does not do.
 
+A packaged project (`oxbasic play`) shows each form in its own window, with the
+form's menu bar as the application's while that window is in front. The form's
+window takes the focus when it opens and when it becomes active, because a menu
+item is enabled only while the form holds the focus. Without that, every item
+of the form's menu shows disabled.
+
 
 
 ## Known limitations
@@ -247,8 +255,8 @@ needs a Developer ID signature and notarisation, which the script does not do.
   follow-up).
 - The file dialog filters after the user picks a file, so the picker shows
   every file; a file the filter rejects comes back as `""`.
-- Shapes and Lines aren't clamped to the form, and choosing a file in a
-  FileListBox doesn't open it.
+- Shapes and Lines are kept within the form. A FileListBox's double click
+  raises `DblClick`; the program opens the file it names with `FileName`.
 - Menus are edited in the Menu Editor (Properties → Menu Editor…), with
   shortcuts set from modifier toggles and a key box.
 - `Resume`/`Resume Next` resume precisely when the handler sits at the

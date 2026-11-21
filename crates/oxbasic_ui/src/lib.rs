@@ -28,6 +28,8 @@ pub mod menu_editor;
 mod dir_tests;
 #[cfg(test)]
 mod file_tests;
+#[cfg(all(test, feature = "gpui"))]
+mod gaps_tests;
 #[cfg(feature = "gpui")]
 pub mod gpui_backend;
 #[cfg(feature = "gpui")]
@@ -260,6 +262,32 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
             ("Resize", ""),
             ("Unload", "Cancel As Integer"),
         ],
+        // the file browsing lists: a list's events, and Change when Path or
+        // Pattern changes (a file list's double click opens the file)
+        "dirlistbox" | "filelistbox" | "volumelistbox" => &[
+            ("Change", ""),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("GotFocus", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+        ],
+        // a scrollbar: Change when Value moves, Scroll while it is dragged
+        "hscrollbar" | "vscrollbar" => &[
+            ("Change", ""),
+            ("GotFocus", ""),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+            ("Scroll", ""),
+        ],
+
         _ => &[],
     }
 }

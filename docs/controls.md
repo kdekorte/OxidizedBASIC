@@ -345,7 +345,7 @@ with hidden files and folders left out.
 |---|---|---|---|---|
 | `Path` | property | String | R/W | R/W |
 | `Pattern` | property | String | R/W | R/W |
-| `FileName` | property | String | R | — |
+| `FileName` | property | String | R/W | R/W |
 
 `Pattern` is one or more patterns separated by `;`, such as `*.bas;*.oxproj`.
 Each is `*.ext` (names ending in `ext`) or an exact name, ignoring case. An
@@ -391,6 +391,13 @@ as one in a hidden Frame does.
 `Tab` is the selected page, from 0 up to the last tab; other values raise 380.
 Setting `Tab` shows that page and raises `Click`, as VB's TabStrip does. The
 tab captions are set in the designer.
+
+The selected tab is bold, in the page's colour, and its bottom edge is open so
+it joins the page; the other tabs are greyed and sit back from the page. The
+page is drawn first and the strip over it, so the selected tab covers the
+page's top border. A press on a tab in the strip selects that page. A `Tab` the
+program sets is shown in a form window that is already open, not only in one
+opened afterwards.
 
 ### Menu
 A form's menu bar is not a control: it is the form's `menus` list. Each item
@@ -544,7 +551,10 @@ or `.cur` cursors (a `MouseIcon` is a still image). On a platform other
 than macOS the waiting cursor and `MouseIcon` show the arrow and the
 pointing hand. The Menu Editor (Properties → Menu Editor…) edits the items,
 their shortcuts (modifier toggles and a key, F1–F12 included), and their order.
-Shapes are not clamped to the form, so a Shape or Line sized
-past the form's edge is drawn past it. `FileListBox.Pattern` raises no
-`Change`, and `FileName` can't be set. Choosing a file doesn't open it.
+An **App Menu** button makes the selected top-level item an application-menu
+item (About, Quit): it sits under the menu named after the app, not on the bar.
+The IDE's own application menu has an About item.
+Shapes and Lines are drawn no further than the form's edge. `FileListBox.Pattern`
+raises `Change`, and `FileName` can be set to select a file (error 53 when it
+isn't in the list). A double-click on a file raises `DblClick`.
 

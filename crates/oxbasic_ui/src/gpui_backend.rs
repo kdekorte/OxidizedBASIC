@@ -137,7 +137,8 @@ impl Render for FormWindow {
                 .focus
                 .get(&idx)
                 .is_some_and(|f| f.contains_focused(window, cx));
-            let look = ControlLook::running(&self.state[idx], form.form_origin(idx), focused);
+            let mut look = ControlLook::running(&self.state[idx], form.form_origin(idx), focused);
+            look.form_size = Some((form.width, form.height));
             let mut hook = |part: Part,
                             el: gpui::Stateful<gpui::Div>,
                             cx: &mut Context<FormWindow>|

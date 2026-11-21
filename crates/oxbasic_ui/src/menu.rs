@@ -24,6 +24,10 @@ pub struct MenuItem {
     /// `Checked`: a tick beside the item.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub checked: bool,
+    /// Under the application's own menu (the one named after the app, as on a
+    /// Mac): About and Quit go here. Only a top-level item can be one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub app_menu: bool,
 }
 
 fn default_enabled() -> bool {
@@ -39,6 +43,7 @@ impl MenuItem {
             shortcut: String::new(),
             enabled: true,
             checked: false,
+            app_menu: false,
         }
     }
 

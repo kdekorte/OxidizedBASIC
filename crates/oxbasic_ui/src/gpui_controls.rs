@@ -70,6 +70,8 @@ pub struct ControlLook {
     /// Where the control is on the form (its `Left`/`Top` plus those of the
     /// containers around it); `None` is its own `Left`/`Top`.
     pub origin: Option<(f32, f32)>,
+    /// The form's size, so a Shape or Line is drawn no further than the form.
+    pub form_size: Option<(f32, f32)>,
     /// The caret and the other end of the selection in a text field, when
     /// it has the focus.
     pub caret: usize,
@@ -104,6 +106,7 @@ impl ControlLook {
             value: state.value,
             tab: state.tab,
             origin: Some(origin),
+            form_size: None,
             caret: state.caret,
             anchor: state.anchor,
             selected: state.selected.clone(),
@@ -673,6 +676,9 @@ pub fn paint_control<V: 'static>(
                 .flex();
             for (i, caption) in c.tabs.iter().enumerate() {
                 let selected = i as u8 == look.tab;
+                // the selected tab opens into the page: its bottom edge is
+                // open, and it is the page's colour and bold; the others are
+                // greyed and sit back from the page
                 let mut tab = div()
                     .flex()
                     .items_center()
@@ -681,10 +687,24 @@ pub fn paint_control<V: 'static>(
                     .whitespace_nowrap()
                     .border_1()
                     .border_color(rgb(BUTTON_BORDER))
-                    .bg(rgb(if selected { FORM_BACK } else { BUTTON_FACE }))
+                    .rounded_t_md()
                     .child(SharedString::from(caption.clone()));
                 if selected {
-                    tab = tab.font_weight(FontWeight::BOLD);
+                    // reaches 2px over the page's top border (painted before
+                    // the strip, so the tab covers it) with its bottom edge
+                    // open: it merges into the page it selects
+                    tab = tab
+                        .h(px(STRIP + 2.))
+                        .bg(rgb(FORM_BACK))
+                        .text_color(rgb(TEXT))
+                        .font_weight(FontWeight::BOLD)
+                        .border_b_0();
+                } else {
+                    tab = tab
+                        .h(px(STRIP - 4.))
+                        .mt(px(4.))
+                        .bg(rgb(BUTTON_FACE))
+                        .text_color(rgb(0x6E6E73));
                 }
                 strip = strip.child(tab);
             }
@@ -697,7 +717,9 @@ pub fn paint_control<V: 'static>(
                 .border_1()
                 .border_color(rgb(BUTTON_BORDER))
                 .bg(rgb(FORM_BACK));
-            hook(Part::Body, base.child(strip).child(page), cx)
+            // the strip is painted after the page so the selected tab can
+            // reach over the page's top border and open into it
+            hook(Part::Body, base.child(page).child(strip), cx)
         }
         // VB6 Frame: a group box. The caption interrupts the top border.
         ControlKind::Frame => {
@@ -930,10 +952,18 @@ pub fn paint_control<V: 'static>(
         // by the same code that paints a PictureBox's drawing
         ControlKind::Line | ControlKind::Shape => {
             let mut canvas = crate::canvas::Canvas::default();
+            // kept on the form: a Shape or Line past the edge is drawn to it
+            let (w, h) = match look.form_size {
+                Some((fw, fh)) => {
+                    let (left, top) = look.origin.unwrap_or((c.rect.left, c.rect.top));
+                    crate::canvas::clamped_size(c.rect.width, c.rect.height, left, top, fw, fh)
+                }
+                None => (c.rect.width, c.rect.height),
+            };
             if let Some(shape) = crate::canvas::control_shape(
                 c.kind,
-                c.rect.width,
-                c.rect.height,
+                w,
+                h,
                 c.fore_color.unwrap_or(TEXT),
                 c.shape_type,
                 c.fill_style,
