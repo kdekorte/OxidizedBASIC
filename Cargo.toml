@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/oxbasic_ast",
     "crates/oxbasic_parser",
+    "crates/oxbasic_vb_grammar",
     "crates/oxbasic_runtime",
     "crates/oxbasic_ui",
     "crates/oxbasic_ide",
@@ -18,6 +19,7 @@ oxbasic_ast = { path = "crates/oxbasic_ast" }
 oxbasic_parser = { path = "crates/oxbasic_parser" }
 oxbasic_runtime = { path = "crates/oxbasic_runtime" }
 oxbasic_ui = { path = "crates/oxbasic_ui" }
+oxbasic_vb_grammar = { path = "crates/oxbasic_vb_grammar" }
 pest = "2.7"
 pest_derive = "2.7"
 

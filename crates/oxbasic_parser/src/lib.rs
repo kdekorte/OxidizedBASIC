@@ -4,6 +4,7 @@
 //! using a `pest` grammar (see `src/oxbasic.pest`).
 
 use oxbasic_ast::*;
+use std::rc::Rc;
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
@@ -144,7 +145,7 @@ fn proc_decl(pair: Pair<Rule>, kind: ProcKind) -> Result<ProcDecl, String> {
         name,
         params,
         ret_type,
-        body,
+        body: Rc::new(body),
     })
 }
 
@@ -193,7 +194,103 @@ fn param(pair: Pair<Rule>) -> Result<Param, String> {
 
 fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
     match pair.as_rule() {
-        Rule::OptionStmt => Ok(Stmt::OptionExplicit),
+        Rule::OptionStmt => {
+            // `Option Explicit`, `Option Base 1` or `Option Compare Text`
+            let child = filter_kw(pair.into_inner()).next();
+            match child.map(|c| (c.as_rule(), c)) {
+                Some((Rule::OptionBase, c)) => {
+                    let n = filter_kw(c.into_inner()).next().unwrap();
+                    let v = n.as_str().parse::<i64>().map_err(|e| e.to_string())?;
+                    if v != 0 && v != 1 {
+                        return err("Option Base must be 0 or 1");
+                    }
+                    Ok(Stmt::OptionBase(v))
+                }
+                Some((Rule::OptionCompare, c)) => {
+                    let mode = c.as_str().to_lowercase();
+                    Ok(Stmt::OptionCompareText(mode.ends_with("text")))
+                }
+                _ => Ok(Stmt::OptionExplicit),
+            }
+        }
+        Rule::DefTypeStmt => {
+            // `DefInt A-Z`: the keyword gives the type; each range is one or two
+            // letters, the first and last of the range
+            let mut children = pair.into_inner();
+            let kw = children.next().unwrap().as_str().to_ascii_lowercase();
+            let ty = match kw.trim_start_matches("def") {
+                "int" => "Integer",
+                "lng" => "Long",
+                "str" => "String",
+                "bool" => "Boolean",
+                "dbl" => "Double",
+                "sng" => "Single",
+                "cur" => "Currency",
+                "date" => "Date",
+                _ => "Variant",
+            };
+            let mut ranges = Vec::new();
+            for range in children {
+                let mut letters = range.into_inner().map(|i| {
+                    i.as_str().chars().next().unwrap().to_ascii_lowercase()
+                });
+                let first = letters.next().unwrap();
+                let last = letters.next().unwrap_or(first);
+                ranges.push((ty.to_string(), first, last));
+            }
+            Ok(Stmt::DefType(ranges))
+        }
+        Rule::EraseStmt => {
+            let mut targets = Vec::new();
+            for child in filter_kw(pair.into_inner()) {
+                targets.push(expr(child)?);
+            }
+            Ok(Stmt::Erase(targets))
+        }
+        Rule::ReDimStmt => {
+            // `filter_kw` drops the keyword pairs, so look for `Preserve` first
+            let preserve = pair
+                .clone()
+                .into_inner()
+                .any(|p| p.as_rule() == Rule::kw_preserve);
+            let mut vars = Vec::new();
+            for child in filter_kw(pair.into_inner()) {
+                if child.as_rule() == Rule::ReDimVar {
+                    let mut name = String::new();
+                    let mut dims = None;
+                    for c in child.into_inner() {
+                        match c.as_rule() {
+                            Rule::Ident => name = c.as_str().to_string(),
+                            Rule::ArrayDims => {
+                                dims = Some(c.into_inner().map(expr).collect::<Result<_, _>>()?);
+                            }
+                            _ => {}
+                        }
+                    }
+                    vars.push(VarDecl { name, dims, ty: None });
+                }
+            }
+            Ok(Stmt::ReDim { preserve, vars })
+        }
+        Rule::MidStmt => {
+            let mut children = filter_kw(pair.into_inner());
+            let target = expr(children.next().unwrap())?;
+            let start = expr(children.next().unwrap())?;
+            // the children after `start` are the optional length, then the text
+            let rest: Vec<_> = children.collect();
+            let (value_pair, length_pair) = rest.split_last().unwrap();
+            let length = match length_pair.first() {
+                Some(l) => Some(expr(l.clone())?),
+                None => None,
+            };
+            let value = expr(value_pair.clone())?;
+            Ok(Stmt::MidAssign {
+                target,
+                start,
+                length,
+                value,
+            })
+        }
         Rule::LabelDef => Ok(Stmt::Label(ident(pair))),
         Rule::DimStmt => {
             let mut decls = Vec::new();
@@ -408,6 +505,111 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             let body = rest_stmts(children)?;
             Ok(Stmt::While { cond, body })
         }
+        Rule::WithStmt => {
+            let mut children = filter_kw(pair.into_inner());
+            let obj = expr(children.next().unwrap())?;
+            let body = rest_stmts(children)?;
+            Ok(Stmt::With { obj, body })
+        }
+        Rule::TypeDecl => {
+            let mut name = String::new();
+            let mut fields = Vec::new();
+            for child in pair.into_inner() {
+                match child.as_rule() {
+                    Rule::Ident => name = child.as_str().to_string(),
+                    Rule::TypeField => {
+                        let mut field_name = String::new();
+                        let mut dims = None;
+                        let mut ty = None;
+                        for c in child.into_inner() {
+                            match c.as_rule() {
+                                Rule::Ident => field_name = c.as_str().to_string(),
+                                Rule::ArrayDims => {
+                                    dims = Some(c.into_inner().map(expr).collect::<Result<_, _>>()?);
+                                }
+                                Rule::TypeName => ty = Some(type_name(c)),
+                                _ => {}
+                            }
+                        }
+                        fields.push(VarDecl {
+                            name: field_name,
+                            dims,
+                            ty,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Stmt::TypeDecl { name, fields })
+        }
+        Rule::EnumDecl => {
+            let mut name = String::new();
+            let mut members: Vec<(String, Expr)> = Vec::new();
+            for child in pair.into_inner() {
+                match child.as_rule() {
+                    Rule::Ident => name = child.as_str().to_string(),
+                    Rule::EnumMember => {
+                        let mut member = String::new();
+                        let mut value = None;
+                        for c in child.into_inner() {
+                            match c.as_rule() {
+                                Rule::Ident => member = c.as_str().to_string(),
+                                Rule::Expr => value = Some(expr(c)?),
+                                _ => {}
+                            }
+                        }
+                        // without `= value`, a member is the previous one plus 1
+                        // (the first is 0)
+                        let value = match value {
+                            Some(v) => v,
+                            None => match members.last() {
+                                Some((_, prev)) => Expr::Binary {
+                                    op: BinaryOp::Add,
+                                    lhs: Box::new(prev.clone()),
+                                    rhs: Box::new(Expr::Lit(Lit::Int(1))),
+                                },
+                                None => Expr::Lit(Lit::Int(0)),
+                            },
+                        };
+                        members.push((member, value));
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Stmt::EnumDecl { name, members })
+        }
+        Rule::WithCallStmt => {
+            // `.Caption = x` is an assignment, handled by the Let/Set rules;
+            // a bare `.Refresh` or `.Move 1, 2` is a call on the With object
+            let mut children = pair.into_inner();
+            let first = children.next().unwrap();
+            let mut path = vec![ident(first)];
+            let mut args = Vec::new();
+            for child in children {
+                match child.as_rule() {
+                    Rule::MemberTail => path.extend(
+                        child
+                            .into_inner()
+                            .filter(|c| c.as_rule() == Rule::Ident)
+                            .map(|c| c.as_str().to_string()),
+                    ),
+                    Rule::Expr => args.push(expr(child)?),
+                    _ => {}
+                }
+            }
+            let target = path[1..].iter().fold(
+                Expr::WithRef(path[0].clone()),
+                |acc, seg| Expr::Member {
+                    obj: Box::new(acc),
+                    name: seg.clone(),
+                },
+            );
+            Ok(Stmt::Call {
+                target,
+                args,
+                bare: true,
+            })
+        }
         Rule::PrintStmt => {
             let mut items = Vec::new();
             let mut trailing = false;
@@ -465,6 +667,9 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             Ok(Stmt::Exit(kind))
         }
         Rule::GoToStmt => Ok(Stmt::GoTo(ident(pair))),
+        Rule::GoSubStmt => Ok(Stmt::GoSub(ident(pair))),
+        Rule::ReturnStmt => Ok(Stmt::Return),
+        Rule::StopStmt => Ok(Stmt::Stop),
         Rule::OnErrorStmt => {
             let inner = filter_kw(pair.into_inner()).next().unwrap();
             match inner.as_rule() {
@@ -929,6 +1134,8 @@ fn primary(pair: Pair<Rule>) -> Result<Expr, String> {
             }
         }
         Rule::Ident => Ok(Expr::Var(pair.as_str().to_string())),
+        // `.Caption` inside a `With` block: the name after the dot
+        Rule::WithRef => Ok(Expr::WithRef(ident(pair))),
         Rule::Expr => expr(pair),
         _ => {
             // keyword literals: true / false / empty / null / nothing
@@ -1182,5 +1389,51 @@ mod tests {
         assert!(matches!(only("Circle 5\n"), Stmt::Call { .. }));
         assert!(matches!(only("Obj.PSet = 3\n"), Stmt::Assign { .. }));
         assert!(matches!(only("Lines = 2\n"), Stmt::Assign { .. }));
+    }
+
+    #[test]
+    fn parses_let_erase_redim_and_mid() {
+        assert!(matches!(only("Let x = 5\n"), Stmt::Assign { .. }));
+        assert!(matches!(only("Erase a, b\n"), Stmt::Erase(v) if v.len() == 2));
+        assert!(matches!(
+            only("ReDim a(3)\n"),
+            Stmt::ReDim { preserve: false, .. }
+        ));
+        assert!(matches!(
+            only("ReDim Preserve a(3), b(2, 1)\n"),
+            Stmt::ReDim { preserve: true, vars } if vars.len() == 2
+        ));
+        assert!(matches!(
+            only("Mid(s, 2, 3) = \"abc\"\n"),
+            Stmt::MidAssign { length: Some(_), .. }
+        ));
+        assert!(matches!(
+            only("Mid(s, 2) = \"abc\"\n"),
+            Stmt::MidAssign { length: None, .. }
+        ));
+    }
+
+    #[test]
+    fn parses_the_option_forms() {
+        assert!(matches!(only("Option Explicit\n"), Stmt::OptionExplicit));
+        assert!(matches!(only("Option Base 0\n"), Stmt::OptionBase(0)));
+        assert!(matches!(only("Option Base 1\n"), Stmt::OptionBase(1)));
+        assert!(matches!(
+            only("Option Compare Text\n"),
+            Stmt::OptionCompareText(true)
+        ));
+        assert!(matches!(
+            only("Option Compare Binary\n"),
+            Stmt::OptionCompareText(false)
+        ));
+        assert!(parse("Option Base 2\n").is_err());
+    }
+
+    #[test]
+    fn new_keywords_are_not_mistaken_for_names() {
+        // as variables and in a dotted name, these stay ordinary names
+        assert!(matches!(only("erase_count = 1\n"), Stmt::Assign { .. }));
+        assert!(matches!(only("Mid = 3\n"), Stmt::Assign { .. }));
+        assert!(matches!(only("letter = 2\n"), Stmt::Assign { .. }));
     }
 }

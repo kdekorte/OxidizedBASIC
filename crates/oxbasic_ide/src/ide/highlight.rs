@@ -84,8 +84,95 @@ fn is_ident_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
 
-/// Tokenize one source line into (text, kind) spans.
+/// Tokenize one source line into (text, kind) spans, from the Tree-sitter
+/// grammar. A line the grammar can't parse on its own (a block's first or
+/// last line, say, or one mid-edit) is coloured by [`tokenize_line_plain`],
+/// so colouring never gets worse than the plain tokenizer.
 pub fn tokenize_line(line: &str) -> Vec<(String, Tok)> {
+    match grammar_tokens(line) {
+        Some(toks) => toks,
+        None => tokenize_line_plain(line),
+    }
+}
+
+/// The grammar's leaves for `line`, as spans, or `None` when the line has a
+/// syntax error or its leaves don't cover its text.
+fn grammar_tokens(line: &str) -> Option<Vec<(String, Tok)>> {
+    thread_local! {
+        static PARSER: std::cell::RefCell<tree_sitter::Parser> = std::cell::RefCell::new({
+            let mut p = tree_sitter::Parser::new();
+            p.set_language(&oxbasic_vb_grammar::LANGUAGE.into())
+                .expect("the grammar loads");
+            p
+        });
+    }
+    if line.trim().is_empty() {
+        return None;
+    }
+    // the grammar ends every line with a newline: parse the line with one, so
+    // a line on its own is complete, then map the tokens back onto the line
+    let source = format!("{line}\n");
+    let tree = PARSER.with(|p| p.borrow_mut().parse(&source, None))?;
+    let root = tree.root_node();
+    if root.has_error() {
+        return None;
+    }
+
+    // every leaf, in order; a gap between two leaves is whitespace
+    let mut out: Vec<(String, Tok)> = Vec::new();
+    let mut pos = 0usize;
+    let mut cursor = root.walk();
+    let mut stack = vec![root];
+    let mut leaves = Vec::new();
+    while let Some(node) = stack.pop() {
+        if node.child_count() == 0 {
+            leaves.push(node);
+        } else {
+            let mut kids: Vec<_> = node.children(&mut cursor).collect();
+            kids.reverse();
+            stack.extend(kids);
+        }
+    }
+    for node in leaves {
+        let (start, end) = (node.start_byte(), node.end_byte());
+        if start < pos || end > line.len() {
+            return None;
+        }
+        if start > pos {
+            // whitespace (or a continuation) between tokens
+            out.push((line[pos..start].to_string(), Tok::Punct));
+        }
+        let kind = leaf_kind(&node);
+        out.push((line[start..end].to_string(), kind));
+        pos = end;
+    }
+    if pos < line.len() {
+        out.push((line[pos..].to_string(), Tok::Punct));
+    }
+    let joined: String = out.iter().map(|(t, _)| t.as_str()).collect();
+    (joined == line).then_some(out)
+}
+
+/// The colour kind of one grammar leaf.
+fn leaf_kind(node: &tree_sitter::Node) -> Tok {
+    match node.kind() {
+        "comment" | "apostrophe_comment" => Tok::Comment,
+        "string" => Tok::Str,
+        "number" | "date_literal" => Tok::Num,
+        "identifier" => Tok::Ident,
+        // a built-in type (Integer, String) is coloured as a keyword, as VB does
+        "builtin_type" => Tok::Keyword,
+        // keywords are anonymous leaves whose kind is the keyword's text
+        k if k.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) => Tok::Keyword,
+        _ => Tok::Punct,
+    }
+}
+
+
+/// Tokenize one source line into (text, kind) spans with the plain line
+/// tokenizer: the fallback for a line the grammar can't parse.
+pub fn tokenize_line_plain(line: &str) -> Vec<(String, Tok)> {
+
     let mut out = Vec::new();
     let chars: Vec<char> = line.chars().collect();
     let mut i = 0;
@@ -201,5 +288,64 @@ mod tests {
         assert_eq!(toks[0].1, Tok::Comment);
         let toks = tokenize_line("x = 3.5");
         assert!(toks.iter().any(|(t, k)| *k == Tok::Num && t == "3.5"));
+    }
+
+    /// The kinds of `line`'s tokens, with the text of each, for the tests below.
+    fn kinds(line: &str) -> Vec<(String, Tok)> {
+        tokenize_line(line)
+    }
+
+    #[test]
+    fn the_grammar_colours_a_keyword_in_any_case() {
+        let toks = kinds("dIM who As String");
+        assert!(toks.contains(&("dIM".to_string(), Tok::Keyword)), "{:?}", toks);
+        assert!(toks.contains(&("As".to_string(), Tok::Keyword)), "{:?}", toks);
+        assert!(toks.contains(&("who".to_string(), Tok::Ident)), "{:?}", toks);
+    }
+
+    #[test]
+    fn the_grammar_keeps_the_whole_line_and_its_spacing() {
+        let line = "lbl.Caption = \"a\" & b";
+        let joined: String = kinds(line).iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(joined, line, "every character is in some token");
+        let toks = kinds(line);
+        assert!(toks.contains(&("\"a\"".to_string(), Tok::Str)), "{:?}", toks);
+        assert!(toks.contains(&("Caption".to_string(), Tok::Ident)), "{:?}", toks);
+    }
+
+    #[test]
+    fn a_line_with_an_apostrophe_comment_is_a_comment_at_its_end() {
+        let toks = kinds("x = 1 ' a note");
+        assert_eq!(toks.last().map(|(_, k)| *k), Some(Tok::Comment), "{:?}", toks);
+    }
+
+    #[test]
+    fn a_line_the_grammar_cannot_parse_falls_back_to_the_plain_tokenizer() {
+        // a block's first line on its own is a syntax error, so the plain
+        // tokenizer colours it: Sub is a keyword there too
+        let toks = kinds("Sub Form_Load()");
+        assert_eq!(toks[0], ("Sub".to_string(), Tok::Keyword));
+        assert_eq!(toks, tokenize_line_plain("Sub Form_Load()"));
+    }
+}
+
+#[cfg(test)]
+mod grammar_used_tests {
+    use super::*;
+
+    #[test]
+    fn a_statement_line_is_coloured_by_the_grammar() {
+        // the plain tokenizer would also colour these, so the test checks the
+        // grammar's own result: a parse that the grammar accepts
+        for line in ["x = 1", "Print \"hi\"", "lbl.Caption = \"a\" & b", "Dim n As Integer"] {
+            assert!(grammar_tokens(line).is_some(), "the grammar didn't take {:?}", line);
+        }
+    }
+
+    #[test]
+    fn a_block_line_on_its_own_falls_back() {
+        // End Sub only means something inside its procedure
+        assert!(grammar_tokens("End Sub").is_none());
+        assert!(grammar_tokens("Sub Form_Load()").is_none());
     }
 }

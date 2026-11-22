@@ -4,6 +4,8 @@
 //! `oxbasic_runtime`. They model the classic Visual Basic 6.0 / VBA
 //! statement and expression surface that Phase 1 of the roadmap covers.
 
+use std::rc::Rc;
+
 /// A whole parsed translation unit: procedure declarations plus top-level
 /// (module-level) statements, in source order.
 #[derive(Debug, Clone)]
@@ -29,7 +31,8 @@ pub struct ProcDecl {
     pub name: String,
     pub params: Vec<Param>,
     pub ret_type: Option<String>,
-    pub body: Vec<Stmt>,
+    /// Shared, so a call (and each GoSub frame) takes a pointer, not a copy.
+    pub body: Rc<Vec<Stmt>>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +106,21 @@ pub enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    /// `With obj ... End With`: inside, `.Member` is a member of `obj`.
+    With {
+        obj: Expr,
+        body: Vec<Stmt>,
+    },
+    /// `Type Name ... End Type`: a record with these fields.
+    TypeDecl {
+        name: String,
+        fields: Vec<VarDecl>,
+    },
+    /// `Enum Name ... End Enum`: named Long constants, `(name, value)`.
+    EnumDecl {
+        name: String,
+        members: Vec<(String, Expr)>,
+    },
     Call {
         target: Expr,
         args: Vec<Expr>,
@@ -121,11 +139,39 @@ pub enum Stmt {
         shape: Graphic,
     },
     Exit(ExitKind),
+    /// `Stop`: pause in the debugger (no effect outside the IDE).
+    Stop,
+    /// `Erase a, b`: each array is reset to its elements' defaults (a dynamic
+    /// one is emptied).
+    Erase(Vec<Expr>),
+    /// `ReDim [Preserve] a(n), b(n, m)`: resizes dynamic arrays.
+    ReDim {
+        preserve: bool,
+        vars: Vec<VarDecl>,
+    },
+    /// `Mid(s, start [, length]) = text`: overwrites characters of a string.
+    MidAssign {
+        target: Expr,
+        start: Expr,
+        length: Option<Expr>,
+        value: Expr,
+    },
+    /// `GoSub label`: continue at `label`, and come back here on `Return`.
+    GoSub(String),
+    /// `Return`: back to the statement after the last `GoSub`.
+    Return,
     GoTo(String),
     OnError(OnErrorMode),
     Resume(ResumeKind),
     End,
     OptionExplicit,
+    /// `Option Base 0|1`: the default lower bound of arrays.
+    OptionBase(i64),
+    /// `Option Compare Text|Binary`: `true` for Text (case-insensitive).
+    OptionCompareText(bool),
+    /// `DefInt`, `DefStr`, ...: the type given to undeclared names whose first
+    /// letter falls in each range, as `(type name, first letter, last letter)`.
+    DefType(Vec<(String, char, char)>),
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +271,8 @@ pub enum ResumeKind {
 pub enum Expr {
     Lit(Lit),
     Var(String),
+    /// `.Member` inside a `With` block: a member of the With object.
+    WithRef(String),
     /// `Name(arg1, arg2)` — also used for array indexing; the runtime
     /// decides whether `name` is an array element or a procedure call.
     Call {

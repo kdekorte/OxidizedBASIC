@@ -43,6 +43,10 @@ pub(crate) fn is_builtin(name: &str) -> bool {
             | "str"
             | "val"
             | "format"
+            | "round"
+            | "choose"
+            | "switch"
+            | "timer"
             | "split"
             | "join"
             | "strcomp"
@@ -390,6 +394,7 @@ impl<'out> Interpreter<'out> {
                 Variant::Boolean(_) => 11,
                 Variant::Nothing => 9,
                 Variant::Array(_) => 8204,
+                Variant::Record(_) => 8204,
             })),
             "typename" => Ok(Variant::String(
                 match arg(args, 0)? {
@@ -404,6 +409,7 @@ impl<'out> Interpreter<'out> {
                     Variant::String(_) => "String",
                     Variant::Boolean(_) => "Boolean",
                     Variant::Array(_) => "Variant()",
+                    Variant::Record(r) => return Ok(Variant::String(r.ty.clone())),
                     Variant::Nothing => "Nothing",
                 }
                 .to_string(),
@@ -416,9 +422,11 @@ impl<'out> Interpreter<'out> {
                     VbArray {
                         dims: vec![n],
                         data: args.to_vec(),
+                        lower: self.option_base,
                     },
                 ))))
             }
+            // `LBound` is the first index; `UBound` the last (both per dimension)
             "ubound" | "lbound" => {
                 let arr = match arg(args, 0)? {
                     Variant::Array(a) => a,
@@ -432,9 +440,9 @@ impl<'out> Interpreter<'out> {
                 let b = arr.borrow();
                 if b.dims.is_empty() {
                     return if name == "ubound" {
-                        Ok(Variant::Long(b.data.len() as i32 - 1))
+                        Ok(Variant::Long((b.lower + b.data.len() as i64 - 1) as i32))
                     } else {
-                        Ok(Variant::Long(0))
+                        Ok(Variant::Long(b.lower as i32))
                     };
                 }
                 let ix = (dim - 1) as usize;
@@ -442,9 +450,9 @@ impl<'out> Interpreter<'out> {
                     return err(9, "subscript out of range");
                 }
                 Ok(Variant::Long(if name == "ubound" {
-                    b.dims[ix] as i32 - 1
+                    (b.lower + b.dims[ix] as i64 - 1) as i32
                 } else {
-                    0
+                    b.lower as i32
                 }))
             }
             "split" => {
@@ -466,6 +474,7 @@ impl<'out> Interpreter<'out> {
                     VbArray {
                         dims: vec![n],
                         data: parts,
+                        lower: self.option_base,
                     },
                 ))))
             }
@@ -595,6 +604,61 @@ impl<'out> Interpreter<'out> {
                 format_value(&v, &pat)
             }
 
+            // Round(x [, digits]): VB rounds half to even (banker's rounding)
+            "round" => {
+                let x = want_f64(args, 0)?;
+                let digits = if args.len() > 1 {
+                    to_i64(arg(args, 1)?)?
+                } else {
+                    0
+                };
+                let scale = 10f64.powi(digits as i32);
+                let scaled = x * scale;
+                let rounded = if (scaled - scaled.trunc()).abs() == 0.5 {
+                    // exactly halfway: take the even neighbour
+                    let t = scaled.trunc();
+                    if t % 2.0 == 0.0 {
+                        t
+                    } else {
+                        t + scaled.signum()
+                    }
+                } else {
+                    scaled.round()
+                };
+                Ok(numeric(rounded / scale))
+            }
+
+            // Choose(index, value1, value2, ...): the value at index (1-based),
+            // or Null when index is out of range
+            "choose" => {
+                let i = to_i64(arg(args, 0)?)?;
+                if i >= 1 && (i as usize) < args.len() {
+                    Ok(args[i as usize].clone())
+                } else {
+                    Ok(Variant::Null)
+                }
+            }
+
+            // Switch(expr1, value1, expr2, value2, ...): the value of the first
+            // true expression; Null when none is true
+            "switch" => {
+                let mut i = 0;
+                while i + 1 < args.len() {
+                    if to_bool(&args[i])? {
+                        return Ok(args[i + 1].clone());
+                    }
+                    i += 2;
+                }
+                Ok(Variant::Null)
+            }
+
+            // Timer: seconds since midnight, as a Single
+            "timer" => {
+                let serial = now_serial();
+                let secs = (serial - serial.floor()) * 86_400.0;
+                Ok(Variant::Single(secs as f32))
+            }
+
             _ => err(35, &format!("Sub or Function not defined: {}", name)),
         }
     }
@@ -634,64 +698,231 @@ pub fn pattern_matches(name: &str, patterns: &str) -> bool {
     })
 }
 
-/// Minimal `Format` implementation: date tokens (yyyy/mm/dd/hh/nn/ss) and
-/// numeric patterns like "0.00".
+/// VB6 `Format(value, pattern)`: named formats, numeric patterns (`0`, `#`,
+/// `,`, `.`, `%`, `E+`) and date/time patterns. A pattern with none of those
+/// codes is shown as typed.
 fn format_value(v: &Variant, pat: &str) -> ExecResult<Variant> {
+    if pat.is_empty() {
+        return Ok(Variant::String(to_string(v)?));
+    }
+    let named = match pat.to_ascii_lowercase().as_str() {
+        "general number" => Some(to_string(v)?),
+        "currency" => Some(format_numeric(to_f64(v)?, "$#,##0.00")),
+        "fixed" => Some(format_numeric(to_f64(v)?, "0.00")),
+        "standard" => Some(format_numeric(to_f64(v)?, "#,##0.00")),
+        "percent" => Some(format_numeric(to_f64(v)?, "0.00%")),
+        "scientific" => Some(format_numeric(to_f64(v)?, "0.00E+00")),
+        "yes/no" => Some(if to_bool(v)? { "Yes" } else { "No" }.into()),
+        "true/false" => Some(if to_bool(v)? { "True" } else { "False" }.into()),
+        "on/off" => Some(if to_bool(v)? { "On" } else { "Off" }.into()),
+        _ => None,
+    };
+    if let Some(s) = named {
+        return Ok(Variant::String(s));
+    }
+    if is_date_pattern(pat) {
+        return Ok(Variant::String(format_date_pattern(to_f64(v)?, pat)));
+    }
+    if is_numeric_pattern(pat) {
+        return Ok(Variant::String(format_numeric(to_f64(v)?, pat)));
+    }
+    Ok(Variant::String(pat.to_string()))
+}
+
+/// A date/time pattern has a date or time code: y, m, d, h, n, s, q, w, or AM/PM.
+fn is_date_pattern(pat: &str) -> bool {
     let p = pat.to_ascii_lowercase();
-    if p.contains("yyyy") || p.contains("mm") || p.contains("dd") || p.contains("nn") {
-        let d = to_f64(v)?;
-        let days = d.floor() as i64;
-        let frac = d - days as f64;
-        let (y, m, dd) = civil_from_days(days);
-        let secs = (frac * 86400.0).round() as u64;
-        let (hh, mm, ss) = (secs / 3600, (secs % 3600) / 60, secs % 60);
-        let mut out = String::new();
-        let mut chars = pat.chars().peekable();
-        while let Some(c) = chars.next() {
-            match c {
-                'y' | 'Y' => {
-                    let mut n = 1;
-                    while matches!(chars.peek(), Some('y') | Some('Y')) {
-                        chars.next();
-                        n += 1;
-                    }
-                    out.push_str(&format!("{:0width$}", y, width = n.min(4)));
+    p.contains('y') || p.contains('d') || p.contains('h') || p.contains('n')
+        || p.contains('s') || p.contains('q') || p.contains('w') || p.contains('m')
+        || p.contains("am/pm") || p.contains("a/p")
+}
+
+/// A numeric pattern has digit placeholders.
+fn is_numeric_pattern(pat: &str) -> bool {
+    pat.contains('0') || pat.contains('#')
+}
+
+/// Date/time pattern: `yy`/`yyyy`, `m`..`mmmm`, `d`..`dddd`, `h`, `n`, `s`,
+/// `q` (quarter), `w` (weekday number), `AM/PM`, `A/P`, quoted and `\` literals.
+fn format_date_pattern(d: f64, pat: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "January", "February", "March", "April", "May", "June", "July", "August",
+        "September", "October", "November", "December",
+    ];
+    const DAYS: [&str; 7] = [
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+    ];
+    let days = d.floor() as i64;
+    let frac = d - days as f64;
+    let (y, m, dd) = civil_from_days(days);
+    let secs = (frac * 86400.0).round() as u64;
+    let (hh, mm, ss) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    // weekday 1 = Sunday, as VB's default; 1899-12-30 was a Saturday
+    let wd = ((days + 6).rem_euclid(7)) as usize;
+    let hour12 = if hh % 12 == 0 { 12 } else { hh % 12 };
+    let chars: Vec<char> = pat.chars().collect();
+    let run = |i: usize| {
+        let c = chars[i].to_ascii_lowercase();
+        chars[i..].iter().take_while(|x| x.to_ascii_lowercase() == c).count()
+    };
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            i += 1;
+            while i < chars.len() && chars[i] != '"' {
+                out.push(chars[i]);
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        let rest: String = chars[i..].iter().take(5).collect::<String>().to_ascii_lowercase();
+        if rest.starts_with("am/pm") {
+            out.push_str(if hh < 12 { "AM" } else { "PM" });
+            i += 5;
+            continue;
+        }
+        if rest.starts_with("a/p") {
+            out.push(if hh < 12 { 'A' } else { 'P' });
+            i += 3;
+            continue;
+        }
+        let n = run(i);
+        match c.to_ascii_lowercase() {
+            'y' => {
+                if n <= 2 {
+                    out.push_str(&format!("{:02}", y.rem_euclid(100)));
+                } else {
+                    out.push_str(&format!("{:04}", y));
                 }
-                'm' | 'M' => {
-                    let mut n = 1;
-                    while matches!(chars.peek(), Some('m') | Some('M')) {
-                        chars.next();
-                        n += 1;
-                    }
-                    out.push_str(&format!("{:0width$}", m, width = n.min(2)));
-                }
-                'd' | 'D' => {
-                    let mut n = 1;
-                    while matches!(chars.peek(), Some('d') | Some('D')) {
-                        chars.next();
-                        n += 1;
-                    }
-                    out.push_str(&format!("{:0width$}", dd, width = n.min(2)));
-                }
-                'h' | 'H' => out.push_str(&format!("{:02}", hh)),
-                'n' | 'N' => out.push_str(&format!("{:02}", mm)),
-                's' | 'S' => out.push_str(&format!("{:02}", ss)),
-                other => out.push(other),
+            }
+            'm' => out.push_str(&match n {
+                1 => m.to_string(),
+                2 => format!("{:02}", m),
+                3 => MONTHS[(m - 1) as usize][..3].to_string(),
+                _ => MONTHS[(m - 1) as usize].to_string(),
+            }),
+            'd' => out.push_str(&match n {
+                1 => dd.to_string(),
+                2 => format!("{:02}", dd),
+                3 => DAYS[wd][..3].to_string(),
+                _ => DAYS[wd].to_string(),
+            }),
+            'h' => out.push_str(&if n >= 2 { format!("{:02}", hour12) } else { hour12.to_string() }),
+            'n' => out.push_str(&if n >= 2 { format!("{:02}", mm) } else { mm.to_string() }),
+            's' => out.push_str(&if n >= 2 { format!("{:02}", ss) } else { ss.to_string() }),
+            'q' => out.push_str(&(((m - 1) / 3) + 1).to_string()),
+            'w' => out.push_str(&(wd + 1).to_string()),
+            _ => {
+                out.push(c);
+                i += 1;
+                continue;
             }
         }
-        Ok(Variant::String(out))
-    } else if p.contains('0') || p.contains('#') || p.contains('.') {
-        let x = to_f64(v)?;
-        let decimals = p
+        i += n;
+    }
+    out
+}
+
+/// Numeric pattern: `0` is a required digit, `#` an optional one, `,` groups
+/// thousands between digit placeholders, `.` is the decimal point, `%`
+/// multiplies by 100, and `E+`/`E-` gives scientific notation.
+fn format_numeric(x: f64, pat: &str) -> String {
+    let pat = pat.split(';').next().unwrap_or(pat);
+    let percent = pat.contains('%');
+    let x = if percent { x * 100.0 } else { x };
+    let suffix = if percent { "%" } else { "" };
+
+    if let Some(e_pos) = pat.to_ascii_lowercase().find('e') {
+        let mantissa_pat = &pat[..e_pos];
+        let after = &pat[e_pos + 1..];
+        let plus = after.starts_with('+');
+        let exp_digits = after
+            .trim_start_matches(['+', '-'])
+            .chars()
+            .filter(|c| *c == '0')
+            .count()
+            .max(1);
+        let decimals = mantissa_pat
             .split('.')
             .nth(1)
             .map(|s| s.chars().filter(|c| *c == '0' || *c == '#').count())
             .unwrap_or(0);
-        Ok(Variant::String(format!("{:.*}", decimals, x)))
-    } else {
-        Ok(Variant::String(to_string(v)?))
+        let mut exp = if x == 0.0 { 0 } else { x.abs().log10().floor() as i32 };
+        let mut mant = if x == 0.0 { 0.0 } else { x / 10f64.powi(exp) };
+        // rounding can push the mantissa to 10: renormalise
+        if format!("{:.*}", decimals, mant.abs()).starts_with("10") {
+            mant /= 10.0;
+            exp += 1;
+        }
+        let sign = if exp < 0 {
+            "-"
+        } else if plus {
+            "+"
+        } else {
+            ""
+        };
+        return format!(
+            "{:.*}E{}{:0width$}{}",
+            decimals,
+            mant,
+            sign,
+            exp.abs(),
+            suffix,
+            width = exp_digits
+        );
     }
+
+    let (int_pat, dec_pat) = match pat.split_once('.') {
+        Some((i, d)) => (i, d),
+        None => (pat, ""),
+    };
+    let decimals = dec_pat.chars().filter(|c| *c == '0' || *c == '#').count();
+    let min_int = int_pat.chars().filter(|c| *c == '0').count();
+    let grouping = int_pat.contains(',');
+
+    // round to the decimals asked for, then split at the point
+    let body = format!("{:.*}", decimals, x.abs());
+    let (int_digits, frac) = match body.split_once('.') {
+        Some((i, f)) => (i.to_string(), f.to_string()),
+        None => (body.clone(), String::new()),
+    };
+    let mut int_s = int_digits.trim_start_matches('0').to_string();
+    while int_s.len() < min_int {
+        int_s.insert(0, '0');
+    }
+    if grouping {
+        let mut grouped = String::new();
+        let n = int_s.len();
+        for (k, ch) in int_s.chars().enumerate() {
+            if k > 0 && (n - k) % 3 == 0 {
+                grouped.push(',');
+            }
+            grouped.push(ch);
+        }
+        int_s = grouped;
+    }
+    let negative = x < 0.0 && body.chars().any(|c| c.is_ascii_digit() && c != '0');
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    out.push_str(&int_s);
+    if decimals > 0 {
+        out.push('.');
+        out.push_str(&frac);
+    }
+    out.push_str(suffix);
+    out
 }
+
 
 /// Parse a few common date literal shapes ("2024-05-01", "5/1/2024").
 fn parse_date_str(s: &str) -> ExecResult<Variant> {

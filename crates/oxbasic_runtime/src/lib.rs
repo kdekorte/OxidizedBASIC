@@ -36,13 +36,34 @@ pub enum Variant {
     Date(f64),
     String(String),
     Array(Rc<RefCell<VbArray>>),
+    /// A user-defined `Type` value. Its fields are held inline, so assigning
+    /// a record copies it, as VB does.
+    Record(Record),
+}
+
+/// A field of a user-defined `Type`, resolved when the type is declared.
+#[derive(Clone, Debug)]
+pub(crate) struct TypeField {
+    pub name: String,
+    /// `None` for a scalar field; the element count per dimension otherwise.
+    pub dims: Option<Vec<usize>>,
+    pub ty: Option<String>,
+}
+
+/// A record of a user-defined `Type`: its type name and its fields in order.
+#[derive(Clone, Debug)]
+pub struct Record {
+    pub ty: String,
+    pub fields: Vec<(String, Variant)>,
 }
 
 /// A BASIC array. `dims` is empty for dynamic (auto-growing) arrays.
+/// `lower` is the first valid index: 0, or 1 under `Option Base 1`.
 #[derive(Clone, Debug)]
 pub struct VbArray {
     pub dims: Vec<usize>,
     pub data: Vec<Variant>,
+    pub lower: i64,
 }
 
 impl Variant {
@@ -77,12 +98,22 @@ impl VbArray {
         }
         let mut flat = 0usize;
         for (i, &ix) in idxs.iter().enumerate() {
-            if ix < 0 || ix as usize >= self.dims[i] {
+            let zero_based = ix - self.lower;
+            if zero_based < 0 || zero_based as usize >= self.dims[i] {
                 return err(9, "subscript out of range");
             }
-            flat = flat * self.dims[i] + ix as usize;
+            flat = flat * self.dims[i] + zero_based as usize;
         }
         Ok(flat)
+    }
+
+    /// The position in `data` of a 1-D index (a dynamic array or a vector).
+    fn index_1d(&self, ix: i64) -> ExecResult<usize> {
+        let zero_based = ix - self.lower;
+        if zero_based < 0 || zero_based as usize >= self.data.len() {
+            return err(9, "subscript out of range");
+        }
+        Ok(zero_based as usize)
     }
 }
 
@@ -152,6 +183,8 @@ pub(crate) enum Flow {
     ResumeLabel(String),
     /// `End` statement: stop the program.
     Halt,
+    /// `Return`: ends the subroutine (a `GoSub`) that is running it.
+    Return(usize),
 }
 
 pub(crate) enum ErrMode {
@@ -175,10 +208,15 @@ pub(crate) struct Frame {
     err_desc: String,
     /// Source line of the statement about to execute (debugger support).
     current_line: usize,
+    /// The statements `GoSub` finds its labels in: the module's, or the
+    /// procedure's own body.
+    body: Rc<Vec<Stmt>>,
+    /// How many `GoSub`s are running in this frame (a `Return` needs one).
+    gosub_depth: usize,
 }
 
 impl Frame {
-    fn main() -> Frame {
+    fn main(body: Rc<Vec<Stmt>>) -> Frame {
         Frame {
             name: String::new(),
             is_main: true,
@@ -191,6 +229,8 @@ impl Frame {
             err_number: 0,
             err_desc: String::new(),
             current_line: 0,
+            body,
+            gosub_depth: 0,
         }
     }
 
@@ -210,9 +250,14 @@ impl Frame {
             err_number: 0,
             err_desc: String::new(),
             current_line: 0,
+            body: decl.body.clone(),
+            gosub_depth: 0,
         }
     }
 }
+
+
+
 
 /// A host object as the program names it: `Label1`, or one element of a
 /// control array, `Command1(2)`.
@@ -331,8 +376,18 @@ pub struct Interpreter<'out> {
     pub(crate) globals: NameMap<Rc<RefCell<Variant>>>,
     pub(crate) global_types: NameMap<String>,
     pub(crate) constants: NameMap<Variant>,
+    /// User-defined `Type`s: each field's name, its declared type, and (for an
+    /// array field) its element counts, resolved when the type is declared.
+    pub(crate) user_types: NameMap<Vec<TypeField>>,
     pub(crate) out: &'out mut dyn Output,
     pub(crate) option_explicit: bool,
+    /// `Option Compare Text`: string comparisons ignore case.
+    pub(crate) option_compare_text: bool,
+    /// The type `DefInt`/`DefStr`/... gives an undeclared name by its first
+    /// letter (index 0 = `a`), or `None` for the default Variant.
+    pub(crate) def_types: [Option<String>; 26],
+    /// `Option Base 0|1`: the lowest index of an array declared from now on.
+    pub(crate) option_base: i64,
     pub(crate) rng: Cell<u64>,
     pub(crate) depth: usize,
     /// Debugger: source lines with breakpoints (shared with the IDE).
@@ -348,6 +403,8 @@ pub struct Interpreter<'out> {
     /// `DoEvents`: lets the host show what the program drew so far and
     /// hear a Stop; returns `false` to abort the program.
     doevents_hook: Option<Box<dyn FnMut() -> bool>>,
+    /// The objects of the `With` blocks being run, innermost last.
+    with_stack: Vec<Expr>,
 }
 
 /// Debugger pause notification: where execution stopped and what the
@@ -417,8 +474,12 @@ impl<'out> Interpreter<'out> {
             globals: NameMap::default(),
             global_types: NameMap::default(),
             constants: builtin_constants(),
+            user_types: NameMap::default(),
             out,
             option_explicit: false,
+            option_compare_text: false,
+            def_types: Default::default(),
+            option_base: 0,
             rng: Cell::new(0x9E3779B97F4A7C15),
             depth: 0,
             breakpoints: None,
@@ -427,6 +488,7 @@ impl<'out> Interpreter<'out> {
             objects: None,
             ended: false,
             doevents_hook: None,
+            with_stack: Vec::new(),
             base_dir: None,
         };
         it.add_program(prog);
@@ -449,14 +511,63 @@ impl<'out> Interpreter<'out> {
                         .insert(p.name.to_lowercase(), self.decls.len());
                     self.decls.push(Rc::new(p.clone()));
                 }
-                Item::Stmt(s) => self.top_level.push(s.clone()),
+                Item::Stmt(s) => {
+                    self.register_declaration(s);
+                    self.top_level.push(s.clone());
+                }
             }
+        }
+    }
+
+    /// A `Type` or `Enum` is known from the moment the program is loaded, so
+    /// procedures and code above it can use it: the type's fields are kept,
+    /// the enum's members become named constants.
+    fn register_declaration(&mut self, s: &Stmt) {
+        match s {
+            Stmt::TypeDecl { name, fields } => {
+                // a field's bounds are constant expressions: resolve them now
+                let mut resolved = Vec::with_capacity(fields.len());
+                for fd in fields {
+                    let dims = match &fd.dims {
+                        None => None,
+                        Some(exprs) => {
+                            let mut ds = Vec::new();
+                            for e in exprs {
+                                let mut f = Frame::main(Rc::new(Vec::new()));
+                                let upper = self
+                                    .eval(e, &mut f)
+                                    .and_then(|v| to_i64(&v))
+                                    .unwrap_or(0);
+                                ds.push((upper - self.option_base + 1).max(0) as usize);
+                            }
+                            Some(ds)
+                        }
+                    };
+                    resolved.push(TypeField {
+                        name: fd.name.to_lowercase(),
+                        dims,
+                        ty: fd.ty.clone(),
+                    });
+                }
+                self.user_types.insert(name.to_lowercase(), resolved);
+            }
+            Stmt::EnumDecl { members, .. } => {
+                for (member, value) in members {
+                    // the values are constant expressions: evaluate them now
+                    let mut f = Frame::main(Rc::new(Vec::new()));
+                    if let Ok(v) = self.eval(value, &mut f) {
+                        self.constants.insert(member.to_lowercase(), v);
+                    }
+                }
+            }
+            Stmt::DefType(ranges) => self.register_def_types(ranges),
+            _ => {}
         }
     }
 
     pub fn run(&mut self) -> ExecResult<()> {
         let stmts = self.top_level.clone();
-        let mut f = Frame::main();
+        let mut f = Frame::main(Rc::new(stmts.clone()));
         self.exec_block(&stmts, &mut f)?;
         Ok(())
     }
@@ -484,7 +595,7 @@ impl<'out> Interpreter<'out> {
                 Item::Stmt(s) => Some(s.clone()),
             })
             .collect();
-        let mut f = Frame::main();
+        let mut f = Frame::main(Rc::new(stmts.clone()));
         self.exec_block(&stmts, &mut f)
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -708,6 +819,7 @@ impl<'out> Interpreter<'out> {
                         VbArray {
                             dims: vec![n],
                             data: items,
+                            lower: 0,
                         },
                     ))))),
                 );
@@ -721,7 +833,7 @@ impl<'out> Interpreter<'out> {
                     Some(d) => {
                         // defaults are constant expressions; evaluate in a
                         // scratch main frame
-                        let mut scratch = Frame::main();
+                        let mut scratch = Frame::main(Rc::new(Vec::new()));
                         self.eval(d, &mut scratch)?
                     }
                     None => Variant::Empty,
@@ -825,6 +937,10 @@ impl<'out> Interpreter<'out> {
         if self.option_explicit {
             return err(500, &format!("Variable not defined: {}", name));
         }
+        let value = match self.implicit_type(name) {
+            Some(t) => coerce_typed(&value, &t)?,
+            None => value,
+        };
         let rc = Rc::new(RefCell::new(value));
         if f.is_main {
             self.globals.insert(ln.to_string(), rc);
@@ -832,6 +948,169 @@ impl<'out> Interpreter<'out> {
             f.locals.insert(ln.to_string(), rc);
         }
         Ok(())
+    }
+
+    /// The `DefInt`-style type of an undeclared `name`, from its first letter.
+    fn implicit_type(&self, name: &str) -> Option<String> {
+        let first = name.chars().next()?.to_ascii_lowercase();
+        if !first.is_ascii_lowercase() {
+            return None;
+        }
+        self.def_types[(first as u8 - b'a') as usize].clone()
+    }
+
+    /// `DefInt A-C, X`: records each range's type for undeclared names.
+    fn register_def_types(&mut self, ranges: &[(String, char, char)]) {
+        for (ty, first, last) in ranges {
+            for c in *first..=*last {
+                if c.is_ascii_lowercase() {
+                    self.def_types[(c as u8 - b'a') as usize] = Some(ty.clone());
+                }
+            }
+        }
+    }
+
+    /// The starting value of a variable declared `As ty`: a record for a
+    /// user-defined `Type`, else the scalar default for the built-in type.
+    fn default_value(&self, ty: Option<&str>) -> ExecResult<Variant> {
+        let Some(t) = ty else {
+            return Ok(Variant::Empty);
+        };
+        let Some(fields) = self.user_types.get(&t.to_lowercase()) else {
+            return Ok(default_for_type(Some(t)));
+        };
+        let mut out = Vec::with_capacity(fields.len());
+        for fd in fields {
+            let value = match &fd.dims {
+                // an array field: a fixed array of the field's type
+                Some(ds) => {
+                    let n: usize = ds.iter().product();
+                    let def = self.default_value(fd.ty.as_deref())?;
+                    Variant::Array(Rc::new(RefCell::new(VbArray {
+                        dims: ds.clone(),
+                        data: (0..n).map(|_| def.clone()).collect(),
+                        lower: self.option_base,
+                    })))
+                }
+                None => self.default_value(fd.ty.as_deref())?,
+            };
+            out.push((fd.name.clone(), value));
+        }
+        Ok(Variant::Record(Record {
+            ty: t.to_lowercase(),
+            fields: out,
+        }))
+    }
+
+    /// `obj` names a variable (or array element) holding a user-defined record.
+    fn is_record_place(&mut self, obj: &Expr, f: &mut Frame) -> bool {
+        self.with_record(obj, f, |_| ()).is_ok()
+    }
+
+    /// Run `op` on the record `obj` names, a variable or an array element
+    /// (`pts(2)`), changing it in place. Errors if `obj` names no record.
+    fn with_record<T>(
+        &mut self,
+        obj: &Expr,
+        f: &mut Frame,
+        op: impl FnOnce(&mut Record) -> T,
+    ) -> ExecResult<T> {
+        let not_record = || err(13, "type mismatch: not a user-defined record");
+        match obj {
+            Expr::Var(name) => {
+                let Some(rc) = self.lookup_rc(f, name) else {
+                    return not_record();
+                };
+                let mut borrowed = rc.borrow_mut();
+                match &mut *borrowed {
+                    Variant::Record(r) => Ok(op(r)),
+                    _ => not_record(),
+                }
+            }
+            Expr::Call { name, args } if args.len() == 1 => {
+                let Some(rc) = self.lookup_rc(f, name) else {
+                    return not_record();
+                };
+                let ix = to_i64(&self.eval(&args[0], f)?)?;
+                let mut borrowed = rc.borrow_mut();
+                let Variant::Array(arr) = &mut *borrowed else {
+                    return not_record();
+                };
+                let mut arr = arr.borrow_mut();
+                let at = arr.index_1d(ix)?;
+                match &mut arr.data[at] {
+                    Variant::Record(r) => Ok(op(r)),
+                    _ => not_record(),
+                }
+            }
+            // a record inside a record: `o.I` in `o.I.N`. The outer record is
+            // reached from its variable, then its fields are walked in turn.
+            Expr::Member { obj: inner, name } => {
+                let mut chain = vec![name.clone()];
+                let mut base = inner.as_ref();
+                while let Expr::Member { obj, name } = base {
+                    chain.push(name.clone());
+                    base = obj.as_ref();
+                }
+                chain.reverse();
+                let Expr::Var(var) = base else {
+                    return not_record();
+                };
+                let Some(rc) = self.lookup_rc(f, var) else {
+                    return not_record();
+                };
+                let mut borrowed = rc.borrow_mut();
+                let Variant::Record(root) = &mut *borrowed else {
+                    return not_record();
+                };
+                let mut cur: &mut Record = root;
+                for step in &chain {
+                    match cur.fields.iter_mut().find(|(n, _)| n.eq_ignore_ascii_case(step)) {
+                        Some((_, Variant::Record(r))) => cur = r,
+                        _ => return not_record(),
+                    }
+                }
+                Ok(op(cur))
+            }
+            _ => not_record(),
+        }
+    }
+
+    /// `obj.name` read from a record: `None` unless `obj` names a record.
+    fn record_field_value(
+        &mut self,
+        obj: &Expr,
+        name: &str,
+        f: &mut Frame,
+    ) -> ExecResult<Option<Variant>> {
+        if !self.is_record_place(obj, f) {
+            return Ok(None);
+        }
+        self.with_record(obj, f, |r| {
+            match r.fields.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
+                Some((_, v)) => Ok(Some(v.clone())),
+                None => err(438, &format!("object doesn't support this property: {}", name)),
+            }
+        })?
+    }
+
+    /// `obj.name = v` into a record, changed in place.
+    fn record_field_store(
+        &mut self,
+        obj: &Expr,
+        name: &str,
+        v: Variant,
+        f: &mut Frame,
+    ) -> ExecResult<()> {
+        self.with_record(obj, f, |r| {
+            match r.fields.iter_mut().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
+                Some((_, slot)) => {
+                    *slot = v;
+                    Ok(())
+                }
+                None => err(438, &format!("object doesn't support this property: {}", name)),
+            }
+        })?
     }
 
     fn declare_var(
@@ -845,13 +1124,16 @@ impl<'out> Interpreter<'out> {
         let value = match dims {
             Some(ds) => {
                 let n: usize = ds.iter().product();
-                let def = default_for_type(ty.as_deref());
+                // an array of records holds one record per element
+                let def = self.default_value(ty.as_deref())?;
+                let data = (0..n).map(|_| def.clone()).collect();
                 Variant::Array(Rc::new(RefCell::new(VbArray {
                     dims: ds,
-                    data: vec![def; n],
+                    data,
+                    lower: self.option_base,
                 })))
             }
-            None => default_for_type(ty.as_deref()),
+            None => self.default_value(ty.as_deref())?,
         };
         let rc = Rc::new(RefCell::new(value));
         if f.is_main {
@@ -1009,6 +1291,7 @@ impl<'out> Interpreter<'out> {
                         }
                     }
                     Flow::ExitDo | Flow::ExitFor | Flow::ExitProc | Flow::Halt => return Ok(flow),
+                    Flow::Return(at) => return Ok(Flow::Return(at)),
                     Flow::Goto(l) => match labels.get(&l.to_lowercase()) {
                         Some(&j) => {
                             i = j;
@@ -1058,9 +1341,136 @@ impl<'out> Interpreter<'out> {
     fn exec_stmt(&mut self, s: &Stmt, f: &mut Frame) -> ExecResult<Flow> {
         match s {
             Stmt::LineMarker(_) => Ok(Flow::Normal),
+            // `Type` and `Enum` were registered when the program was loaded
+            Stmt::TypeDecl { .. } | Stmt::EnumDecl { .. } => Ok(Flow::Normal),
             Stmt::Label(_) => Ok(Flow::Normal),
             Stmt::OptionExplicit => {
                 self.option_explicit = true;
+                Ok(Flow::Normal)
+            }
+            Stmt::OptionBase(base) => {
+                self.option_base = *base;
+                Ok(Flow::Normal)
+            }
+            Stmt::OptionCompareText(text) => {
+                self.option_compare_text = *text;
+                Ok(Flow::Normal)
+            }
+            // `DefInt A-Z` etc.: undeclared names starting with those letters
+            Stmt::DefType(ranges) => {
+                self.register_def_types(ranges);
+                Ok(Flow::Normal)
+            }
+            // `Erase a`: a fixed array keeps its size with each element reset to
+            // its default; a dynamic array is emptied (back to no elements).
+            Stmt::Erase(targets) => {
+                for t in targets {
+                    let (Expr::Var(name) | Expr::Call { name, .. }) = t else {
+                        return err(13, "type mismatch: Erase needs an array");
+                    };
+                    let Some(rc) = self.lookup_rc(f, name) else {
+                        return err(9, "subscript out of range");
+                    };
+                    let mut borrowed = rc.borrow_mut();
+                    let Variant::Array(arr) = &mut *borrowed else {
+                        return err(13, "type mismatch: Erase needs an array");
+                    };
+                    let mut arr = arr.borrow_mut();
+                    if arr.dims.is_empty() {
+                        arr.data.clear();
+                    } else {
+                        for v in arr.data.iter_mut() {
+                            *v = match v {
+                                Variant::String(_) => Variant::String(String::new()),
+                                Variant::Boolean(_) => Variant::Boolean(false),
+                                Variant::Empty | Variant::Null | Variant::Nothing => Variant::Empty,
+                                Variant::Array(_) => Variant::Empty,
+                                _ => Variant::Long(0),
+                            };
+                        }
+                    }
+                }
+                Ok(Flow::Normal)
+            }
+            // `ReDim a(n)`: a dynamic array is resized to n+1 elements. With
+            // `Preserve` the existing elements are kept (up to the new size).
+            Stmt::ReDim { preserve, vars } => {
+                for d in vars {
+                    let Some(exprs) = &d.dims else {
+                        return err(9, "ReDim needs bounds");
+                    };
+                    let mut ds = Vec::new();
+                    for e in exprs {
+                        let upper = to_i64(&self.eval(e, f)?)?;
+                        if upper < self.option_base {
+                            return err(9, "array dimension must be >= the lower bound");
+                        }
+                        ds.push((upper - self.option_base + 1) as usize);
+                    }
+                    if ds.len() != 1 {
+                        return err(9, "ReDim supports one dimension");
+                    }
+                    let Some(rc) = self.lookup_rc(f, &d.name) else {
+                        // not yet declared: ReDim creates it
+                        let arr = VbArray {
+                            dims: vec![],
+                            data: vec![Variant::Empty; ds[0]],
+                            lower: self.option_base,
+                        };
+                        let rc = Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(arr)))));
+                        let ln = d.name.to_lowercase();
+                        if f.is_main {
+                            self.globals.insert(ln, rc);
+                        } else {
+                            f.locals.insert(ln, rc);
+                        }
+                        continue;
+                    };
+                    let mut borrowed = rc.borrow_mut();
+                    let Variant::Array(arr) = &mut *borrowed else {
+                        return err(13, "type mismatch: ReDim needs an array");
+                    };
+                    let mut arr = arr.borrow_mut();
+                    if !arr.dims.is_empty() {
+                        return err(10, "This array is fixed or temporarily locked");
+                    }
+                    let keep = if *preserve { arr.data.len().min(ds[0]) } else { 0 };
+                    let mut data: Vec<Variant> = arr.data.drain(..keep).collect();
+                    data.resize(ds[0], Variant::Empty);
+                    arr.data = data;
+                }
+                Ok(Flow::Normal)
+            }
+            // `Mid(s, start [, length]) = text`: overwrites characters of a string
+            // in place, from `start` (1-based), for at most `length` characters
+            // (and never past the end of the string).
+            Stmt::MidAssign {
+                target,
+                start,
+                length,
+                value,
+            } => {
+                let s = self.eval(target, f)?.as_string()?;
+                let start = to_i64(&self.eval(start, f)?)?;
+                if start < 1 {
+                    return err(5, "invalid procedure call: Mid start < 1");
+                }
+                let text = self.eval(value, f)?.as_string()?;
+                let mut chars: Vec<char> = s.chars().collect();
+                let from = (start - 1) as usize;
+                if from >= chars.len() {
+                    return Ok(Flow::Normal);
+                }
+                let max = match length {
+                    Some(l) => to_i64(&self.eval(l, f)?)?.max(0) as usize,
+                    None => usize::MAX,
+                };
+                let count = max.min(text.chars().count()).min(chars.len() - from);
+                for (i, c) in text.chars().take(count).enumerate() {
+                    chars[from + i] = c;
+                }
+                let result: String = chars.into_iter().collect();
+                self.assign(target, Variant::String(result), f)?;
                 Ok(Flow::Normal)
             }
             Stmt::End => {
@@ -1075,11 +1485,12 @@ impl<'out> Interpreter<'out> {
                             let mut ds = Vec::new();
                             for e in exprs {
                                 let v = self.eval(e, f)?;
-                                let n = to_i64(&v)?;
-                                if n < 0 {
-                                    return err(9, "array dimension must be >= 0");
+                                let upper = to_i64(&v)?;
+                                // `Dim a(10)` spans 0..10 (1..10 under Option Base 1)
+                                if upper < self.option_base {
+                                    return err(9, "array dimension must be >= the lower bound");
                                 }
-                                ds.push(n as usize + 1); // Dim a(10) spans 0..10
+                                ds.push((upper - self.option_base + 1) as usize);
                             }
                             Some(ds)
                         }
@@ -1146,6 +1557,47 @@ impl<'out> Interpreter<'out> {
                 ExitKind::Sub | ExitKind::Function | ExitKind::Property => Flow::ExitProc,
             }),
             Stmt::GoTo(l) => Ok(Flow::Goto(l.clone())),
+            // `GoSub label` runs the code from `label` in the frame's body, up
+            // to the matching `Return`, then continues after the GoSub. It is a
+            // call, so it works from inside a loop or an If, as in VB.
+            Stmt::GoSub(l) => {
+                let body = f.body.clone();
+                let start = body.iter().position(|s| {
+                    matches!(s, Stmt::Label(x) if x.eq_ignore_ascii_case(l))
+                });
+                let Some(start) = start else {
+                    return err(35, &format!("Label {} not defined", l));
+                };
+                f.gosub_depth += 1;
+                let flow = self.exec_block(&body[start..], f);
+                f.gosub_depth -= 1;
+                match flow? {
+                    // a Return ends the subroutine and resumes the caller
+                    Flow::Return(_) | Flow::Normal => Ok(Flow::Normal),
+                    // anything else (End, an error goto, a GoTo out) carries on
+                    // to the caller unchanged
+                    other => Ok(other),
+                }
+            }
+            // `Return` ends the subroutine it is in: the GoSub that called it
+            // sees Flow::Return and carries on after itself. With no GoSub
+            // running in this frame there is nothing to return to.
+            Stmt::Return => {
+                if f.gosub_depth == 0 {
+                    return err(3, "Return without GoSub");
+                }
+                Ok(Flow::Return(0))
+            }
+
+
+            // Stop: a debugger pause at the next statement. Outside the IDE
+            // there is no debugger and nothing happens, as in VB.
+            Stmt::Stop => {
+                if self.debug_hook.is_some() {
+                    self.step_depth = Some(self.depth);
+                }
+                Ok(Flow::Normal)
+            }
             Stmt::OnError(mode) => {
                 f.err_mode = match mode {
                     OnErrorMode::GoTo(l) => ErrMode::Goto(l.clone()),
@@ -1187,16 +1639,17 @@ impl<'out> Interpreter<'out> {
         match item {
             CaseItem::Value(e) => {
                 let v = self.eval(e, f)?;
-                values_eq(subject, &v)
+                values_eq(subject, &v, self.option_compare_text)
             }
             CaseItem::Range(lo, hi) => {
                 let l = self.eval(lo, f)?;
                 let h = self.eval(hi, f)?;
-                Ok(compare(subject, &l, BinaryOp::Ge)? && compare(subject, &h, BinaryOp::Le)?)
+                let t = self.option_compare_text;
+                Ok(compare(subject, &l, BinaryOp::Ge, t)? && compare(subject, &h, BinaryOp::Le, t)?)
             }
             CaseItem::Is(op, e) => {
                 let v = self.eval(e, f)?;
-                compare(subject, &v, *op)
+                compare(subject, &v, *op, self.option_compare_text)
             }
         }
     }
@@ -1299,6 +1752,14 @@ impl<'out> Interpreter<'out> {
                 }
                 Ok(Flow::Normal)
             }
+            // `With obj ... End With`: `.Member` inside means a member of obj.
+            // The object is pushed for the body and popped however it ends.
+            Stmt::With { obj, body } => {
+                self.with_stack.push(obj.clone());
+                let result = self.exec_block(body, f);
+                self.with_stack.pop();
+                result
+            }
             _ => err(5, "internal: unhandled statement"),
         }
     }
@@ -1310,6 +1771,11 @@ impl<'out> Interpreter<'out> {
 
 impl<'out> Interpreter<'out> {
     fn assign(&mut self, target: &Expr, v: Variant, f: &mut Frame) -> ExecResult<()> {
+        // `.Caption = x` inside a With block: a member of the With object
+        if let Expr::WithRef(name) = target {
+            let member = self.resolve_with(name)?;
+            return self.assign(&member, v, f);
+        }
         match target {
             Expr::Var(name) => {
                 let lowered = Lowered::new(name);
@@ -1339,6 +1805,7 @@ impl<'out> Interpreter<'out> {
                             VbArray {
                                 dims: vec![],
                                 data: vec![],
+                                lower: self.option_base,
                             },
                         )))));
                         let ln = name.to_lowercase();
@@ -1363,7 +1830,7 @@ impl<'out> Interpreter<'out> {
                         if idxs.len() != 1 {
                             return err(9, "dynamic arrays take exactly one subscript");
                         }
-                        let ix = idxs[0];
+                        let ix = idxs[0] - arr.lower;
                         if ix < 0 {
                             return err(9, "subscript out of range");
                         }
@@ -1381,6 +1848,10 @@ impl<'out> Interpreter<'out> {
                     err(13, "type mismatch: not an array")
                 }
             }
+            Expr::Member { obj, name } if self.is_record_place(obj, f) => {
+                // `p.X = v` on a user-defined Type: store into the record
+                self.record_field_store(obj, name, v, f)
+            }
             Expr::Member { obj, name } => match self.object_ref(obj, f)? {
                 Some((object, prefix)) => {
                     let host = self.objects.clone().expect("object_ref needs a host");
@@ -1391,6 +1862,24 @@ impl<'out> Interpreter<'out> {
                 }
                 None => err(13, "type mismatch: cannot assign to this expression"),
             },
+            // `b.Vals(1) = v` on a record whose field is an array
+            Expr::MethodCall { obj, name, args } if self.is_record_place(obj, f) => {
+                let mut idxs = Vec::with_capacity(args.len());
+                for a in args {
+                    idxs.push(to_i64(&self.eval(a, f)?)?);
+                }
+                self.with_record(obj, f, |r| {
+                    let Some((_, Variant::Array(arr))) =
+                        r.fields.iter().find(|(n, _)| n.eq_ignore_ascii_case(name))
+                    else {
+                        return err(438, &format!("object doesn't support this property: {}", name));
+                    };
+                    let mut arr = arr.borrow_mut();
+                    let flat = arr.flat_index(&idxs)?;
+                    arr.data[flat] = v;
+                    Ok(())
+                })?
+            }
             // `List1.List(0) = "x"`: a parameterised property
             Expr::MethodCall { obj, name, args } => match self.object_ref(obj, f)? {
                 Some((object, prefix)) => {
@@ -1456,8 +1945,28 @@ impl<'out> Interpreter<'out> {
     /// property prefix of a sub-object: `Label1` -> (`Label1`, ""),
     /// `Command1(i)` -> (`Command1` element `i`, ""), `Label1.Font` ->
     /// (`Label1`, "Font."). `None` when `obj` is not a host object.
+    /// `.name` inside a `With` block: the member `name` of the innermost With
+    /// object. Outside any `With` block it is an error, as in VB.
+    fn resolve_with(&self, name: &str) -> ExecResult<Expr> {
+        match self.with_stack.last() {
+            Some(obj) => Ok(Expr::Member {
+                obj: Box::new(obj.clone()),
+                name: name.to_string(),
+            }),
+            None => err(
+                91,
+                "a leading '.' needs a With block (Object variable or With block variable not set)",
+            ),
+        }
+    }
+
     fn object_ref(&mut self, obj: &Expr, f: &mut Frame) -> ExecResult<Option<(ObjectRef, String)>> {
         match obj {
+            // `.Label1` with a With block is `Label1.Caption`'s object part
+            Expr::WithRef(base) => {
+                let resolved = self.resolve_with(base)?;
+                self.object_ref(&resolved, f)
+            }
             Expr::Var(base) if self.is_host_object(base, f) => Ok(Some((
                 ObjectRef {
                     name: base.clone(),
@@ -1684,6 +2193,28 @@ impl<'out> Interpreter<'out> {
         args: &[Expr],
         f: &mut Frame,
     ) -> ExecResult<Variant> {
+        // `b.Vals(1)` on a record whose field is an array: read the element
+        if !args.is_empty() && self.is_record_place(obj, f) {
+            let mut idxs = Vec::with_capacity(args.len());
+            for a in args {
+                idxs.push(to_i64(&self.eval(a, f)?)?);
+            }
+            return self.with_record(obj, f, |r| {
+                match r.fields.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
+                    Some((_, Variant::Array(arr))) => {
+                        let arr = arr.borrow();
+                        let flat = arr.flat_index(&idxs)?;
+                        Ok(arr.data[flat].clone())
+                    }
+                    _ => err(438, &format!("object doesn't support this property: {}", name)),
+                }
+            })?;
+        }
+        // `.Refresh` inside a With block: a call on the With object
+        if let Expr::WithRef(base) = obj {
+            let with_obj = self.resolve_with(base)?;
+            return self.call_member(&with_obj, name, args, f);
+        }
         if let Some((object, prefix)) = self.object_ref(obj, f)? {
             let mut values = Vec::with_capacity(args.len());
             for a in args {
@@ -1763,6 +2294,7 @@ impl<'out> Interpreter<'out> {
                             VbArray {
                                 dims: vec![items.len()],
                                 data: items,
+                                lower: 0,
                             },
                         ))))),
                     );
@@ -1868,6 +2400,11 @@ impl<'out> Interpreter<'out> {
                 Lit::Nothing => Variant::Nothing,
             }),
             Expr::Var(name) => self.eval_var(name, f),
+            // `.Caption` inside a With block: read the member of the With object
+            Expr::WithRef(name) => {
+                let member = self.resolve_with(name)?;
+                self.eval(&member, f)
+            }
             Expr::Call { name, args } => {
                 // Array element read or procedure call.
                 let ln = name.to_lowercase();
@@ -1879,10 +2416,7 @@ impl<'out> Interpreter<'out> {
                             let ix = to_i64(&self.eval(&args[0], f)?)?;
                             let arr = arr.borrow();
                             if arr.dims.is_empty() {
-                                if ix >= 0 && (ix as usize) < arr.data.len() {
-                                    return Ok(arr.data[ix as usize].clone());
-                                }
-                                return err(9, "subscript out of range");
+                                return Ok(arr.data[arr.index_1d(ix)?].clone());
                             }
                             let flat = arr.flat_index(&[ix])?;
                             return Ok(arr.data[flat].clone());
@@ -1892,6 +2426,10 @@ impl<'out> Interpreter<'out> {
                 self.call_proc(name, args, f)
             }
             Expr::Member { obj, name } => {
+                // a field of a user-defined Type (`p.X`), read from its record
+                if let Some(v) = self.record_field_value(obj, name, f)? {
+                    return Ok(v);
+                }
                 // a host object's property read (`x = Label1.Caption`)
                 if let Some((object, prefix)) = self.object_ref(obj, f)? {
                     let host = self.objects.clone().expect("object_ref needs a host");
@@ -1922,7 +2460,7 @@ impl<'out> Interpreter<'out> {
             Expr::Binary { op, lhs, rhs } => {
                 let l = self.eval(lhs, f)?;
                 let r = self.eval(rhs, f)?;
-                binary_op(op, &l, &r)
+                binary_op(op, &l, &r, self.option_compare_text)
             }
         }
     }
@@ -1940,6 +2478,11 @@ impl<'out> Interpreter<'out> {
             if *rn == ln {
                 return Ok(f.ret.clone());
             }
+        }
+        // `Timer` with no parentheses is the function (a variable of that
+        // name, looked up above, takes precedence)
+        if ln == "timer" {
+            return self.builtin("timer", &[], f);
         }
         if self.option_explicit {
             return err(500, &format!("Variable not defined: {}", name));
@@ -1967,7 +2510,7 @@ pub(crate) fn to_f64(v: &Variant) -> ExecResult<f64> {
             Err(_) => err(13, &format!("type mismatch: \"{}\" is not numeric", s)),
         },
         Variant::Null => err(94, "invalid use of Null"),
-        Variant::Nothing | Variant::Array(_) => err(13, "type mismatch"),
+        Variant::Nothing | Variant::Array(_) | Variant::Record(_) => err(13, "type mismatch"),
     }
 }
 
@@ -2028,6 +2571,7 @@ pub(crate) fn to_string(v: &Variant) -> ExecResult<String> {
         Variant::Date(d) => Ok(format_date(*d)),
         Variant::Nothing => Ok("Nothing".into()),
         Variant::Array(_) => err(13, "type mismatch: cannot convert array to string"),
+        Variant::Record(_) => err(13, "type mismatch: cannot convert a user type to string"),
     }
 }
 
@@ -2046,6 +2590,7 @@ fn print_repr(v: &Variant) -> ExecResult<String> {
         Variant::Empty => Ok(String::new()),
         Variant::Nothing => Ok("Nothing".into()),
         Variant::Array(_) => err(13, "type mismatch: cannot print array"),
+        Variant::Record(_) => err(13, "type mismatch: cannot print a user type"),
     }
 }
 
@@ -2071,6 +2616,7 @@ pub(crate) fn debug_repr(v: &Variant) -> String {
         Variant::Date(d) => format_date(*d),
         Variant::String(s) => format!("\"{}\"", s),
         Variant::Array(a) => format!("[{} items]", a.borrow().data.len()),
+        Variant::Record(r) => format!("{{{}}}", r.ty),
     }
 }
 
@@ -2079,6 +2625,12 @@ fn default_for_type(ty: Option<&str>) -> Variant {
         Some(t) if t.to_ascii_lowercase().contains("string") => Variant::String(String::new()),
         Some(t) if t.to_ascii_lowercase().contains("boolean") => Variant::Boolean(false),
         Some(t) if t.to_ascii_lowercase().contains("date") => Variant::Date(0.0),
+        // a numeric variable starts at zero, as VB's does (not Empty, which prints blank)
+        Some(t) if t.to_ascii_lowercase().contains("integer") => Variant::Integer(0),
+        Some(t) if t.to_ascii_lowercase().contains("long") => Variant::Long(0),
+        Some(t) if t.to_ascii_lowercase().contains("single") => Variant::Single(0.0),
+        Some(t) if t.to_ascii_lowercase().contains("double") => Variant::Double(0.0),
+        Some(t) if t.to_ascii_lowercase().contains("currency") => Variant::Currency(0.0),
         _ => Variant::Empty,
     }
 }
@@ -2124,15 +2676,24 @@ pub(crate) fn coerce_typed(v: &Variant, ty: &str) -> ExecResult<Variant> {
 // Operators
 // ---------------------------------------------------------------------------
 
-fn values_eq(l: &Variant, r: &Variant) -> ExecResult<bool> {
-    compare(l, r, BinaryOp::Eq)
+fn values_eq(l: &Variant, r: &Variant, text: bool) -> ExecResult<bool> {
+    compare(l, r, BinaryOp::Eq, text)
 }
 
-fn compare(l: &Variant, r: &Variant, op: BinaryOp) -> ExecResult<bool> {
+/// Compare two values. With `text` (Option Compare Text), strings compare
+/// without regard to case; otherwise they compare by character code.
+fn compare(l: &Variant, r: &Variant, op: BinaryOp, text: bool) -> ExecResult<bool> {
+    let fold = |s: &str| -> String {
+        if text {
+            s.to_lowercase()
+        } else {
+            s.to_string()
+        }
+    };
     let ord: std::cmp::Ordering = match (l, r) {
-        (Variant::String(a), Variant::String(b)) => a.cmp(b),
-        (Variant::Empty, Variant::String(b)) => "".cmp(b.as_str()),
-        (Variant::String(a), Variant::Empty) => a.as_str().cmp(""),
+        (Variant::String(a), Variant::String(b)) => fold(a).cmp(&fold(b)),
+        (Variant::Empty, Variant::String(b)) => "".cmp(fold(b).as_str()),
+        (Variant::String(a), Variant::Empty) => fold(a).as_str().cmp(""),
         _ => {
             let a = to_f64(l)?;
             let b = to_f64(r)?;
@@ -2181,7 +2742,7 @@ fn numeric(x: f64) -> Variant {
     }
 }
 
-fn binary_op(op: &BinaryOp, l: &Variant, r: &Variant) -> ExecResult<Variant> {
+fn binary_op(op: &BinaryOp, l: &Variant, r: &Variant, text: bool) -> ExecResult<Variant> {
     use BinaryOp::*;
     // The hot cases of a numeric loop, with no coercion to go through:
     // Double with Double (or Long), Long with Long. Anything else, or any
@@ -2231,7 +2792,7 @@ fn binary_op(op: &BinaryOp, l: &Variant, r: &Variant) -> ExecResult<Variant> {
         _ => {}
     }
     match op {
-        Eq | Ne | Lt | Gt | Le | Ge => Ok(Variant::Boolean(compare(l, r, *op)?)),
+        Eq | Ne | Lt | Gt | Le | Ge => Ok(Variant::Boolean(compare(l, r, *op, text)?)),
         Concat => Ok(Variant::String(format!(
             "{}{}",
             to_string(l)?,
@@ -2343,9 +2904,14 @@ pub(crate) fn now_serial() -> f64 {
     secs / 86400.0 + 25569.0
 }
 
-/// Howard Hinnant's civil-from-days algorithm.
-pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
+/// The VB serial of the Unix day `unix_days` (days since 1970-01-01), 25569 of
+/// them after VB's epoch 1899-12-30.
+const UNIX_TO_VB_DAYS: i64 = 25_569;
+
+/// Howard Hinnant's civil-from-days algorithm, on a VB serial day (day 0 =
+/// 1899-12-30): returns (year, month, day).
+pub(crate) fn civil_from_days(serial_days: i64) -> (i64, u32, u32) {
+    let z = serial_days - UNIX_TO_VB_DAYS + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = (z - era * 146_097) as u64;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
@@ -2364,7 +2930,7 @@ pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let mp = if m > 2 { m - 3 } else { m + 9 } as u64;
     let doy = (153 * mp + 2) / 5 + d as u64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe as i64 - 719_468
+    era * 146_097 + doe as i64 - 719_468 + UNIX_TO_VB_DAYS
 }
 
 pub(crate) fn format_date(serial: f64) -> String {

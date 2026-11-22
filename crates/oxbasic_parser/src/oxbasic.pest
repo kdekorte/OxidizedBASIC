@@ -28,6 +28,9 @@ kw_loop = @{ ^"loop" ~ !IdentChar }
 kw_while = @{ ^"while" ~ !IdentChar }
 kw_until = @{ ^"until" ~ !IdentChar }
 kw_wend = @{ ^"wend" ~ !IdentChar }
+kw_with = @{ ^"with" ~ !IdentChar }
+kw_type = @{ ^"type" ~ !IdentChar }
+kw_enum = @{ ^"enum" ~ !IdentChar }
 kw_sub = @{ ^"sub" ~ !IdentChar }
 kw_function = @{ ^"function" ~ !IdentChar }
 kw_property = @{ ^"property" ~ !IdentChar }
@@ -42,11 +45,23 @@ kw_const = @{ ^"const" ~ !IdentChar }
 kw_set = @{ ^"set" ~ !IdentChar }
 kw_call = @{ ^"call" ~ !IdentChar }
 kw_goto = @{ ^"goto" ~ !IdentChar }
+kw_gosub = @{ ^"gosub" ~ !IdentChar }
+kw_return = @{ ^"return" ~ !IdentChar }
+kw_stop = @{ ^"stop" ~ !IdentChar }
 kw_on = @{ ^"on" ~ !IdentChar }
 kw_error = @{ ^"error" ~ !IdentChar }
 kw_resume = @{ ^"resume" ~ !IdentChar }
 kw_option = @{ ^"option" ~ !IdentChar }
 kw_explicit = @{ ^"explicit" ~ !IdentChar }
+kw_base = @{ ^"base" ~ !IdentChar }
+kw_compare = @{ ^"compare" ~ !IdentChar }
+kw_text = @{ ^"text" ~ !IdentChar }
+kw_binary = @{ ^"binary" ~ !IdentChar }
+kw_let = @{ ^"let" ~ !IdentChar }
+kw_erase = @{ ^"erase" ~ !IdentChar }
+kw_redim = @{ ^"redim" ~ !IdentChar }
+kw_preserve = @{ ^"preserve" ~ !IdentChar }
+kw_mid = @{ ^"mid" ~ !IdentChar }
 kw_new = @{ ^"new" ~ !IdentChar }
 kw_as = @{ ^"as" ~ !IdentChar }
 kw_byval = @{ ^"byval" ~ !IdentChar }
@@ -83,22 +98,27 @@ LabelDef = { !ReservedKw ~ Ident ~ ":" }
 ReservedKw = _{
       kw_if | kw_then | kw_else | kw_elseif | kw_end | kw_select | kw_case
     | kw_for | kw_each | kw_in | kw_to | kw_step | kw_next
-    | kw_do | kw_loop | kw_while | kw_until | kw_wend
+    | kw_do | kw_loop | kw_while | kw_until | kw_wend | kw_with | kw_type | kw_enum
     | kw_sub | kw_function | kw_exit | kw_dim | kw_const | kw_set
-    | kw_call | kw_goto | kw_on | kw_error | kw_resume | kw_option
+    | kw_call | kw_goto | kw_gosub | kw_return | kw_stop | kw_on | kw_error | kw_resume | kw_option
     | kw_mod | kw_and | kw_or | kw_not | kw_xor | kw_eqv | kw_imp
     | kw_is | kw_new | kw_byval | kw_byref
     | kw_public | kw_private | kw_static | kw_global | kw_optional | kw_paramarray
+    | kw_let | kw_erase | kw_redim | kw_preserve
 }
 
 Statement = _{
       OptionStmt
+    | DefTypeStmt
     | IfStmt
     | SelectStmt
     | ForEachStmt
     | ForStmt
     | DoStmt
     | WhileStmt
+    | WithStmt
+    | TypeDecl
+    | EnumDecl
     | SubDecl
     | FuncDecl
     | DimStmt
@@ -108,15 +128,29 @@ Statement = _{
     | ResumeStmt
     | ExitStmt
     | GoToStmt
+    | GoSubStmt
+    | ReturnStmt
+    | StopStmt
     | EndStmt
     | PrintStmt
     | GraphicsStmt
+    | EraseStmt
+    | ReDimStmt
+    | MidStmt
     | LetStmt
     | CallStmt
     | ExprCallStmt
+    | WithCallStmt
 }
 
-OptionStmt = { kw_option ~ kw_explicit }
+OptionStmt = { kw_option ~ (kw_explicit | OptionBase | OptionCompare) }
+// `DefInt A-Z, s-t`: undeclared names starting with those letters get that type
+DefTypeStmt = { kw_deftype ~ DefRange ~ ("," ~ DefRange)* }
+DefRange = { Ident ~ ("-" ~ Ident)? }
+kw_deftype = @{ ^"def" ~ (^"int" | ^"lng" | ^"str" | ^"bool" | ^"dbl" | ^"sng" | ^"cur" | ^"date" | ^"var" | ^"obj" | ^"vrnt") ~ !IdentChar }
+
+OptionBase = { kw_base ~ Number }
+OptionCompare = { kw_compare ~ (kw_text | kw_binary) }
 
 IfStmt = { kw_if ~ Expr ~ kw_then ~ (BlockIf | LineIf) }
 BlockIf = { NEWLINE ~ Lines ~ ElseIfBlock* ~ ElseBlock? ~ kw_end ~ kw_if }
@@ -139,6 +173,14 @@ DoCond = { (kw_while | kw_until) ~ Expr }
 DoPre = { DoCond ~ NEWLINE ~ Lines ~ kw_loop }
 DoPost = { NEWLINE ~ Lines ~ kw_loop ~ DoCond? }
 WhileStmt = { kw_while ~ Expr ~ NEWLINE ~ Lines ~ kw_wend }
+// `With obj ... End With`: inside, `.Member` names a member of `obj`
+WithStmt = { kw_with ~ Expr ~ NEWLINE ~ Lines ~ kw_end ~ kw_with }
+// `Type Name` with one `field As Type` line per field, then `End Type`
+TypeDecl = { kw_type ~ Ident ~ NEWLINE ~ TypeField* ~ kw_end ~ kw_type }
+TypeField = { Ident ~ ArrayDims? ~ kw_as ~ TypeName ~ NEWLINE }
+// `Enum Name` with `Member [= value]` lines, then `End Enum`
+EnumDecl = { kw_enum ~ Ident ~ NEWLINE ~ EnumMember* ~ kw_end ~ kw_enum }
+EnumMember = { Ident ~ ("=" ~ Expr)? ~ NEWLINE }
 
 SubDecl = { Visibility? ~ kw_sub ~ Ident ~ Params? ~ NEWLINE ~ Lines ~ kw_end ~ kw_sub }
 FuncDecl = { Visibility? ~ kw_function ~ Ident ~ Params? ~ (kw_as ~ TypeName)? ~ NEWLINE ~ Lines ~ kw_end ~ kw_function }
@@ -167,6 +209,9 @@ ResumeNextKw = { kw_next }
 
 ExitStmt = { kw_exit ~ (kw_sub | kw_function | kw_property | kw_for | kw_do) }
 GoToStmt = { kw_goto ~ Ident }
+GoSubStmt = { kw_gosub ~ Ident }
+ReturnStmt = { kw_return }
+StopStmt = { kw_stop }
 
 // ---- Expressions (VB precedence: arithmetic > & > comparison > Not > And > Or > Xor > Eqv > Imp)
 Expr = { ImpExpr }
@@ -199,8 +244,11 @@ PrimaryExpr = _{
     | Number
     | KeywordLit
     | "(" ~ Expr ~ ")"
+    | WithRef
     | Ident
 }
+// `.Caption` inside a `With` block: a member of the With object
+WithRef = { "." ~ Ident }
 KeywordLit = { kw_true | kw_false | kw_empty | kw_null | kw_nothing }
 
 StringLit = @{ "\"" ~ StringChar* ~ "\"" }
@@ -224,7 +272,14 @@ PrintStmt = { (kw_debug ~ ".")? ~ kw_print ~ PrintArgs? }
 PrintArgs = { Expr ~ (PSep ~ Expr)* ~ PSep? }
 PSep = { ";" | "," }
 
-LetStmt = { PostfixExpr ~ "=" ~ Expr }
+LetStmt = { (kw_let)? ~ PostfixExpr ~ "=" ~ Expr }
+// `Erase a, b`: resets each array (a dynamic one is emptied)
+EraseStmt = { kw_erase ~ PostfixExpr ~ ("," ~ PostfixExpr)* }
+// `ReDim [Preserve] a(n[, m]), b(n)`: resizes dynamic arrays
+ReDimStmt = { kw_redim ~ kw_preserve? ~ ReDimVar ~ ("," ~ ReDimVar)* }
+ReDimVar = { Ident ~ ArrayDims }
+// the `Mid` statement: `Mid(s, start [, length]) = text` replaces characters
+MidStmt = { kw_mid ~ "(" ~ Expr ~ "," ~ Expr ~ ("," ~ Expr)? ~ ")" ~ "=" ~ Expr }
 CallStmt = { kw_call ~ PostfixExpr }
 // VB's graphics statements, which take coordinate pairs:
 //   [obj.]Line [Step](x1, y1)-[Step](x2, y2) [, color] [, B | BF]
@@ -254,6 +309,8 @@ BoxFlag = { "," ~ (BoxFill | BoxOnly) }
 BoxFill = @{ ^"bf" ~ !IdentChar }
 BoxOnly = @{ ^"b" ~ !IdentChar }
 ExprCallStmt = { !ReservedKw ~ Ident ~ ElementIndex? ~ MemberTail ~ BareArgs? }
+// `.Caption = "x"` or `.Refresh` inside a `With` block
+WithCallStmt = { WithRef ~ MemberTail ~ BareArgs? }
 // `Command1(2).SetFocus`: a control array element, before its members
 ElementIndex = { "(" ~ Expr ~ ")" ~ &"." }
 MemberTail = { ("." ~ Ident)* }

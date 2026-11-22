@@ -21,8 +21,14 @@ Immediate pane below.*
   `For…Next [Step]`, `For Each…In`, `Do While/Until…Loop` (pre- and
   post-test), `While…Wend`, `Sub`/`Function` with `ByVal`/`ByRef`/
   `Optional`/`ParamArray`, `Dim`/`Static`/`Const`, arrays, labels,
-  `GoTo`, `On Error GoTo <label>|0`, `On Error Resume Next`, `Resume [Next|label]`,
-  `Exit {Sub,Function,For,Do}`, `End`, `Option Explicit`, `Print`/`Debug.Print`
+  `GoTo`, `GoSub`/`Return`, `On Error GoTo <label>|0`, `On Error Resume Next`,
+  `Resume [Next|label]`, `Exit {Sub,Function,For,Do}`, `End`, `Stop`,
+  `Option Explicit`, `Option Base 0|1` (arrays index from 1 under base 1),
+  `Option Compare Text|Binary`, `Let`, `Erase`, `ReDim [Preserve]`, the `Mid`
+  statement, `With…End With` (a leading `.Member` reads, writes or calls on the
+  With object), `Type…End Type` (records, including fields that are arrays),
+  `Enum…End Enum` (named constants), `DefInt`/`DefLng`/`DefStr`/… (implicit
+  types of undeclared names by first letter), `Print`/`Debug.Print`
   with `;`/`,` separators, colon-separated statements, `&H`/`&O` literals,
   `'` and `Rem` comments, and full VB operator precedence.
 - **Runtime** (`oxbasic_runtime`): tree-walking interpreter with a
@@ -261,7 +267,8 @@ of the form's menu shows disabled.
   shortcuts set from modifier toggles and a key box.
 - `Resume`/`Resume Next` resume precisely when the handler sits at the
   same block level as the failing statement (the common VB idiom).
-- No `ReDim`, file I/O, or `Mid`-statement yet.
+- Language gaps: file I/O is not implemented yet. A `Type` cannot hold a field
+  of a user-defined `Type` (only built-in field types and arrays of them).
 
 ## Roadmap
 
