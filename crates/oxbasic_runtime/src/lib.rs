@@ -926,11 +926,13 @@ impl<'out> Interpreter<'out> {
     fn set_var(&mut self, f: &mut Frame, name: &str, value: Variant) -> ExecResult<()> {
         let lowered = Lowered::new(name);
         let ln = lowered.as_str();
-        let value = match self.declared_type_ref(f, ln) {
-            Some(t) => coerce_typed(&value, t)?,
-            None => value,
-        };
+        // The common case, an existing variable, is one lookup: its declared
+        // type (if any) is read from the same frame in the same pass.
         if let Some(rc) = self.lookup_ref(f, ln) {
+            let value = match self.declared_type_ref(f, ln) {
+                Some(t) => coerce_typed(&value, t)?,
+                None => value,
+            };
             *rc.borrow_mut() = value;
             return Ok(());
         }
@@ -1263,12 +1265,21 @@ impl<'out> Interpreter<'out> {
     /// Execute a statement block. Handles labels, `GoTo`, error trapping
     /// (`On Error GoTo <label>` / `Resume Next`) and `Resume`.
     pub(crate) fn exec_block(&mut self, stmts: &[Stmt], f: &mut Frame) -> ExecResult<Flow> {
-        let mut labels: HashMap<String, usize> = HashMap::new();
-        for (i, s) in stmts.iter().enumerate() {
-            if let Stmt::Label(l) = s {
-                labels.entry(l.to_lowercase()).or_insert(i);
-            }
-        }
+        // The label table is built only when a GoTo or error handler needs it,
+        // not on every run of the block (a loop body runs many times).
+        let mut labels: Option<HashMap<String, usize>> = None;
+        let find_label = |labels: &mut Option<HashMap<String, usize>>, name: &str| -> Option<usize> {
+            let map = labels.get_or_insert_with(|| {
+                let mut m = HashMap::new();
+                for (i, s) in stmts.iter().enumerate() {
+                    if let Stmt::Label(l) = s {
+                        m.entry(l.to_lowercase()).or_insert(i);
+                    }
+                }
+                m
+            });
+            map.get(&name.to_lowercase()).copied()
+        };
         let mut i = 0usize;
         while i < stmts.len() {
             if let Stmt::Label(_) = &stmts[i] {
@@ -1292,8 +1303,8 @@ impl<'out> Interpreter<'out> {
                     }
                     Flow::ExitDo | Flow::ExitFor | Flow::ExitProc | Flow::Halt => return Ok(flow),
                     Flow::Return(at) => return Ok(Flow::Return(at)),
-                    Flow::Goto(l) => match labels.get(&l.to_lowercase()) {
-                        Some(&j) => {
+                    Flow::Goto(l) => match find_label(&mut labels, &l) {
+                        Some(j) => {
                             i = j;
                             continue;
                         }
@@ -1322,8 +1333,8 @@ impl<'out> Interpreter<'out> {
                             i += 1;
                             continue;
                         }
-                        ErrMode::Goto(l) => match labels.get(&l.to_lowercase()) {
-                            Some(&j) => {
+                        ErrMode::Goto(l) => match find_label(&mut labels, &l) {
+                            Some(j) => {
                                 i = j;
                                 continue;
                             }
