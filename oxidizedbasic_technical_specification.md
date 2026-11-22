@@ -165,10 +165,12 @@ The OxidizedBASIC IDE is a native GPUI application providing sub-millisecond edi
 - Implement event listener registry connecting GPUI input/mouse events to BASIC subroutines.
 
 ### Phase 3: IDE Development (Months 6–9)
-- Build the visual Form Designer in GPUI Kit.
-- Integrate Tree-sitter syntax highlighting editor and Property Inspector.
-- Implement debug controls (Breakpoints, Step-over, Variable Watch).
+- Build the visual Form Designer in GPUI Kit. (Done: drag, resize handles, toolbox, Property Inspector.)
+- Integrate Tree-sitter syntax highlighting editor and Property Inspector. (Done for highlighting: the `oxbasic_vb_grammar` crate parses each line; a line that cannot parse alone falls back to a hand-written tokenizer. Not done: whole-document parsing so block headers and footers are coloured by the grammar.)
+- Implement debug controls (Breakpoints, Step-over, Variable Watch). (Done. Step-into is not implemented.)
+- Open items: editor diagnostics (error underlines) are not implemented, and the editor stores lines in a `Vec<String>` rather than a rope. Code folding is done for blocks (Sub, Function, loops, If, Select, With, Type, Enum).
 
 ### Phase 4: JIT Codegen & Packaging (Months 10–12)
 - Integrate Cranelift JIT backend for compiling BASIC routines directly to native assembly.
 - Packaging: `scripts/make_app.sh` produces the macOS `.app` (done for the IDE and for `oxbasic play`); a Developer ID-signed and notarised build for other Macs is still to do.
+- Performance: revisit the interpreter's speed. The benchmark `examples/basica.bas` runs in about 1.26s against 0.34s for basika (a C interpreter). Most of the time is spent looking variables up by name (lowercasing and hashing on every access). Resolving names to slots at load time is the likely fix; the JIT work should be measured against this baseline.
