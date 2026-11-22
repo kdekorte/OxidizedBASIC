@@ -349,6 +349,9 @@ pub struct Ide {
     /// The window's size at the last draw, which bounds the panes.
     viewport: gpui::Size<gpui::Pixels>,
     scrollbars_initialized: bool,
+    /// Header rows of the code blocks the editor shows folded (collapsed).
+    folded: std::collections::BTreeSet<usize>,
+
     breakpoints: Arc<Mutex<HashSet<usize>>>,
     // form designer
     form: FormSpec,
@@ -492,6 +495,7 @@ Print \"Total = \" & CStr(Total)
             viewport: size(px(1180.0), px(760.0)),
             scrollbars_initialized: false,
             breakpoints: Arc::new(Mutex::new(HashSet::new())),
+            folded: std::collections::BTreeSet::new(),
             form,
             selected: None,
             project_selected: false,
@@ -738,6 +742,12 @@ impl Ide {
         }
     }
 
+    fn toggle_fold(&mut self, row: usize) {
+        if !self.folded.insert(row) {
+            self.folded.remove(&row);
+        }
+    }
+
     fn toggle_breakpoint(&mut self, line: usize) {
         let mut bps = self.breakpoints.lock().unwrap();
         if !bps.insert(line) {
@@ -831,6 +841,8 @@ impl Ide {
 
 #[cfg(test)]
 mod editor_tests;
+#[cfg(test)]
+mod fold_tests;
 #[cfg(test)]
 mod event_tests;
 #[cfg(test)]
@@ -1916,6 +1928,20 @@ impl Ide {
             .unwrap_or_default();
         let find_current = self.find.as_ref().and_then(|b| b.current);
         let bps = self.breakpoints.lock().unwrap().clone();
+        // Code folding: the blocks in the source, and the rows hidden by the
+        // ones that are folded. The buffer itself is unchanged, so line
+        // numbers, breakpoints and the debugger keep their meaning.
+        let folds = code_model::find_folds(&self.lines);
+        // the caret is never left on a hidden row: open whatever hides it
+        // (typing, moving, find and navigation all reach here)
+        while let Some(f) = code_model::folded_block_hiding(&folds, &self.folded, self.cursor.0) {
+            self.folded.remove(&f.start);
+        }
+        let hidden = code_model::hidden_rows(&folds, &self.folded);
+        let fold_of_row: std::collections::HashMap<usize, bool> = folds
+            .iter()
+            .map(|f| (f.start, self.folded.contains(&f.start)))
+            .collect();
         let paused_line = self.paused.as_ref().map(|p| p.line);
         // Retain the width of the longest source line so horizontal scrolling
         // can expose it instead of flex layout clipping or wrapping it.
@@ -1935,10 +1961,45 @@ impl Ide {
             .font_family("Menlo");
 
         for (idx, line) in self.lines.clone().into_iter().enumerate() {
+            // a row inside a folded block is not drawn at all
+            if hidden.contains(&idx) {
+                continue;
+            }
             let lineno = idx + 1;
             let has_bp = bps.contains(&lineno);
             let is_paused = paused_line == Some(lineno);
             let is_cursor = self.cursor.0 == idx;
+
+            // a header that opens a block shows its fold marker: ▾ open, ▸ folded
+            let foldable = fold_of_row.contains_key(&idx);
+            let fold_marker = match fold_of_row.get(&idx) {
+                Some(true) => "\u{25b8}",
+                Some(false) => "\u{25be}",
+                None => "",
+            };
+
+            // the fold marker is its own cell, beside the gutter: a click on it
+            // folds the block and does not toggle a breakpoint
+            let fold_cell = div()
+                .id((SharedString::from("fold"), idx))
+                .debug_selector(move || format!("fold-{}", idx))
+                .w(px(14.0))
+                .h_full()
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(rgb(DIM))
+                .cursor_pointer()
+                .child(SharedString::from(fold_marker))
+                .on_click(cx.listener(
+                    move |this: &mut Ide, _ev: &gpui::ClickEvent, _win, cx| {
+                        if foldable {
+                            this.toggle_fold(idx);
+                        }
+                        cx.notify();
+                    },
+                ));
 
             let mut gutter = div()
                 .id((SharedString::from("gutter"), idx))
@@ -1990,6 +2051,7 @@ impl Ide {
                     .h_5()
                     .items_center()
                     .whitespace_nowrap()
+                    .child(fold_cell)
                     .child(gutter)
                     .child(code),
             );

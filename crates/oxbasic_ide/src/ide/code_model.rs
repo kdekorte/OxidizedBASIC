@@ -200,6 +200,107 @@ pub fn rename_control(lines: &mut [String], old: &str, new: &str, events: &[&str
     changed
 }
 
+/// A block that can be folded: its header row, and the row of its closing
+/// line (`End Sub`, `Next`, `Loop`, ...). The rows between are hidden when
+/// the block is folded; the header stays visible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fold {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// The first word of a line, lowercased, and what follows it.
+fn first_word(line: &str) -> (String, &str) {
+    let t = line.trim_start();
+    let w = ident_prefix(t);
+    (w.to_ascii_lowercase(), t[w.len()..].trim())
+}
+
+/// The closing word a line opens a foldable block with (`sub` closes with
+/// `End Sub`, `for` with `Next`, ...), if it opens one.
+fn opens_block(line: &str) -> Option<&'static str> {
+    let (word, rest) = first_word(line);
+    match word.as_str() {
+        "sub" => Some("sub"),
+        "function" => Some("function"),
+        "property" => Some("property"),
+        "for" => Some("next"),
+        "while" => Some("wend"),
+        "do" => Some("loop"),
+        "with" => Some("with"),
+        "type" => Some("type"),
+        "enum" => Some("enum"),
+        "select" if rest.to_ascii_lowercase().starts_with("case") => Some("select"),
+        // a block If has nothing after its `Then`; a one-line If does not fold
+        "if" if rest.to_ascii_lowercase().ends_with("then") => Some("if"),
+        _ => None,
+    }
+}
+
+/// Whether `line` closes a block that `closer` names.
+fn closes_block(line: &str, closer: &str) -> bool {
+    let (word, rest) = first_word(line);
+    match closer {
+        "next" => word == "next",
+        "loop" => word == "loop",
+        "wend" => word == "wend",
+        _ if word == "end" => ident_prefix(rest).eq_ignore_ascii_case(closer),
+        _ => false,
+    }
+}
+
+/// Every foldable block in the module, nested ones included, in source order.
+/// A block that is never closed is left out.
+pub fn find_folds(lines: &[String]) -> Vec<Fold> {
+    let mut folds = Vec::new();
+    // open blocks, innermost last: (header row, the word that closes it)
+    let mut open: Vec<(usize, &'static str)> = Vec::new();
+    for (row, line) in lines.iter().enumerate() {
+        // the innermost open block closes first (a `Next` ends the nearest `For`)
+        if let Some(&(start, closer)) = open.last() {
+            if closes_block(line, closer) {
+                open.pop();
+                folds.push(Fold { start, end: row });
+                continue;
+            }
+        }
+        if let Some(closer) = opens_block(line) {
+            open.push((row, closer));
+        }
+    }
+    folds.sort_by_key(|f| f.start);
+    folds
+}
+
+/// The rows hidden by the folded blocks: every row strictly inside a folded
+/// block. A header row stays visible.
+pub fn hidden_rows(
+    folds: &[Fold],
+    folded: &std::collections::BTreeSet<usize>,
+) -> std::collections::HashSet<usize> {
+    let mut hidden = std::collections::HashSet::new();
+    for f in folds.iter().filter(|f| folded.contains(&f.start)) {
+        hidden.extend(f.start + 1..f.end);
+    }
+    hidden
+}
+
+/// The fold that hides `row` while it is folded, if any. The innermost block
+/// wins when folds are nested, so one click opens the one that is shown.
+pub fn folded_block_hiding(
+    folds: &[Fold],
+    folded: &std::collections::BTreeSet<usize>,
+    row: usize,
+) -> Option<Fold> {
+    folds
+        .iter()
+        .filter(|f| folded.contains(&f.start) && f.start < row && row <= f.end)
+        .min_by_key(|f| f.end - f.start)
+        .copied()
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +399,98 @@ mod tests {
             "a non-event suffix must not match"
         );
         assert_eq!(l[5], "Private Sub OkButton_mousedown(Button As Integer)");
+    }
+
+    fn fold(start: usize, end: usize) -> Fold {
+        Fold { start, end }
+    }
+
+    #[test]
+    fn finds_the_blocks_of_each_kind() {
+        let l = lines(
+            "Sub A()\nIf x > 1 Then\n  y = 1\nEnd If\nFor i = 1 To 3\n  Print i\nNext i\nDo\n  x = 1\nLoop\nWhile x\nWend\nEnd Sub",
+        );
+        assert_eq!(
+            find_folds(&l),
+            vec![fold(0, 12), fold(1, 3), fold(4, 6), fold(7, 9), fold(10, 11)]
+        );
+    }
+
+    #[test]
+    fn nested_blocks_close_at_their_own_end() {
+        let l = lines("For i = 1 To 2\nFor j = 1 To 2\nNext j\nNext i");
+        assert_eq!(find_folds(&l), vec![fold(0, 3), fold(1, 2)]);
+    }
+
+    #[test]
+    fn a_one_line_if_does_not_fold() {
+        let l = lines("If x Then y = 1\nIf x Then\ny = 2\nEnd If");
+        assert_eq!(find_folds(&l), vec![fold(1, 3)]);
+    }
+
+    #[test]
+    fn select_with_type_and_enum_fold() {
+        let l = lines(
+            "Select Case x\nCase 1\nEnd Select\nWith p\n.X = 1\nEnd With\nType T\nN As Long\nEnd Type\nEnum E\nA\nEnd Enum",
+        );
+        assert_eq!(
+            find_folds(&l),
+            vec![fold(0, 2), fold(3, 5), fold(6, 8), fold(9, 11)]
+        );
+    }
+
+    #[test]
+    fn an_unclosed_block_is_not_a_fold() {
+        assert_eq!(find_folds(&lines("Sub A()\nx = 1")), vec![]);
+    }
+
+    #[test]
+    fn a_variable_named_like_a_keyword_is_not_a_block() {
+        // `Subtotal`, `Format` and `Done` start with a block word but are not one
+        let l = lines("Subtotal = 1\nFormat = 2\nDone = 3\nFor i = 1 To 2\nNext i");
+        assert_eq!(find_folds(&l), vec![fold(3, 4)]);
+    }
+
+    fn folded_set(rows: &[usize]) -> std::collections::BTreeSet<usize> {
+        rows.iter().copied().collect()
+    }
+
+    #[test]
+    fn a_folded_block_hides_its_body_but_keeps_its_header_and_end() {
+        // Sub (0..4) holds For (1..3)
+        let l = lines("Sub A()\nFor i = 1 To 2\nPrint i\nNext i\nx = 1\nEnd Sub");
+        let folds = find_folds(&l);
+        assert_eq!(folds, vec![fold(0, 5), fold(1, 3)]);
+
+        let hidden = hidden_rows(&folds, &folded_set(&[0]));
+        // the Sub's body is hidden, including the nested For; its header (0)
+        // and End Sub (5) stay visible
+        assert!(!hidden.contains(&0));
+        assert!(!hidden.contains(&5));
+        assert_eq!(hidden, [1, 2, 3, 4].into_iter().collect());
+
+        // folding just the For hides its body row, not its Next
+        let hidden = hidden_rows(&folds, &folded_set(&[1]));
+        assert_eq!(hidden, [2].into_iter().collect());
+    }
+
+    #[test]
+    fn nothing_is_hidden_until_a_block_is_folded() {
+        let folds = find_folds(&lines("For i = 1 To 2\nNext i"));
+        assert!(hidden_rows(&folds, &folded_set(&[])).is_empty());
+    }
+
+    #[test]
+    fn the_innermost_folded_block_is_the_one_that_hides_a_row() {
+        let folds = find_folds(&lines("Sub A()\nFor i = 1 To 2\nPrint i\nNext i\nEnd Sub"));
+        let both = folded_set(&[0, 1]);
+        // row 2 is inside both folds: the For is the one to open
+        assert_eq!(folded_block_hiding(&folds, &both, 2), Some(fold(1, 3)));
+        // row 4 (End Sub) is hidden only by the Sub
+        assert_eq!(folded_block_hiding(&folds, &both, 4), Some(fold(0, 4)));
+        // a header row is never hidden
+        assert_eq!(folded_block_hiding(&folds, &both, 0), None);
+        // nothing hides a row when nothing is folded
+        assert_eq!(folded_block_hiding(&folds, &folded_set(&[]), 2), None);
     }
 }
