@@ -508,4 +508,20 @@ mod grammar_used_tests {
     }
 
 
+    #[test]
+    fn select_case_with_ranges_and_comparisons_is_coloured_by_the_grammar() {
+        let l = module(
+            "Sub A()\n  Select Case x\n  Case 1 To 5\n    y = 1\n  Case Is > 9\n    y = 2\n  Case Else\n    y = 3\n  End Select\nEnd Sub",
+        );
+        let rows = tokenize_module(&l);
+        // the Case lines are not errors: their keywords are keyword-coloured
+        assert!(rows[2].iter().any(|(t, k)| t == "To" && *k == Tok::Keyword), "{:?}", rows[2]);
+        assert!(rows[4].iter().any(|(t, k)| t == "Is" && *k == Tok::Keyword), "{:?}", rows[4]);
+        for (row, toks) in rows.iter().enumerate() {
+            let joined: String = toks.iter().map(|(t, _)| t.as_str()).collect();
+            assert_eq!(joined, l[row], "row {}", row);
+        }
+    }
+
+
 }

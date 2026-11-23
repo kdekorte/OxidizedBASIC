@@ -231,8 +231,18 @@ module.exports = grammar({
 
     case_clause: ($) =>
       prec.left(
-        seq(kw('Case'), choice(kw('Else'), commaSep1($.expression)), $._eol, repeat($._line)),
+        seq(kw('Case'), choice(kw('Else'), commaSep1($.case_item)), $._eol, repeat($._line)),
       ),
+
+    // one item of a Case: a value, a range `1 To 5`, or a comparison `Is > 9`
+    case_item: ($) =>
+      choice(
+        seq(kw('Is'), $.comparison_op, $.expression),
+        seq($.expression, kw('To'), $.expression),
+        $.expression,
+      ),
+
+    comparison_op: ($) => choice('<=', '>=', '<>', '<', '>', '='),
 
 
     for_statement: ($) =>
