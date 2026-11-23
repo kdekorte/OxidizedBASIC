@@ -424,6 +424,141 @@ pub fn unknown_name(lines: &[String], controls: &[String]) -> Option<Diagnostic>
 }
 
 
+/// The members every control has (`docs/controls.md`, "Properties common to
+/// every control"), in lowercase.
+const COMMON_MEMBERS: &[&str] = &[
+    "name", "index", "left", "top", "width", "height", "enabled", "visible", "tabindex",
+    "tabstop", "container", "tooltiptext", "mousepointer", "mouseicon", "move", "zorder",
+    "forecolor", "backcolor", "font", "font.name", "font.size", "font.bold", "font.italic",
+    "font.underline", "font.strikethrough", "fontname", "fontsize", "fontbold", "fontitalic",
+    "fontunderline", "fontstrikethru", "caption", "text", "setfocus",
+];
+
+/// The members of a list control (ListBox), from the ListBox table.
+const LIST_MEMBERS: &[&str] = &[
+    "list", "listcount", "listindex", "additem", "removeitem", "clear", "selected", "selcount",
+    "multiselect",
+];
+
+/// The members of a ComboBox, from its table.
+const COMBO_MEMBERS: &[&str] = &[
+    "text", "style", "list", "listcount", "listindex", "selstart", "sellength", "seltext",
+    "locked", "additem", "removeitem", "clear", "setfocus",
+];
+
+/// The members of a PictureBox, from its table.
+const PICTURE_MEMBERS: &[&str] = &[
+    "picture", "autosize", "currentx", "currenty", "cls", "line", "pset", "circle", "setfocus",
+];
+
+/// The member names a control of kind `kind` (its type name, as the Properties
+/// window shows it) can be asked for, beyond the common ones. `None` when the
+/// kind's table is not written down yet: such a control is not checked.
+fn kind_members(kind: &str) -> Option<&'static [&'static str]> {
+    match kind.to_ascii_lowercase().as_str() {
+        "listbox" => Some(LIST_MEMBERS),
+        "combobox" => Some(COMBO_MEMBERS),
+        "picturebox" => Some(PICTURE_MEMBERS),
+        _ => None,
+    }
+}
+
+/// A `Control.Member` line whose member names nothing the control has: a
+/// misspelled method such as `lstFruit.RemooveItem`. `controls` gives each
+/// control's name and kind (its type name). Only a control whose kind has a
+/// written table is checked, so a valid name is never reported as a typo. A
+/// member the table lists but the runtime does not do yet is not reported.
+pub fn unknown_member(lines: &[String], controls: &[(String, String)]) -> Option<Diagnostic> {
+    let src = lines.join("\n");
+    let program = oxbasic_parser::parse(&src).ok()?;
+
+    fn walk(
+        stmts: &[oxbasic_ast::Stmt],
+        controls: &[(String, String)],
+        line: &mut usize,
+        found: &mut Option<(usize, String)>,
+    ) {
+        use oxbasic_ast::{Expr, Stmt};
+        for s in stmts {
+            if found.is_some() {
+                return;
+            }
+            match s {
+                Stmt::LineMarker(l) => *line = *l,
+                Stmt::Call { target: Expr::Member { obj, name }, .. } => {
+                    if let Expr::Var(control) = obj.as_ref() {
+                        if let Some((_, kind)) =
+                            controls.iter().find(|(n, _)| n.eq_ignore_ascii_case(control))
+                        {
+                            if let Some(table) = kind_members(kind) {
+                                let m = name.to_ascii_lowercase();
+                                if !COMMON_MEMBERS.contains(&m.as_str())
+                                    && !table.contains(&m.as_str())
+                                {
+                                    *found = Some((*line, format!("{}.{}", control, name)));
+                                }
+                            }
+                        }
+                    }
+                }
+                Stmt::If { arms, else_body } => {
+                    for a in arms {
+                        walk(&a.body, controls, line, found);
+                    }
+                    if let Some(b) = else_body {
+                        walk(b, controls, line, found);
+                    }
+                }
+                Stmt::For { body, .. }
+                | Stmt::ForEach { body, .. }
+                | Stmt::DoWhile { body, .. }
+                | Stmt::DoLoop { body, .. }
+                | Stmt::While { body, .. }
+                | Stmt::With { body, .. } => walk(body, controls, line, found),
+                Stmt::Select { arms, else_body, .. } => {
+                    for a in arms {
+                        walk(&a.body, controls, line, found);
+                    }
+                    if let Some(b) = else_body {
+                        walk(b, controls, line, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut found: Option<(usize, String)> = None;
+    let mut line = 0usize;
+    let mut top: Vec<oxbasic_ast::Stmt> = Vec::new();
+    for item in &program.items {
+        match item {
+            oxbasic_ast::Item::Stmt(s) => top.push(s.clone()),
+            oxbasic_ast::Item::Proc(p) => {
+                let mut ignored = 0usize;
+                walk(&p.body, controls, &mut ignored, &mut found);
+            }
+        }
+    }
+    walk(&top, controls, &mut line, &mut found);
+
+    let (line_no, dotted) = found?;
+    let row = line_no.saturating_sub(1);
+    let text = lines.get(row)?;
+    let member = dotted.split_once('.').map(|(_, m)| m).unwrap_or(&dotted);
+    let column = text
+        .find(member)
+        .map(|b| text[..b].chars().count())
+        .unwrap_or(0);
+    Some(Diagnostic {
+        row,
+        column,
+        message: format!("'{}' is not a property or method of this control", dotted),
+    })
+}
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -678,5 +813,42 @@ mod tests {
     fn a_module_that_does_not_parse_gives_no_unknown_name() {
         // the syntax error is the report here, not an unknown name
         assert_eq!(unknown_name(&lines("Print (2"), &[]), None);
+    }
+
+    fn kinds(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(n, k)| (n.to_string(), k.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn a_misspelled_list_method_is_flagged() {
+        let l = lines("Sub Main()\n  lstFruit.RemooveItem 2\nEnd Sub");
+        let d = unknown_member(&l, &kinds(&[("lstFruit", "ListBox")])).expect("a typo");
+        assert_eq!(d.row, 1);
+        assert_eq!(d.column, 11);
+        assert!(d.message.contains("lstFruit.RemooveItem"), "{}", d.message);
+    }
+
+    #[test]
+    fn a_real_method_and_a_common_property_are_not_flagged() {
+        let l = lines("Sub Main()\n  lstFruit.RemoveItem 2\n  lstFruit.Caption = \"x\"\n  lstFruit.Clear\nEnd Sub");
+        assert_eq!(unknown_member(&l, &kinds(&[("lstFruit", "ListBox")])), None);
+    }
+
+    #[test]
+    fn a_valid_member_the_runtime_lacks_is_not_a_typo() {
+        // ListBox.Sorted is in the VB6 set the table lists as a valid member
+        // but the runtime does not implement it: it is not reported as a typo
+        let l = lines("Sub Main()\n  lstFruit.Sorted = True\nEnd Sub");
+        assert_eq!(unknown_member(&l, &kinds(&[("lstFruit", "ListBox")])), None);
+    }
+
+    #[test]
+    fn a_kind_without_a_table_is_not_checked() {
+        // a Frame's table is not written yet, so nothing it does is flagged
+        let l = lines("Sub Main()\n  Frame1.Anything\nEnd Sub");
+        assert_eq!(unknown_member(&l, &kinds(&[("Frame1", "Frame")])), None);
     }
 }

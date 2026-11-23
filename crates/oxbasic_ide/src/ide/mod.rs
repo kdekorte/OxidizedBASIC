@@ -744,12 +744,21 @@ impl Ide {
         }
     }
 
-    /// The problem to show in the code: a syntax error, or else a bare word
-    /// that names nothing (`Elsee` on its own line). The form's controls are
-    /// the names the module may use.
+    /// The problem to show in the code: a syntax error; else a bare word that
+    /// names nothing (`Elsee` on its own line); else a misspelled member of a
+    /// control (`lstFruit.RemooveItem`). The form's controls are the names the
+    /// module may use.
     pub(super) fn current_diagnostic(&self) -> Option<code_model::Diagnostic> {
         let controls: Vec<String> = self.form.controls.iter().map(|c| c.name.clone()).collect();
-        code_model::diagnostic(&self.lines).or_else(|| code_model::unknown_name(&self.lines, &controls))
+        let kinds: Vec<(String, String)> = self
+            .form
+            .controls
+            .iter()
+            .map(|c| (c.name.clone(), c.kind.basic_name().to_string()))
+            .collect();
+        code_model::diagnostic(&self.lines)
+            .or_else(|| code_model::unknown_name(&self.lines, &controls))
+            .or_else(|| code_model::unknown_member(&self.lines, &kinds))
     }
 
     fn toggle_fold(&mut self, row: usize) {

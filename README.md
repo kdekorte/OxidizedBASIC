@@ -81,8 +81,10 @@ Immediate pane below.*
     the status line shows the message and its line number. Only the first
     error is marked. A word alone on a line that names nothing the module can
     run (a misspelled `Else` such as `Elsee`, or a call to a sub that does not
-    exist) is marked the same way, as an unknown name. Names inside an
-    expression are not checked yet.
+    exist) is marked the same way, as an unknown name. A misspelled member of
+    a control (`lstFruit.RemooveItem`) is marked when the control's kind has
+    its member list written down: ListBox, ComboBox and PictureBox for now.
+    Names inside an expression are not checked yet.
   - **Visual form designer**: the form canvas renders the `.oxform`
     layout; click to select controls, **drag to move** them and **drag
     the eight selection handles** to resize them (like VB6), and add

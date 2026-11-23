@@ -78,3 +78,44 @@ fn a_correct_else_is_not_flagged_in_the_editor(cx: &mut gpui::TestAppContext) {
         assert_eq!(ide.current_diagnostic(), None);
     });
 }
+
+#[gpui::test]
+fn a_misspelled_method_of_a_list_is_flagged_in_the_editor(cx: &mut gpui::TestAppContext) {
+    let (ide, mut cx) = editor_with(
+        "Sub Main()\n  lstFruit.RemooveItem 2\nEnd Sub",
+        cx,
+    );
+    let cx = &mut cx;
+    ide.update(cx, |ide, cx| {
+        ide.form.control(ControlSpec::new(
+            "lstFruit",
+            ControlKind::ListBox,
+            Rect::new(16.0, 40.0, 160.0, 100.0),
+        ));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        let d = ide.current_diagnostic().expect("RemooveItem is not a ListBox member");
+        assert_eq!(d.row, 1);
+        assert!(d.message.contains("lstFruit.RemooveItem"), "{}", d.message);
+    });
+}
+
+#[gpui::test]
+fn a_real_list_method_is_not_flagged_in_the_editor(cx: &mut gpui::TestAppContext) {
+    let (ide, mut cx) = editor_with("Sub Main()\n  lstFruit.RemoveItem 2\nEnd Sub", cx);
+    let cx = &mut cx;
+    ide.update(cx, |ide, cx| {
+        ide.form.control(ControlSpec::new(
+            "lstFruit",
+            ControlKind::ListBox,
+            Rect::new(16.0, 40.0, 160.0, 100.0),
+        ));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.current_diagnostic(), None);
+    });
+}
