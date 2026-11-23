@@ -300,6 +300,29 @@ pub fn folded_block_hiding(
 }
 
 
+/// A problem in the source, shown under its row: the row (0-based), the
+/// column (0-based, in characters) where the bad text starts, and what is
+/// wrong with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub row: usize,
+    pub column: usize,
+    pub message: String,
+}
+
+/// The first syntax error in `lines`, if the module does not parse. The
+/// parser reports a 1-based position; this is the editor's 0-based row.
+pub fn diagnostic(lines: &[String]) -> Option<Diagnostic> {
+    let src = lines.join("\n");
+    let e = oxbasic_parser::check(&src)?;
+    Some(Diagnostic {
+        row: e.line.saturating_sub(1).min(lines.len().saturating_sub(1)),
+        column: e.column.saturating_sub(1),
+        message: e.message,
+    })
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -492,5 +515,26 @@ mod tests {
         assert_eq!(folded_block_hiding(&folds, &both, 0), None);
         // nothing hides a row when nothing is folded
         assert_eq!(folded_block_hiding(&folds, &folded_set(&[]), 2), None);
+    }
+
+    #[test]
+    fn a_module_that_parses_has_no_diagnostic() {
+        assert_eq!(diagnostic(&lines("Sub A()\n  Print 1\nEnd Sub")), None);
+    }
+
+    #[test]
+    fn the_diagnostic_points_at_the_failing_row() {
+        // the bad line is row 1 (0-based); the parser reports line 2
+        let d = diagnostic(&lines("Print 1\nPrint (2\nPrint 3")).expect("an error");
+        assert_eq!(d.row, 1);
+        assert!(d.column <= "Print (2".chars().count());
+        assert!(!d.message.is_empty());
+    }
+
+    #[test]
+    fn an_error_at_the_end_of_the_text_stays_on_a_real_row() {
+        let l = lines("Print 1\nPrint (2");
+        let d = diagnostic(&l).expect("an error");
+        assert!(d.row < l.len());
     }
 }

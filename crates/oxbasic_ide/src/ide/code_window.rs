@@ -388,7 +388,17 @@ impl Ide {
                     .text_xs()
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .child(SharedString::from(self.status.clone())),
+                    .child(SharedString::from(
+                        match code_model::diagnostic(&self.lines) {
+                            // with the caret on the error, its message shows here
+                            Some(d) if d.row == self.cursor.0 => format!(
+                                "Syntax error: {} (line {})",
+                                d.message,
+                                d.row + 1
+                            ),
+                            _ => self.status.clone(),
+                        },
+                    )),
             );
 
         // The open list floats over the editor, under its select box.

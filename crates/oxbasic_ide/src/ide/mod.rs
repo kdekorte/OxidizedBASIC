@@ -91,6 +91,8 @@ const DIM: u32 = 0x6E6E73;
 const ACCENT: u32 = 0x007AFF;
 const SEL_BG: u32 = 0xDCEEFF;
 const C_KEYWORD: u32 = 0x9B2393;
+/// The underline of a syntax error in the code.
+const C_ERROR: u32 = 0xD32F2F;
 const C_STRING: u32 = 0xC41A16;
 const C_NUMBER: u32 = 0x1C00CF;
 const C_COMMENT: u32 = 0x5D6C79;
@@ -841,6 +843,8 @@ impl Ide {
 
 #[cfg(test)]
 mod editor_tests;
+#[cfg(test)]
+mod diagnostic_tests;
 #[cfg(test)]
 mod fold_tests;
 #[cfg(test)]
@@ -1937,6 +1941,8 @@ impl Ide {
         while let Some(f) = code_model::folded_block_hiding(&folds, &self.folded, self.cursor.0) {
             self.folded.remove(&f.start);
         }
+        // Diagnostics: a syntax error in the module is underlined on its row.
+        let diag = code_model::diagnostic(&self.lines);
         let hidden = code_model::hidden_rows(&folds, &self.folded);
         let fold_of_row: std::collections::HashMap<usize, bool> = folds
             .iter()
@@ -2040,7 +2046,8 @@ impl Ide {
                     (from < to).then_some((from, to, find_current == Some(i)))
                 })
                 .collect();
-            code = code.child(render_code_line(&line, selected, caret, &found));
+            let error_from = diag.as_ref().filter(|d| d.row == idx).map(|d| d.column);
+            code = code.child(render_code_line(&line, selected, caret, &found, error_from));
 
             list = list.child(
                 div()
@@ -2117,6 +2124,7 @@ fn render_code_line(
     selected: Option<(usize, Option<usize>)>,
     caret: Option<usize>,
     found: &[(usize, usize, bool)],
+    error_from: Option<usize>,
 ) -> gpui::Div {
     // colour each character by its token, then cut the line wherever the
     // selection, a find match or the caret starts or ends
@@ -2144,6 +2152,8 @@ fn render_code_line(
             *m = (*m).max(if current { 2 } else { 1 });
         }
     }
+    // the syntax error runs from its column to the end of the row
+    let is_error = |i: usize| error_from.is_some_and(|from| i >= from);
     let caret_bar = || div().flex_none().w(px(1.5)).h(px(15.0)).bg(rgb(ACCENT));
     let mut row = div().flex().items_center();
     let mut i = 0;
@@ -2153,12 +2163,13 @@ fn render_code_line(
         }
         let in_sel = i >= sel_from && i < sel_to;
         let color = colors[i].1;
-        // a run of characters with the same colour, selection and match
+        // a run of characters with the same colour, selection, match and error
         let mut j = i + 1;
         while j < len
             && colors[j].1 == color
             && (j >= sel_from && j < sel_to) == in_sel
             && mark[j] == mark[i]
+            && is_error(j) == is_error(i)
             && caret != Some(j)
         {
             j += 1;
@@ -2172,6 +2183,9 @@ fn render_code_line(
             span = span.bg(rgb(FIND_CURRENT_BG));
         } else if mark[i] == 1 {
             span = span.bg(rgb(FIND_BG));
+        }
+        if is_error(i) {
+            span = span.border_b_2().border_color(rgb(C_ERROR));
         }
         row = row.child(span);
         i = j;

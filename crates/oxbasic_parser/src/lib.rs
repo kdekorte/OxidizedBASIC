@@ -23,6 +23,57 @@ fn filter_kw<'a>(pairs: Pairs<'a, Rule>) -> impl Iterator<Item = Pair<'a, Rule>>
     pairs.filter(move |p| !is_kw(p.as_rule()))
 }
 
+/// A syntax error with its position: `line` and `column` are 1-based, and
+/// `message` is what the parser expected, without the formatted snippet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxError {
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+}
+
+/// Where the source fails to parse, if it does. The IDE uses this to
+/// underline the bad text as the user types.
+pub fn check(src: &str) -> Option<SyntaxError> {
+    match OxbasicParser::parse(Rule::Program, src) {
+        Ok(_) => None,
+        Err(e) => {
+            let (line, column) = match e.line_col {
+                pest::error::LineColLocation::Pos((l, c)) => (l, c),
+                pest::error::LineColLocation::Span((l, c), _) => (l, c),
+            };
+            let message = match &e.variant {
+                pest::error::ErrorVariant::ParsingError { positives, negatives } => {
+                    let mut parts: Vec<String> = Vec::new();
+                    if !positives.is_empty() {
+                        parts.push(format!(
+                            "expected {}",
+                            positives.iter().map(|r| format!("{:?}", r)).collect::<Vec<_>>().join(", ")
+                        ));
+                    }
+                    if !negatives.is_empty() {
+                        parts.push(format!(
+                            "unexpected {}",
+                            negatives.iter().map(|r| format!("{:?}", r)).collect::<Vec<_>>().join(", ")
+                        ));
+                    }
+                    parts.join("; ")
+                }
+                pest::error::ErrorVariant::CustomError { message } => message.clone(),
+            };
+            Some(SyntaxError {
+                line,
+                column,
+                message: if message.is_empty() {
+                    "syntax error".to_string()
+                } else {
+                    message
+                },
+            })
+        }
+    }
+}
+
 /// Parse BASIC source text into a `Program`.
 ///
 /// Returns a human-readable error (with position) on failure.
@@ -1435,5 +1486,23 @@ mod tests {
         assert!(matches!(only("erase_count = 1\n"), Stmt::Assign { .. }));
         assert!(matches!(only("Mid = 3\n"), Stmt::Assign { .. }));
         assert!(matches!(only("letter = 2\n"), Stmt::Assign { .. }));
+    }
+
+    #[test]
+    fn check_reports_where_a_line_fails_to_parse() {
+        // valid source has no diagnostic
+        assert_eq!(check("Print 1\nPrint 2\n"), None);
+        // an unclosed parenthesis on line 2: the error points at line 2
+        let e = check("Print 1\nPrint (2\nPrint 3\n").expect("an error");
+        assert_eq!(e.line, 2);
+        assert!(e.column >= 1);
+        assert!(!e.message.is_empty());
+    }
+
+    #[test]
+    fn check_and_parse_agree_on_what_is_an_error() {
+        for src in ["Print 1\n", "Print (2\n", "If x Then\n", "Sub A()\nEnd Sub\n"] {
+            assert_eq!(check(src).is_some(), parse(src).is_err(), "{:?}", src);
+        }
     }
 }
