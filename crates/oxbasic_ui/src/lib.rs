@@ -19,6 +19,9 @@
 //!   from GPUI input/timer events.
 
 mod form;
+pub mod grid;
+#[cfg(test)]
+mod grid_tests;
 pub mod menu;
 #[cfg(feature = "gpui")]
 pub mod menu_bar;

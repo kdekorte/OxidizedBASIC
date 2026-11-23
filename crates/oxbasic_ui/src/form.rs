@@ -53,6 +53,9 @@ pub enum ControlKind {
     /// VB's TabStrip-style TabControl: a row of tabs, each a page that holds
     /// the controls whose `tab` is its index. `Tab` is the selected page.
     TabControl,
+    /// A table of text cells with fixed header rows and columns (`Rows`,
+    /// `Cols`, `TextMatrix`...). The user can edit its cells while `Editable`.
+    DataGrid,
 }
 
 impl ControlKind {
@@ -80,6 +83,7 @@ impl ControlKind {
             ControlKind::Slider => "Slider",
             ControlKind::ProgressBar => "ProgressBar",
             ControlKind::TabControl => "TabControl",
+            ControlKind::DataGrid => "DataGrid",
         }
     }
 
@@ -104,6 +108,7 @@ impl ControlKind {
             "slider" | "trackbar" => ControlKind::Slider,
             "progressbar" | "progress" => ControlKind::ProgressBar,
             "tabcontrol" | "tabstrip" | "tab" => ControlKind::TabControl,
+            "datagrid" | "msflexgrid" | "flexgrid" | "grid" => ControlKind::DataGrid,
             "timer" => ControlKind::Timer,
             "checkbox" | "check" => ControlKind::CheckBox,
             "optionbutton" | "option" | "radio" => ControlKind::OptionButton,
@@ -185,6 +190,9 @@ pub struct ControlSpec {
     /// shows only while that page is selected. Zero for every other control.
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub page: u8,
+    /// A DataGrid's cells and settings. Written only for a DataGrid.
+    #[serde(default, skip_serializing_if = "is_default_grid")]
+    pub grid: crate::grid::GridSpec,
     /// `FillStyle` (Shape control): 0 solid, 1 transparent (VB's default).
     #[serde(default = "default_one_u8")]
     pub fill_style: u8,
@@ -291,6 +299,10 @@ fn is_zero_u8(n: &u8) -> bool {
     *n == 0
 }
 
+fn is_default_grid(g: &crate::grid::GridSpec) -> bool {
+    *g == crate::grid::GridSpec::default()
+}
+
 fn is_zero_u32(n: &u32) -> bool {
     *n == 0
 }
@@ -373,6 +385,7 @@ impl ControlKind {
             ControlKind::Slider => (160.0, 40.0),
             ControlKind::ProgressBar => (200.0, 20.0),
             ControlKind::TabControl => (320.0, 200.0),
+            ControlKind::DataGrid => (320.0, 140.0),
         }
     }
 
@@ -450,6 +463,7 @@ impl ControlKind {
                 | ControlKind::CheckBox
                 | ControlKind::OptionButton
                 | ControlKind::PictureBox
+                | ControlKind::DataGrid
         )
     }
 }
@@ -534,6 +548,7 @@ impl ControlSpec {
             tab: 0,
             tabs: Vec::new(),
             page: 0,
+            grid: crate::grid::GridSpec::default(),
             fill_style: 1,
             diagonal: false,
             path: String::new(),

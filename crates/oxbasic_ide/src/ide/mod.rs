@@ -798,6 +798,7 @@ impl Ide {
             ControlKind::Slider => "Slider",
             ControlKind::ProgressBar => "Progress",
             ControlKind::TabControl => "Tab",
+            ControlKind::DataGrid => "Grid",
         };
         // The first free `<Prefix><n>` — renamed controls can leave gaps or
         // already hold the next number.
