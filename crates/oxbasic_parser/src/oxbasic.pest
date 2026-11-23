@@ -24,6 +24,11 @@ kw_output = @{ ^"output" ~ !IdentChar }
 kw_append = @{ ^"append" ~ !IdentChar }
 kw_write = @{ ^"write" ~ !IdentChar }
 kw_eof = @{ ^"eof" ~ !IdentChar }
+kw_random = @{ ^"random" ~ !IdentChar }
+kw_get = @{ ^"get" ~ !IdentChar }
+kw_put = @{ ^"put" ~ !IdentChar }
+kw_seek = @{ ^"seek" ~ !IdentChar }
+kw_len = @{ ^"len" ~ !IdentChar }
 
 kw_for = @{ ^"for" ~ !IdentChar }
 kw_each = @{ ^"each" ~ !IdentChar }
@@ -145,6 +150,9 @@ Statement = _{
     | FileLineInputStmt
     | FileInputStmt
     | FilePrintStmt
+    | FileGetStmt
+    | FilePutStmt
+    | FileSeekStmt
     | PrintStmt
     | GraphicsStmt
     | EraseStmt
@@ -283,8 +291,16 @@ EndStmt = { kw_end }
 
 // File I/O (VB's sequential files). A file is opened under a number and is
 // then named by `#n`. `Open path For Input|Output|Append As #n`.
-FileOpenStmt = { kw_open ~ Expr ~ kw_for ~ FileMode ~ kw_as ~ "#"? ~ Expr }
-FileMode = { kw_input | kw_output | kw_append }
+FileOpenStmt = { kw_open ~ Expr ~ kw_for ~ FileMode ~ kw_as ~ "#"? ~ Expr ~ (kw_len ~ "=" ~ Expr)? }
+FileMode = { kw_input | kw_output | kw_append | kw_random | kw_binary }
+// `Len = n` on Open: the record length of a random file
+FileLen = { kw_len ~ "=" ~ Expr }
+// `Get #n, [recnum], var` and `Put #n, [recnum], var`: one record or block
+FileRecord = { Expr }
+FileGetStmt = { kw_get ~ "#"? ~ Expr ~ "," ~ FileRecord? ~ "," ~ Expr }
+FilePutStmt = { kw_put ~ "#"? ~ Expr ~ "," ~ FileRecord? ~ "," ~ Expr }
+// `Seek #n, pos`: moves a binary or random file to a position
+FileSeekStmt = { kw_seek ~ "#"? ~ Expr ~ "," ~ Expr }
 // `Close`, `Close #1`, `Close #1, #2`
 FileCloseStmt = { kw_close ~ (FileNumber ~ ("," ~ FileNumber)*)? }
 FileNumber = { "#"? ~ Expr }

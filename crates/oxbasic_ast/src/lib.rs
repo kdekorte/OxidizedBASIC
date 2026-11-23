@@ -63,6 +63,10 @@ pub struct ConstDecl {
 /// How a file opened with `Open` is used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileMode {
+    /// `For Random`: fixed-length records, read and written by number.
+    Random,
+    /// `For Binary`: raw bytes, read and written at a byte position.
+    Binary,
     Input,
     Output,
     Append,
@@ -185,6 +189,25 @@ pub enum Stmt {
         path: Expr,
         mode: FileMode,
         number: Expr,
+        /// `Len = n`: the record length of a random file.
+        record_len: Option<Expr>,
+    },
+    /// `Get #n, [recnum], var`: reads a record (random) or bytes (binary).
+    FileGet {
+        number: Expr,
+        pos: Option<Expr>,
+        target: Expr,
+    },
+    /// `Put #n, [recnum], var`: writes a record or bytes.
+    FilePut {
+        number: Expr,
+        pos: Option<Expr>,
+        value: Expr,
+    },
+    /// `Seek #n, pos`: moves to a 1-based position.
+    FileSeek {
+        number: Expr,
+        pos: Expr,
     },
     /// `Close [#n [, #m]]`: closes the files named, or all of them.
     CloseFile(Vec<Expr>),

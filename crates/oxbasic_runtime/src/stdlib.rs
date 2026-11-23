@@ -48,6 +48,8 @@ pub fn is_builtin(name: &str) -> bool {
             | "switch"
             | "timer"
             | "eof"
+            | "loc"
+            | "lof"
             | "split"
             | "join"
             | "strcomp"
@@ -660,6 +662,14 @@ impl<'out> Interpreter<'out> {
             "eof" => {
                 let n = want_i64(args, 0)?;
                 Ok(Variant::Boolean(self.files.at_end(n)?))
+            }
+            "loc" => {
+                let n = want_i64(args, 0)?;
+                Ok(Variant::Long(self.files.loc(n)? as i32))
+            }
+            "lof" => {
+                let n = want_i64(args, 0)?;
+                Ok(Variant::Long(self.files.lof(n)? as i32))
             }
             "timer" => {
                 let serial = now_serial();

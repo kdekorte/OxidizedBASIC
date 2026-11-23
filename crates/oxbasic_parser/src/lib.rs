@@ -337,10 +337,52 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             let mode = match mode_pair.as_str().to_ascii_lowercase().as_str() {
                 "input" => FileMode::Input,
                 "output" => FileMode::Output,
+                "random" => FileMode::Random,
+                "binary" => FileMode::Binary,
                 _ => FileMode::Append,
             };
             let number = expr(children.next().unwrap())?;
-            Ok(Stmt::OpenFile { path, mode, number })
+            // `Len = n` is optional; its expression is the last child
+            let record_len = match children.next() {
+                Some(p) => Some(expr(p)?),
+                None => None,
+            };
+            Ok(Stmt::OpenFile { path, mode, number, record_len })
+        }
+        Rule::FileGetStmt | Rule::FilePutStmt => {
+            let is_get = pair.as_rule() == Rule::FileGetStmt;
+            let mut number = None;
+            let mut pos = None;
+            let mut target = None;
+            for child in filter_kw(pair.into_inner()) {
+                match child.as_rule() {
+                    Rule::FileRecord => {
+                        let e = child.into_inner().find(|c| c.as_rule() == Rule::Expr).unwrap();
+                        pos = Some(expr(e)?);
+                    }
+                    _ => {
+                        let e = expr(child)?;
+                        if number.is_none() {
+                            number = Some(e);
+                        } else {
+                            target = Some(e);
+                        }
+                    }
+                }
+            }
+            let number = number.unwrap();
+            let target = target.unwrap();
+            Ok(if is_get {
+                Stmt::FileGet { number, pos, target }
+            } else {
+                Stmt::FilePut { number, pos, value: target }
+            })
+        }
+        Rule::FileSeekStmt => {
+            let mut children = filter_kw(pair.into_inner());
+            let number = expr(children.next().unwrap())?;
+            let pos = expr(children.next().unwrap())?;
+            Ok(Stmt::FileSeek { number, pos })
         }
         Rule::FileCloseStmt => {
             let mut numbers = Vec::new();

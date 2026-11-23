@@ -18,6 +18,7 @@
   "True" "False" "Nothing" "Null" "Empty" "Array"
   "With" "Type" "Enum" "Stop" "Option" "Explicit" "Base" "Compare" "Let" "Erase"
   "ReDim" "Preserve" "Mid" "GoSub" "Return"
+  "Open" "Close" "Input" "Output" "Append" "Random" "Binary" "Len" "Get" "Put" "Seek"
 ] @keyword
 
 (builtin_type) @keyword

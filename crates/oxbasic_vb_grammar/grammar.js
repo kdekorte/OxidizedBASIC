@@ -92,6 +92,9 @@ module.exports = grammar({
         $.file_input_statement,
         $.file_line_input_statement,
         $.file_print_statement,
+        $.file_get_statement,
+        $.file_put_statement,
+        $.file_seek_statement,
         $.print_statement,
         $.set_statement,
         $.erase_statement,
@@ -353,11 +356,23 @@ module.exports = grammar({
         kw('Open'),
         $.expression,
         kw('For'),
-        choice(kw('Input'), kw('Output'), kw('Append')),
+        choice(kw('Input'), kw('Output'), kw('Append'), kw('Random'), kw('Binary')),
         kw('As'),
         optional('#'),
         $.expression,
+        optional(seq(kw('Len'), '=', $.expression)),
       ),
+
+    // Get #n, [recnum], var and Put #n, [recnum], value
+    file_get_statement: ($) =>
+      seq(kw('Get'), optional('#'), $.expression, ',', optional($.expression), ',', $.expression),
+
+    file_put_statement: ($) =>
+      seq(kw('Put'), optional('#'), $.expression, ',', optional($.expression), ',', $.expression),
+
+    // Seek #n, pos
+    file_seek_statement: ($) =>
+      seq(kw('Seek'), optional('#'), $.expression, ',', $.expression),
 
     file_close_statement: ($) =>
       seq(kw('Close'), optional(commaSep1(seq(optional('#'), $.expression)))),

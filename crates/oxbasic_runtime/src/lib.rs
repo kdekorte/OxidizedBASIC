@@ -1660,16 +1660,62 @@ impl<'out> Interpreter<'out> {
                 self.exec_print(items, *trailing_sep, f)?;
                 Ok(Flow::Normal)
             }
-            Stmt::OpenFile { path, mode, number } => {
+            Stmt::OpenFile {
+                path,
+                mode,
+                number,
+                record_len,
+            } => {
                 let name = self.eval(path, f)?.as_string()?;
                 let n = to_i64(&self.eval(number, f)?)?;
+                let len = match record_len {
+                    Some(e) => Some(to_i64(&self.eval(e, f)?)?),
+                    None => None,
+                };
                 let full = match &self.base_dir {
                     Some(dir) => dir.join(&name),
                     None => std::path::PathBuf::from(&name),
                 };
-                self.files.open(n, &name, &full, *mode)?;
+                self.files.open(n, &name, &full, *mode, len)?;
                 Ok(Flow::Normal)
             }
+            Stmt::FileSeek { number, pos } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                let p = to_i64(&self.eval(pos, f)?)?;
+                self.files.seek(n, p)?;
+                Ok(Flow::Normal)
+            }
+            Stmt::FileGet {
+                number,
+                pos,
+                target,
+            } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                let recnum = match pos {
+                    Some(e) => Some(to_i64(&self.eval(e, f)?)?),
+                    None => None,
+                };
+                let bytes = self.files.get_record(n, recnum)?;
+                // the record is read back as text, with its padding removed
+                let text = String::from_utf8_lossy(&bytes).trim_end().to_string();
+                self.assign(target, Variant::String(text), f)?;
+                Ok(Flow::Normal)
+            }
+            Stmt::FilePut {
+                number,
+                pos,
+                value,
+            } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                let recnum = match pos {
+                    Some(e) => Some(to_i64(&self.eval(e, f)?)?),
+                    None => None,
+                };
+                let text = self.eval(value, f)?.as_string()?;
+                self.files.put_record(n, recnum, text.as_bytes())?;
+                Ok(Flow::Normal)
+            }
+
             Stmt::CloseFile(numbers) => {
                 if numbers.is_empty() {
                     self.files.close_all()?;

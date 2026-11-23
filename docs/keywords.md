@@ -146,10 +146,22 @@ Dialogs and the interface: `MsgBox`, `InputBox`, `OpenFileDialog`,
 | `Print #` | `Print #n, a; b` | Writes a line, laid out as `Print` lays it out. |
 | `Write #` | `Write #n, "text", 3` | Writes a line with strings quoted and items comma-separated, so `Input #` can read it back. |
 | `EOF` | `EOF(n)` | True once the last line of file `n` has been read. |
+| `Open … For Random` | `Open path For Random As #n [Len = size]` | Fixed-length records, `size` bytes each (default 128). |
+| `Open … For Binary` | `Open path For Binary As #n` | Raw bytes, read and written at a position. |
+| `Get` | `Get #n, [recnum], var` | Reads a record (random) or `var`-sized bytes at the position (binary). |
+| `Put` | `Put #n, [recnum], value` | Writes a record, padded to the record length. |
+| `Seek` | `Seek #n, pos` | Moves to a 1-based position: a record number (random), a byte (binary). |
+| `Loc` | `Loc(n)` | Random: the last record number. Binary: the next byte position. |
+| `Lof` | `Lof(n)` | The file's length in bytes. |
 
 Relative file names are in the program's folder (or the project's, from the
 IDE). Errors: 52 bad file number, 53 file not found, 54 wrong use for the file's
-mode, 55 file already open, 62 input past the end of the file.
+mode, 55 file already open, 62 input past the end of the file, 63 bad record
+number.
+
+Records and bytes are stored as text, padded to the record length. This is not
+VB's binary layout: a file written here is not byte-compatible with one written
+by VB, and `Get` returns text, so numbers come back as strings.
 
 
 - `Property Get`, `Property Let` and `Property Set`. A procedure written with
@@ -157,10 +169,8 @@ mode, 55 file already open, 62 input past the end of the file.
 - Classes, and `New` for anything other than the built-in controls and `Err`.
 ## Not supported
 
-- File I/O is sequential only (`Open … For Input|Output|Append As #n`, `Input #`,
-  `Line Input #`, `Print #`, `Write #`, `Close`, `EOF`). Random and binary
-  access (`For Random`, `For Binary`, `Get`, `Put`, `Seek`) are not supported.
-  See [`examples/files`](../examples/files/README.md).
+- File I/O is sequential, random and binary. Not supported: `Lock`/`Unlock`,
+  and the file functions `FreeFile` and `LOF` on a sequential file.
 - `Step Into` in the debugger. Step Over is supported.
 - `Option Base` values other than `0` and `1`.
 

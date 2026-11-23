@@ -315,6 +315,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -328,6 +332,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -608,6 +620,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -621,6 +637,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -763,6 +787,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -776,6 +804,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -922,6 +958,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -935,6 +975,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -1150,6 +1198,21 @@
     }
   },
   {
+    "type": "file_get_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "file_input_statement",
     "named": true,
     "fields": {},
@@ -1196,6 +1259,36 @@
   },
   {
     "type": "file_print_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "file_put_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "file_seek_statement",
     "named": true,
     "fields": {},
     "children": {
@@ -1289,6 +1382,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -1302,6 +1399,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -1505,6 +1610,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -1518,6 +1627,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -1895,6 +2012,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -1908,6 +2029,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -2153,6 +2282,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -2166,6 +2299,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -2389,6 +2530,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -2402,6 +2547,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -2564,6 +2717,10 @@
           "named": true
         },
         {
+          "type": "file_get_statement",
+          "named": true
+        },
+        {
           "type": "file_input_statement",
           "named": true
         },
@@ -2577,6 +2734,14 @@
         },
         {
           "type": "file_print_statement",
+          "named": true
+        },
+        {
+          "type": "file_put_statement",
+          "named": true
+        },
+        {
+          "type": "file_seek_statement",
           "named": true
         },
         {
@@ -2911,6 +3076,10 @@
     "named": false
   },
   {
+    "type": "Get",
+    "named": false
+  },
+  {
     "type": "Global",
     "named": false
   },
@@ -2944,6 +3113,10 @@
   },
   {
     "type": "Is",
+    "named": false
+  },
+  {
+    "type": "Len",
     "named": false
   },
   {
@@ -3035,6 +3208,14 @@
     "named": false
   },
   {
+    "type": "Put",
+    "named": false
+  },
+  {
+    "type": "Random",
+    "named": false
+  },
+  {
     "type": "ReDim",
     "named": false
   },
@@ -3044,6 +3225,10 @@
   },
   {
     "type": "Return",
+    "named": false
+  },
+  {
+    "type": "Seek",
     "named": false
   },
   {

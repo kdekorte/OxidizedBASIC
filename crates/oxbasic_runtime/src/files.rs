@@ -24,6 +24,15 @@ pub enum OpenFile {
         path: String,
         file: std::io::BufWriter<std::fs::File>,
     },
+    /// Opened `For Random` or `For Binary`: read and written by byte position.
+    /// `record_len` is the size of a random record (1 for binary files).
+    Direct {
+        path: String,
+        file: std::fs::File,
+        record_len: usize,
+        /// Byte offset of the next `Get`/`Put` in a binary file (set by `Seek`).
+        pos: u64,
+    },
 }
 
 /// One value read by `Input #`: a quoted or text field, or a bare field that
@@ -111,6 +120,7 @@ impl FileTable {
         path: &str,
         full: &std::path::Path,
         mode: oxbasic_ast::FileMode,
+        record_len: Option<i64>,
     ) -> ExecResult<()> {
         Self::check_number(n)?;
         if self.is_open(n) {
@@ -141,6 +151,21 @@ impl FileTable {
                 OpenFile::Output {
                     path: path.to_string(),
                     file: std::io::BufWriter::new(file),
+                }
+            }
+            oxbasic_ast::FileMode::Random | oxbasic_ast::FileMode::Binary => {
+                // a random or binary file is created when it is missing
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .read(true)
+                    .write(true)
+                    .open(full)
+                    .map_err(|e| io_error(path, e))?;
+                OpenFile::Direct {
+                    path: path.to_string(),
+                    file,
+                    record_len: record_len.unwrap_or(128).max(1) as usize,
+                    pos: 0,
                 }
             }
         };
@@ -184,7 +209,9 @@ impl FileTable {
                         None => return err(62, "Input past end of file"),
                     }
                 }
-                Some(OpenFile::Output { .. }) => return err(54, "Bad file mode"),
+                Some(OpenFile::Output { .. }) | Some(OpenFile::Direct { .. }) => {
+                    return err(54, "Bad file mode")
+                }
                 None => return err(52, "Bad file name or number"),
             }
         }
@@ -198,7 +225,7 @@ impl FileTable {
                 Some(line) => Ok(line),
                 None => err(62, "Input past end of file"),
             },
-            Some(OpenFile::Output { .. }) => err(54, "Bad file mode"),
+            Some(OpenFile::Output { .. }) | Some(OpenFile::Direct { .. }) => err(54, "Bad file mode"),
             None => err(52, "Bad file name or number"),
         }
     }
@@ -207,7 +234,7 @@ impl FileTable {
     pub fn at_end(&self, n: i64) -> ExecResult<bool> {
         match self.files.get(&n) {
             Some(OpenFile::Input { lines, .. }) => Ok(lines.is_empty()),
-            Some(OpenFile::Output { .. }) => err(54, "Bad file mode"),
+            Some(OpenFile::Output { .. }) | Some(OpenFile::Direct { .. }) => err(54, "Bad file mode"),
             None => err(52, "Bad file name or number"),
         }
     }
@@ -219,7 +246,121 @@ impl FileTable {
             Some(OpenFile::Output { file, .. }) => {
                 writeln!(file, "{}", text).map_err(|e| io_error("", e))
             }
-            Some(OpenFile::Input { .. }) => err(54, "Bad file mode"),
+            Some(OpenFile::Input { .. }) | Some(OpenFile::Direct { .. }) => {
+                err(54, "Bad file mode")
+            }
+            None => err(52, "Bad file name or number"),
+        }
+    }
+
+    /// `Seek #n, pos`: moves a binary or random file to 1-based position `pos`
+    /// (a byte for binary files, a record for random files). Error 52 when
+    /// `n` is not open for direct access.
+    pub fn seek(&mut self, n: i64, pos: i64) -> ExecResult<()> {
+        match self.files.get_mut(&n) {
+            Some(OpenFile::Direct { pos: p, record_len, .. }) => {
+                if pos < 1 {
+                    return err(63, "Bad record number");
+                }
+                // a random file's position is a record number; a binary one is a byte
+                *p = (pos as u64 - 1) * (*record_len as u64);
+                Ok(())
+            }
+            Some(_) => err(54, "Bad file mode"),
+            None => err(52, "Bad file name or number"),
+        }
+    }
+
+    /// `Loc(n)`: for a random file the number of the last record read or
+    /// written; for a binary file the byte position of the next read or
+    /// write (1-based). Error 52 when `n` is not open for direct access.
+    pub fn loc(&self, n: i64) -> ExecResult<i64> {
+        match self.files.get(&n) {
+            Some(OpenFile::Direct { pos, record_len, .. }) => {
+                let rec = *record_len as u64;
+                Ok(if rec == 1 {
+                    *pos as i64 + 1
+                } else {
+                    (*pos / rec) as i64
+                })
+            }
+            Some(_) => err(54, "Bad file mode"),
+            None => err(52, "Bad file name or number"),
+        }
+    }
+
+    /// `Lof(n)`: the length of direct-access file `n` in bytes.
+    pub fn lof(&self, n: i64) -> ExecResult<i64> {
+        match self.files.get(&n) {
+            Some(OpenFile::Direct { file, .. }) => match file.metadata() {
+                Ok(m) => Ok(m.len() as i64),
+                Err(e) => Err(io_error("", e)),
+            },
+            Some(_) => err(54, "Bad file mode"),
+            None => err(52, "Bad file name or number"),
+        }
+    }
+
+    /// `Get #n, [recnum], target`: reads `record_len` bytes at `recnum` (a
+    /// random file) or at the current position (binary), and returns them.
+    /// `recnum` is 1-based. Error 62 past the end of the file.
+    pub fn get_record(&mut self, n: i64, recnum: Option<i64>) -> ExecResult<Vec<u8>> {
+        use std::io::{Read, Seek as _, SeekFrom};
+        match self.files.get_mut(&n) {
+            Some(OpenFile::Direct { file, record_len, pos, .. }) => {
+                if let Some(r) = recnum {
+                    if r < 1 {
+                        return err(63, "Bad record number");
+                    }
+                    *pos = (r as u64 - 1) * (*record_len as u64);
+                }
+                file.seek(SeekFrom::Start(*pos)).map_err(|e| io_error("", e))?;
+                let mut buf = vec![0u8; *record_len];
+                let mut got = 0;
+                while got < buf.len() {
+                    match file.read(&mut buf[got..]) {
+                        Ok(0) => break,
+                        Ok(k) => got += k,
+                        Err(e) => return Err(io_error("", e)),
+                    }
+                }
+                if got == 0 {
+                    return err(62, "Input past end of file");
+                }
+                // a short record is padded with spaces, as VB pads it
+                buf.truncate(*record_len);
+                for b in buf.iter_mut().skip(got) {
+                    *b = b' ';
+                }
+                *pos += *record_len as u64;
+                Ok(buf)
+            }
+            Some(_) => err(54, "Bad file mode"),
+            None => err(52, "Bad file name or number"),
+        }
+    }
+
+    /// `Put #n, [recnum], bytes`: writes `bytes`, padded or cut to
+    /// `record_len`, at `recnum` (random) or the current position (binary).
+    pub fn put_record(&mut self, n: i64, recnum: Option<i64>, bytes: &[u8]) -> ExecResult<()> {
+        use std::io::{Seek as _, SeekFrom, Write};
+        match self.files.get_mut(&n) {
+            Some(OpenFile::Direct { file, record_len, pos, .. }) => {
+                if let Some(r) = recnum {
+                    if r < 1 {
+                        return err(63, "Bad record number");
+                    }
+                    *pos = (r as u64 - 1) * (*record_len as u64);
+                }
+                let mut out = vec![b' '; *record_len];
+                let k = bytes.len().min(*record_len);
+                out[..k].copy_from_slice(&bytes[..k]);
+                file.seek(SeekFrom::Start(*pos)).map_err(|e| io_error("", e))?;
+                file.write_all(&out).map_err(|e| io_error("", e))?;
+                *pos += *record_len as u64;
+                Ok(())
+            }
+            Some(_) => err(54, "Bad file mode"),
             None => err(52, "Bad file name or number"),
         }
     }
