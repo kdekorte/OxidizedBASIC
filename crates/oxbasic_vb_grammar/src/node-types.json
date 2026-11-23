@@ -311,6 +311,26 @@
           "named": true
         },
         {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
+          "named": true
+        },
+        {
           "type": "for_statement",
           "named": true
         },
@@ -584,6 +604,26 @@
           "named": true
         },
         {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
+          "named": true
+        },
+        {
           "type": "for_statement",
           "named": true
         },
@@ -716,6 +756,26 @@
         },
         {
           "type": "exit_statement",
+          "named": true
+        },
+        {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
           "named": true
         },
         {
@@ -855,6 +915,26 @@
         },
         {
           "type": "expression",
+          "named": true
+        },
+        {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
           "named": true
         },
         {
@@ -1055,6 +1135,81 @@
     }
   },
   {
+    "type": "file_close_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "file_input_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "file_line_input_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "file_open_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "file_print_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "for_statement",
     "named": true,
     "fields": {
@@ -1127,6 +1282,26 @@
         },
         {
           "type": "expression",
+          "named": true
+        },
+        {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
           "named": true
         },
         {
@@ -1323,6 +1498,26 @@
         },
         {
           "type": "exit_statement",
+          "named": true
+        },
+        {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
           "named": true
         },
         {
@@ -1696,6 +1891,26 @@
           "named": true
         },
         {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
+          "named": true
+        },
+        {
           "type": "for_statement",
           "named": true
         },
@@ -1934,6 +2149,26 @@
           "named": true
         },
         {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
+          "named": true
+        },
+        {
           "type": "for_statement",
           "named": true
         },
@@ -2150,6 +2385,26 @@
           "named": true
         },
         {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
+          "named": true
+        },
+        {
           "type": "for_statement",
           "named": true
         },
@@ -2305,6 +2560,26 @@
           "named": true
         },
         {
+          "type": "file_close_statement",
+          "named": true
+        },
+        {
+          "type": "file_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_line_input_statement",
+          "named": true
+        },
+        {
+          "type": "file_open_statement",
+          "named": true
+        },
+        {
+          "type": "file_print_statement",
+          "named": true
+        },
+        {
           "type": "for_statement",
           "named": true
         },
@@ -2380,6 +2655,10 @@
     }
   },
   {
+    "type": "#",
+    "named": false
+  },
+  {
     "type": "&",
     "named": false
   },
@@ -2452,6 +2731,10 @@
     "named": false
   },
   {
+    "type": "Append",
+    "named": false
+  },
+  {
     "type": "Array",
     "named": false
   },
@@ -2489,6 +2772,10 @@
   },
   {
     "type": "Case",
+    "named": false
+  },
+  {
+    "type": "Close",
     "named": false
   },
   {
@@ -2648,6 +2935,10 @@
     "named": false
   },
   {
+    "type": "Input",
+    "named": false
+  },
+  {
     "type": "Integer",
     "named": false
   },
@@ -2661,6 +2952,10 @@
   },
   {
     "type": "Like",
+    "named": false
+  },
+  {
+    "type": "Line",
     "named": false
   },
   {
@@ -2704,6 +2999,10 @@
     "named": false
   },
   {
+    "type": "Open",
+    "named": false
+  },
+  {
     "type": "Option",
     "named": false
   },
@@ -2713,6 +3012,10 @@
   },
   {
     "type": "Or",
+    "named": false
+  },
+  {
+    "type": "Output",
     "named": false
   },
   {
@@ -2813,6 +3116,10 @@
   },
   {
     "type": "With",
+    "named": false
+  },
+  {
+    "type": "Write",
     "named": false
   },
   {

@@ -87,6 +87,11 @@ module.exports = grammar({
         $.stop_statement,
         $.goto_statement,
         $.call_statement,
+        $.file_open_statement,
+        $.file_close_statement,
+        $.file_input_statement,
+        $.file_line_input_statement,
+        $.file_print_statement,
         $.print_statement,
         $.set_statement,
         $.erase_statement,
@@ -341,6 +346,37 @@ module.exports = grammar({
 
     // ---- simple statements -----------------------------------------------
     call_statement: ($) => seq(kw('Call'), $.expression),
+
+    // File I/O: Open, Close, Input #, Line Input #, Print #, Write #
+    file_open_statement: ($) =>
+      seq(
+        kw('Open'),
+        $.expression,
+        kw('For'),
+        choice(kw('Input'), kw('Output'), kw('Append')),
+        kw('As'),
+        optional('#'),
+        $.expression,
+      ),
+
+    file_close_statement: ($) =>
+      seq(kw('Close'), optional(commaSep1(seq(optional('#'), $.expression)))),
+
+    file_input_statement: ($) =>
+      seq(kw('Input'), '#', $.expression, ',', commaSep1($.expression)),
+
+    file_line_input_statement: ($) =>
+      seq(kw('Line'), kw('Input'), '#', $.expression, ',', $.expression),
+
+    file_print_statement: ($) =>
+      seq(
+        choice(kw('Print'), kw('Write')),
+        '#',
+        $.expression,
+        optional(
+          seq(',', $.expression, repeat(seq(choice(';', ','), optional($.expression)))),
+        ),
+      ),
 
     print_statement: ($) =>
       seq(

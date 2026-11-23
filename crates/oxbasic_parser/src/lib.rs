@@ -242,6 +242,45 @@ fn param(pair: Pair<Rule>) -> Result<Param, String> {
     }
     Ok(p)
 }
+/// The items of a `Print` argument list, and whether it ends in a separator
+/// (which suppresses the line break). `Print` and `Print #n` share this.
+fn print_items(args: Option<Pair<Rule>>) -> Result<(Vec<PrintItem>, bool), String> {
+    let mut items = Vec::new();
+    let mut trailing = false;
+    if let Some(args) = args {
+        let mut pending: Option<Expr> = None;
+        for child in args.into_inner() {
+            match child.as_rule() {
+                Rule::Expr => {
+                    if let Some(e) = pending.take() {
+                        items.push(PrintItem { expr: e, sep: None });
+                    }
+                    pending = Some(expr(child)?);
+                    trailing = false;
+                }
+                Rule::PSep => {
+                    let sep = child.as_str().chars().next().unwrap();
+                    if let Some(e) = pending.take() {
+                        items.push(PrintItem {
+                            expr: e,
+                            sep: Some(sep),
+                        });
+                    }
+                    // A separator in final position suppresses the newline.
+                    trailing = true;
+                }
+                _ => {}
+            }
+        }
+        if let Some(e) = pending.take() {
+            items.push(PrintItem { expr: e, sep: None });
+            trailing = false;
+        }
+    }
+    Ok((items, trailing))
+}
+
+
 
 fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
     match pair.as_rule() {
@@ -290,6 +329,72 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
                 ranges.push((ty.to_string(), first, last));
             }
             Ok(Stmt::DefType(ranges))
+        }
+        Rule::FileOpenStmt => {
+            let mut children = filter_kw(pair.into_inner());
+            let path = expr(children.next().unwrap())?;
+            let mode_pair = children.next().unwrap();
+            let mode = match mode_pair.as_str().to_ascii_lowercase().as_str() {
+                "input" => FileMode::Input,
+                "output" => FileMode::Output,
+                _ => FileMode::Append,
+            };
+            let number = expr(children.next().unwrap())?;
+            Ok(Stmt::OpenFile { path, mode, number })
+        }
+        Rule::FileCloseStmt => {
+            let mut numbers = Vec::new();
+            for child in filter_kw(pair.into_inner()) {
+                if child.as_rule() == Rule::FileNumber {
+                    let n = child.into_inner().find(|c| c.as_rule() == Rule::Expr).unwrap();
+                    numbers.push(expr(n)?);
+                }
+            }
+            Ok(Stmt::CloseFile(numbers))
+        }
+        Rule::FileInputStmt => {
+            let mut exprs = Vec::new();
+            for child in filter_kw(pair.into_inner()) {
+                exprs.push(expr(child)?);
+            }
+            let mut it = exprs.into_iter();
+            let number = it.next().unwrap();
+            Ok(Stmt::InputFile {
+                number,
+                targets: it.collect(),
+            })
+        }
+        Rule::FileLineInputStmt => {
+            let mut exprs = Vec::new();
+            for child in filter_kw(pair.into_inner()) {
+                exprs.push(expr(child)?);
+            }
+            let mut it = exprs.into_iter();
+            let number = it.next().unwrap();
+            let target = it.next().unwrap();
+            Ok(Stmt::LineInputFile { number, target })
+        }
+        Rule::FilePrintStmt => {
+            let write = pair
+                .clone()
+                .into_inner()
+                .any(|p| p.as_rule() == Rule::kw_write);
+            let mut number = None;
+            let mut args = None;
+            for child in filter_kw(pair.into_inner()) {
+                match child.as_rule() {
+                    Rule::Expr if number.is_none() => number = Some(expr(child)?),
+                    Rule::PrintArgs => args = Some(child),
+                    _ => {}
+                }
+            }
+            let (items, trailing_sep) = print_items(args)?;
+            Ok(Stmt::PrintFile {
+                number: number.unwrap(),
+                items,
+                trailing_sep,
+                write,
+            })
         }
         Rule::EraseStmt => {
             let mut targets = Vec::new();
@@ -662,38 +767,8 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             })
         }
         Rule::PrintStmt => {
-            let mut items = Vec::new();
-            let mut trailing = false;
-            if let Some(args) = filter_kw(pair.into_inner()).next() {
-                let mut pending: Option<Expr> = None;
-                for child in args.into_inner() {
-                    match child.as_rule() {
-                        Rule::Expr => {
-                            if let Some(e) = pending.take() {
-                                items.push(PrintItem { expr: e, sep: None });
-                            }
-                            pending = Some(expr(child)?);
-                            trailing = false;
-                        }
-                        Rule::PSep => {
-                            let sep = child.as_str().chars().next().unwrap();
-                            if let Some(e) = pending.take() {
-                                items.push(PrintItem {
-                                    expr: e,
-                                    sep: Some(sep),
-                                });
-                            }
-                            // A separator in final position suppresses the newline.
-                            trailing = true;
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(e) = pending.take() {
-                    items.push(PrintItem { expr: e, sep: None });
-                    trailing = false;
-                }
-            }
+            let args = filter_kw(pair.into_inner()).next();
+            let (items, trailing) = print_items(args)?;
             Ok(Stmt::Print {
                 items,
                 trailing_sep: trailing,

@@ -60,6 +60,15 @@ pub struct ConstDecl {
     pub value: Expr,
 }
 
+/// How a file opened with `Open` is used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileMode {
+    Input,
+    Output,
+    Append,
+}
+
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     /// Source line marker emitted before each statement (debugger support).
@@ -171,6 +180,33 @@ pub enum Stmt {
     OptionCompareText(bool),
     /// `DefInt`, `DefStr`, ...: the type given to undeclared names whose first
     /// letter falls in each range, as `(type name, first letter, last letter)`.
+    /// `Open path For Input|Output|Append As #n`: opens a file under number `n`.
+    OpenFile {
+        path: Expr,
+        mode: FileMode,
+        number: Expr,
+    },
+    /// `Close [#n [, #m]]`: closes the files named, or all of them.
+    CloseFile(Vec<Expr>),
+    /// `Input #n, v1, v2`: reads comma-separated values into variables.
+    InputFile {
+        number: Expr,
+        targets: Vec<Expr>,
+    },
+    /// `Line Input #n, v`: reads one whole line into a variable.
+    LineInputFile {
+        number: Expr,
+        target: Expr,
+    },
+    /// `Print #n, items` (and `Write #n`): writes to a file.
+    PrintFile {
+        number: Expr,
+        items: Vec<PrintItem>,
+        trailing_sep: bool,
+        /// `Write`: values quoted and comma-separated, as VB's Write does.
+        write: bool,
+    },
+
     DefType(Vec<(String, char, char)>),
 }
 

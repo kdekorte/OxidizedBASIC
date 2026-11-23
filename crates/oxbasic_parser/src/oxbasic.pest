@@ -17,6 +17,14 @@ kw_elseif = @{ ^"elseif" ~ !IdentChar }
 kw_end = @{ ^"end" ~ !IdentChar }
 kw_select = @{ ^"select" ~ !IdentChar }
 kw_case = @{ ^"case" ~ !IdentChar }
+kw_open = @{ ^"open" ~ !IdentChar }
+kw_close = @{ ^"close" ~ !IdentChar }
+kw_input = @{ ^"input" ~ !IdentChar }
+kw_output = @{ ^"output" ~ !IdentChar }
+kw_append = @{ ^"append" ~ !IdentChar }
+kw_write = @{ ^"write" ~ !IdentChar }
+kw_eof = @{ ^"eof" ~ !IdentChar }
+
 kw_for = @{ ^"for" ~ !IdentChar }
 kw_each = @{ ^"each" ~ !IdentChar }
 kw_in = @{ ^"in" ~ !IdentChar }
@@ -132,6 +140,11 @@ Statement = _{
     | ReturnStmt
     | StopStmt
     | EndStmt
+    | FileOpenStmt
+    | FileCloseStmt
+    | FileLineInputStmt
+    | FileInputStmt
+    | FilePrintStmt
     | PrintStmt
     | GraphicsStmt
     | EraseStmt
@@ -267,6 +280,20 @@ Ident = @{ (ASCII_ALPHA | "_") ~ IdentChar* }
 IdentChar = _{ ASCII_ALPHANUMERIC | "_" }
 
 EndStmt = { kw_end }
+
+// File I/O (VB's sequential files). A file is opened under a number and is
+// then named by `#n`. `Open path For Input|Output|Append As #n`.
+FileOpenStmt = { kw_open ~ Expr ~ kw_for ~ FileMode ~ kw_as ~ "#"? ~ Expr }
+FileMode = { kw_input | kw_output | kw_append }
+// `Close`, `Close #1`, `Close #1, #2`
+FileCloseStmt = { kw_close ~ (FileNumber ~ ("," ~ FileNumber)*)? }
+FileNumber = { "#"? ~ Expr }
+// `Input #1, a, b`: reads values into variables (`kw_input` is not a call)
+FileInputStmt = { kw_input ~ "#" ~ Expr ~ "," ~ Expr ~ ("," ~ Expr)* }
+// `Line Input #1, text`: one whole line into a variable
+FileLineInputStmt = { kw_line ~ kw_input ~ "#" ~ Expr ~ "," ~ Expr }
+// `Print #1, items` and `Write #1, items`; the items are as Print's
+FilePrintStmt = { (kw_print | kw_write) ~ "#" ~ Expr ~ ("," ~ PrintArgs)? }
 
 PrintStmt = { (kw_debug ~ ".")? ~ kw_print ~ PrintArgs? }
 PrintArgs = { Expr ~ (PSep ~ Expr)* ~ PSep? }

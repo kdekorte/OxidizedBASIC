@@ -6,6 +6,8 @@
 //! `On Error GoTo` / `On Error Resume Next` trapping.
 
 mod fastmap;
+mod files;
+use files::Field;
 mod stdlib;
 
 pub use stdlib::{is_builtin, pattern_matches};
@@ -410,6 +412,8 @@ pub struct Interpreter<'out> {
     doevents_hook: Option<Box<dyn FnMut() -> bool>>,
     /// The objects of the `With` blocks being run, innermost last.
     with_stack: Vec<Expr>,
+    /// The files the program has open, by number (`Open ... As #n`).
+    pub(crate) files: files::FileTable,
 }
 
 /// Debugger pause notification: where execution stopped and what the
@@ -502,6 +506,7 @@ impl<'out> Interpreter<'out> {
             ended: false,
             doevents_hook: None,
             with_stack: Vec::new(),
+            files: files::FileTable::default(),
             base_dir: None,
         };
         it.add_program(prog);
@@ -581,7 +586,12 @@ impl<'out> Interpreter<'out> {
     pub fn run(&mut self) -> ExecResult<()> {
         let stmts = self.top_level.clone();
         let mut f = Frame::main(Rc::new(stmts.clone()));
-        self.exec_block(&stmts, &mut f)?;
+        let result = self.exec_block(&stmts, &mut f);
+        // files are closed when the program ends, error or not, so output
+        // that was buffered is written
+        let closed = self.files.close_all();
+        result?;
+        closed?;
         Ok(())
     }
 
@@ -1650,6 +1660,54 @@ impl<'out> Interpreter<'out> {
                 self.exec_print(items, *trailing_sep, f)?;
                 Ok(Flow::Normal)
             }
+            Stmt::OpenFile { path, mode, number } => {
+                let name = self.eval(path, f)?.as_string()?;
+                let n = to_i64(&self.eval(number, f)?)?;
+                let full = match &self.base_dir {
+                    Some(dir) => dir.join(&name),
+                    None => std::path::PathBuf::from(&name),
+                };
+                self.files.open(n, &name, &full, *mode)?;
+                Ok(Flow::Normal)
+            }
+            Stmt::CloseFile(numbers) => {
+                if numbers.is_empty() {
+                    self.files.close_all()?;
+                } else {
+                    for e in numbers {
+                        let n = to_i64(&self.eval(e, f)?)?;
+                        self.files.close(n)?;
+                    }
+                }
+                Ok(Flow::Normal)
+            }
+            Stmt::LineInputFile { number, target } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                let line = self.files.read_line(n)?;
+                self.assign(target, Variant::String(line), f)?;
+                Ok(Flow::Normal)
+            }
+            Stmt::InputFile { number, targets } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                // VB's Input # reads comma-separated fields; a line may hold
+                // several values, and a value may be quoted
+                for target in targets {
+                    let v = self.next_input_value(n)?;
+                    self.assign(target, v, f)?;
+                }
+                Ok(Flow::Normal)
+            }
+            Stmt::PrintFile {
+                number,
+                items,
+                trailing_sep,
+                write,
+            } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                let text = self.file_text(items, *trailing_sep, *write, f)?;
+                self.files.write_line(n, &text)?;
+                Ok(Flow::Normal)
+            }
             Stmt::Graphics { target, shape } => {
                 self.exec_graphics(target.as_ref(), shape, f)?;
                 Ok(Flow::Normal)
@@ -2127,6 +2185,53 @@ impl<'out> Interpreter<'out> {
         };
         let result = host.borrow_mut().draw(object.as_ref(), cmd);
         result
+    }
+
+    /// The next value of an `Input #n` read: fields are comma-separated on a
+    /// line, a quoted field has its quotes removed, and a line's fields are
+    /// used up before the next line is read (error 62 at the end).
+    fn next_input_value(&mut self, n: i64) -> ExecResult<Variant> {
+        let field = self.files.next_field(n)?;
+        Ok(match field {
+            Field::Text(s) => Variant::String(s),
+            Field::Number(s) => match s.parse::<f64>() {
+                Ok(x) => Variant::Double(x),
+                Err(_) => Variant::String(s),
+            },
+        })
+    }
+
+    /// The text `Print #n` or `Write #n` writes for `items`: as `Print`
+    /// lays them out, or, for `Write`, strings quoted and items comma-separated.
+    fn file_text(
+        &mut self,
+        items: &[PrintItem],
+        trailing_sep: bool,
+        write: bool,
+        f: &mut Frame,
+    ) -> ExecResult<String> {
+        if !write {
+            // the same layout as `Print`, minus the screen's column stops
+            let mut line = String::new();
+            for item in items {
+                let v = self.eval(&item.expr, f)?;
+                line.push_str(&to_string(&v)?);
+                if item.sep == Some(',') {
+                    line.push(',');
+                }
+            }
+            return Ok(line);
+        }
+        let mut parts: Vec<String> = Vec::new();
+        for item in items {
+            let v = self.eval(&item.expr, f)?;
+            parts.push(match v {
+                Variant::String(s) => format!("\"{}\"", s),
+                other => to_string(&other)?,
+            });
+        }
+        let _ = trailing_sep;
+        Ok(parts.join(","))
     }
 
     fn exec_print(

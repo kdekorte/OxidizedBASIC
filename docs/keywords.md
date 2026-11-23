@@ -135,13 +135,32 @@ if one is there), `,` (thousands separators), `.` (the decimal point), `%`
 Dialogs and the interface: `MsgBox`, `InputBox`, `OpenFileDialog`,
 `SaveFileDialog`, `DoEvents`, `Beep`, `LoadPicture`.
 
-## Not supported
+## File I/O
+
+| Statement | Form | Meaning |
+|---|---|---|
+| `Open` | `Open path For Input\|Output\|Append As #n` | Opens a file under number `n` (1 to 511). `Output` replaces the file, `Append` adds to it. |
+| `Close` | `Close`, `Close #n [, #m]` | Closes the files named; bare `Close` closes them all. Files still open at the end of the program are closed then. |
+| `Input #` | `Input #n, a, b` | Reads comma-separated values into variables. A quoted value keeps its commas. |
+| `Line Input #` | `Line Input #n, s` | Reads one whole line into a variable. |
+| `Print #` | `Print #n, a; b` | Writes a line, laid out as `Print` lays it out. |
+| `Write #` | `Write #n, "text", 3` | Writes a line with strings quoted and items comma-separated, so `Input #` can read it back. |
+| `EOF` | `EOF(n)` | True once the last line of file `n` has been read. |
+
+Relative file names are in the program's folder (or the project's, from the
+IDE). Errors: 52 bad file number, 53 file not found, 54 wrong use for the file's
+mode, 55 file already open, 62 input past the end of the file.
+
 
 - `Property Get`, `Property Let` and `Property Set`. A procedure written with
   them is a syntax error. (`Exit Property` is recognised.)
 - Classes, and `New` for anything other than the built-in controls and `Err`.
-- File input and output: `Open`, `Close`, `Input #` and `Print #` are syntax
-  errors.
+## Not supported
+
+- File I/O is sequential only (`Open … For Input|Output|Append As #n`, `Input #`,
+  `Line Input #`, `Print #`, `Write #`, `Close`, `EOF`). Random and binary
+  access (`For Random`, `For Binary`, `Get`, `Put`, `Seek`) are not supported.
+  See [`examples/files`](../examples/files/README.md).
 - `Step Into` in the debugger. Step Over is supported.
 - `Option Base` values other than `0` and `1`.
 

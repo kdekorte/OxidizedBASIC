@@ -47,6 +47,7 @@ pub fn is_builtin(name: &str) -> bool {
             | "choose"
             | "switch"
             | "timer"
+            | "eof"
             | "split"
             | "join"
             | "strcomp"
@@ -656,6 +657,10 @@ impl<'out> Interpreter<'out> {
             }
 
             // Timer: seconds since midnight, as a Single
+            "eof" => {
+                let n = want_i64(args, 0)?;
+                Ok(Variant::Boolean(self.files.at_end(n)?))
+            }
             "timer" => {
                 let serial = now_serial();
                 let secs = (serial - serial.floor()) * 86_400.0;
