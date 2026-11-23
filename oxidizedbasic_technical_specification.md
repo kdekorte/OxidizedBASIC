@@ -168,7 +168,7 @@ The OxidizedBASIC IDE is a native GPUI application providing sub-millisecond edi
 - Build the visual Form Designer in GPUI Kit. (Done: drag, resize handles, toolbox, Property Inspector.)
 - Integrate Tree-sitter syntax highlighting editor and Property Inspector. (Done for highlighting: the `oxbasic_vb_grammar` crate parses each line; a line that cannot parse alone falls back to a hand-written tokenizer. Not done: whole-document parsing so block headers and footers are coloured by the grammar.)
 - Implement debug controls (Breakpoints, Step-over, Variable Watch). (Done. Step-into is not implemented.)
-- Open items: editor diagnostics (error underlines) are not implemented, and the editor stores lines in a `Vec<String>` rather than a rope. Code folding is done for blocks (Sub, Function, loops, If, Select, With, Type, Enum).
+- Open items: editor diagnostics (error underlines) are not implemented. The editor stores lines in a `Vec<String>`, not a rope, by decision: a rope was benchmarked on a 20,000-line module and was about 5x faster for edits (2.1ms against 11.0ms for 4,000 edits), but a typical BASIC module is a few hundred lines where both are instant, and the editing core (caret, selection, undo) would have to be rewritten to gain it. Code folding is done for blocks (Sub, Function, loops, If, Select, With, Type, Enum).
 
 ### Phase 4: JIT Codegen & Packaging (Months 10–12)
 - Integrate Cranelift JIT backend for compiling BASIC routines directly to native assembly.
