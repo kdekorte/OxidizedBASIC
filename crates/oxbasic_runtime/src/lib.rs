@@ -10,9 +10,11 @@ mod files;
 use files::Field;
 mod stdlib;
 mod vbbinary;
+mod vbtypes;
 
 pub use stdlib::{is_builtin, pattern_matches};
 pub use vbbinary::{decode_value, encode_value, FileType};
+pub use vbtypes::{encode_record, file_type_of, fixed_size};
 
 use fastmap::{Lowered, NameMap};
 use oxbasic_ast::*;
@@ -1698,9 +1700,44 @@ impl<'out> Interpreter<'out> {
                     None => None,
                 };
                 let bytes = self.files.get_record(n, recnum)?;
-                // the record is read back as text, with its padding removed
-                let text = String::from_utf8_lossy(&bytes).trim_end().to_string();
-                self.assign(target, Variant::String(text), f)?;
+                let current = self.eval(target, f)?;
+                let value = match current {
+                    // a user Type: decode each field in order into the record
+                    Variant::Record(r) => {
+                        let Some(fields) = self.user_types.get(&r.ty.to_lowercase()) else {
+                            return err(5, "Invalid procedure call");
+                        };
+                        let fields: Vec<(String, String)> = fields
+                            .iter()
+                            .map(|fd| (fd.name.clone(), fd.ty.clone().unwrap_or_default()))
+                            .collect();
+                        let mut at = 0usize;
+                        let mut out = Vec::with_capacity(fields.len());
+                        for (name, ty_name) in &fields {
+                            let Some(ty) = crate::vbtypes::file_type_of(ty_name) else {
+                                return err(5, "Type of a record field is not supported in a file yet");
+                            };
+                            out.push((name.clone(), decode_value(&ty, &bytes, &mut at)?));
+                        }
+                        Variant::Record(crate::Record { ty: r.ty, fields: out })
+                    }
+                    // a scalar: decoded as the variable's own type
+                    other => {
+                        let ty = match other {
+                            Variant::Integer(_) => FileType::Integer,
+                            Variant::Long(_) => FileType::Long,
+                            Variant::Single(_) => FileType::Single,
+                            Variant::Double(_) => FileType::Double,
+                            Variant::Currency(_) => FileType::Currency,
+                            Variant::Date(_) => FileType::Date,
+                            Variant::Boolean(_) => FileType::Boolean,
+                            _ => FileType::String,
+                        };
+                        let mut at = 0usize;
+                        decode_value(&ty, &bytes, &mut at)?
+                    }
+                };
+                self.assign(target, value, f)?;
                 Ok(Flow::Normal)
             }
             Stmt::FilePut {
@@ -1713,8 +1750,34 @@ impl<'out> Interpreter<'out> {
                     Some(e) => Some(to_i64(&self.eval(e, f)?)?),
                     None => None,
                 };
-                let text = self.eval(value, f)?.as_string()?;
-                self.files.put_record(n, recnum, text.as_bytes())?;
+                let bytes = match self.eval(value, f)? {
+                    // a user Type: its fields in order, in VB's layout
+                    Variant::Record(r) => {
+                        let Some(fields) = self.user_types.get(&r.ty.to_lowercase()) else {
+                            return err(5, "Invalid procedure call");
+                        };
+                        let decl: Vec<(String, String)> = fields
+                            .iter()
+                            .map(|fd| (fd.name.clone(), fd.ty.clone().unwrap_or_default()))
+                            .collect();
+                        crate::vbtypes::encode_record(&decl, &r.fields)?
+                    }
+                    // a scalar: its own VB type
+                    other => {
+                        let ty = match &other {
+                            Variant::Integer(_) => FileType::Integer,
+                            Variant::Long(_) => FileType::Long,
+                            Variant::Single(_) => FileType::Single,
+                            Variant::Double(_) => FileType::Double,
+                            Variant::Currency(_) => FileType::Currency,
+                            Variant::Date(_) => FileType::Date,
+                            Variant::Boolean(_) => FileType::Boolean,
+                            _ => FileType::String,
+                        };
+                        encode_value(&ty, &other)?
+                    }
+                };
+                self.files.put_record(n, recnum, &bytes)?;
                 Ok(Flow::Normal)
             }
 

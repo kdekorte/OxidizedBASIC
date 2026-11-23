@@ -38,9 +38,25 @@ fn a_random_file_round_trips_records_by_number() {
 #[test]
 fn a_random_record_is_padded_to_the_record_length() {
     let (_dir, path) = folder("random_pad");
-    let src = format!("Open \"{p}\" For Random As #1 Len = 6\nPut #1, 1, \"ab\"\nClose #1\n", p = path);
+    // a fixed-length string is 4 bytes; the record is 6, so 2 bytes of padding
+    let src = format!(
+        "Type Rec\nName As String * 4\nEnd Type\nDim r As Rec\nr.Name = \"ab\"\nOpen \"{p}\" For Random As #1 Len = 6\nPut #1, 1, r\nClose #1\n",
+        p = path
+    );
     run(&src).unwrap();
     assert_eq!(std::fs::read(path.replace("\"\"", "\"")).unwrap(), b"ab    ");
+}
+
+#[test]
+fn a_type_record_is_written_in_vb_layout_and_read_back() {
+    let (_dir, path) = folder("type_layout");
+    let src = format!(
+        "Type Rec\nName As String * 4\nAge As Integer\nEnd Type\nDim w As Rec\nDim r As Rec\nw.Name = \"Al\"\nw.Age = 258\nOpen \"{p}\" For Random As #1 Len = 6\nPut #1, 1, w\nClose #1\nOpen \"{p}\" For Random As #2 Len = 6\nGet #2, 1, r\nClose #2\nPrint r.Name; \"|\"; r.Age\n",
+        p = path
+    );
+    assert_eq!(run(&src).unwrap(), "Al  | 258 \n");
+    // the bytes VB writes: "Al  " then 258 as a little-endian 2-byte Integer
+    assert_eq!(std::fs::read(path.replace("\"\"", "\"")).unwrap(), vec![b'A', b'l', b' ', b' ', 2, 1]);
 }
 
 #[test]
