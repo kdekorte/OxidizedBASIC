@@ -389,7 +389,7 @@ impl Ide {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .child(SharedString::from(
-                        match code_model::diagnostic(&self.lines) {
+                        match self.current_diagnostic() {
                             // with the caret on the error, its message shows here
                             Some(d) if d.row == self.cursor.0 => format!(
                                 "Syntax error: {} (line {})",

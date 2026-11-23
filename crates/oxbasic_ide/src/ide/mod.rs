@@ -744,6 +744,14 @@ impl Ide {
         }
     }
 
+    /// The problem to show in the code: a syntax error, or else a bare word
+    /// that names nothing (`Elsee` on its own line). The form's controls are
+    /// the names the module may use.
+    pub(super) fn current_diagnostic(&self) -> Option<code_model::Diagnostic> {
+        let controls: Vec<String> = self.form.controls.iter().map(|c| c.name.clone()).collect();
+        code_model::diagnostic(&self.lines).or_else(|| code_model::unknown_name(&self.lines, &controls))
+    }
+
     fn toggle_fold(&mut self, row: usize) {
         if !self.folded.insert(row) {
             self.folded.remove(&row);
@@ -1942,7 +1950,7 @@ impl Ide {
             self.folded.remove(&f.start);
         }
         // Diagnostics: a syntax error in the module is underlined on its row.
-        let diag = code_model::diagnostic(&self.lines);
+        let diag = self.current_diagnostic();
         let hidden = code_model::hidden_rows(&folds, &self.folded);
         let fold_of_row: std::collections::HashMap<usize, bool> = folds
             .iter()

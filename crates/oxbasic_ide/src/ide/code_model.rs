@@ -323,6 +323,107 @@ pub fn diagnostic(lines: &[String]) -> Option<Diagnostic> {
 }
 
 
+/// The first bare word in `lines` that names nothing the module can run: not
+/// a built-in statement or function, a procedure of the module, a control of
+/// the form (`controls`), or a label. `Elsee` on its own line is such a word
+/// (a call to a sub that does not exist), so it is flagged where it stands.
+///
+/// Only a word on a line by itself is checked; a name inside an expression
+/// is not. A module that does not parse gives no answer here, because its
+/// syntax error is reported instead.
+pub fn unknown_name(lines: &[String], controls: &[String]) -> Option<Diagnostic> {
+    let src = lines.join("\n");
+    let program = oxbasic_parser::parse(&src).ok()?;
+
+    // the names the module may call: its procedures, the form's controls and
+    // the built-in names, in lowercase
+    let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for item in &program.items {
+        if let oxbasic_ast::Item::Proc(p) = item {
+            known.insert(p.name.to_lowercase());
+        }
+    }
+    for c in controls {
+        known.insert(c.to_lowercase());
+    }
+    known.insert("form".to_string());
+
+    // walk the statements in order, remembering the source line of each
+    let mut line = 0usize;
+    let mut found: Option<(usize, String)> = None;
+    fn walk(
+        stmts: &[oxbasic_ast::Stmt],
+        known: &std::collections::HashSet<String>,
+        line: &mut usize,
+        found: &mut Option<(usize, String)>,
+    ) {
+        use oxbasic_ast::{Expr, Stmt};
+        for s in stmts {
+            if found.is_some() {
+                return;
+            }
+            match s {
+                Stmt::LineMarker(l) => *line = *l,
+                Stmt::Call { target: Expr::Var(name), args, bare: true } if args.is_empty() => {
+                    let lower = name.to_lowercase();
+                    if !known.contains(&lower) && !oxbasic_runtime::is_builtin(&lower) {
+                        *found = Some((*line, name.clone()));
+                    }
+                }
+                Stmt::If { arms, else_body } => {
+                    for a in arms {
+                        walk(&a.body, known, line, found);
+                    }
+                    if let Some(b) = else_body {
+                        walk(b, known, line, found);
+                    }
+                }
+                Stmt::For { body, .. }
+                | Stmt::ForEach { body, .. }
+                | Stmt::DoWhile { body, .. }
+                | Stmt::DoLoop { body, .. }
+                | Stmt::While { body, .. }
+                | Stmt::With { body, .. } => walk(body, known, line, found),
+                Stmt::Select { arms, else_body, .. } => {
+                    for a in arms {
+                        walk(&a.body, known, line, found);
+                    }
+                    if let Some(b) = else_body {
+                        walk(b, known, line, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut top: Vec<oxbasic_ast::Stmt> = Vec::new();
+    for item in &program.items {
+        match item {
+            oxbasic_ast::Item::Stmt(s) => top.push(s.clone()),
+            oxbasic_ast::Item::Proc(p) => {
+                let mut ignored = 0usize;
+                walk(&p.body, &known, &mut ignored, &mut found);
+            }
+        }
+    }
+    walk(&top, &known, &mut line, &mut found);
+
+    let (line_no, name) = found?;
+    // the row of the bad word, and its column: where it starts on that row
+    let row = line_no.saturating_sub(1);
+    let text = lines.get(row)?;
+    let column = text
+        .find(name.as_str())
+        .map(|b| text[..b].chars().count())
+        .unwrap_or(0);
+    Some(Diagnostic {
+        row,
+        column,
+        message: format!("Unknown name '{}': not a statement, a sub, or a control", name),
+    })
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -536,5 +637,46 @@ mod tests {
         let l = lines("Print 1\nPrint (2");
         let d = diagnostic(&l).expect("an error");
         assert!(d.row < l.len());
+    }
+
+    fn controls(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_misspelled_else_on_its_own_line_is_flagged() {
+        let l = lines("If x Then\n  y = 1\nElsee\n  y = 2\nEnd If");
+        let d = unknown_name(&l, &[]).expect("Elsee is not a name");
+        assert_eq!(d.row, 2);
+        assert_eq!(d.column, 0);
+        assert!(d.message.contains("Elsee"), "{}", d.message);
+    }
+
+    #[test]
+    fn a_correct_else_is_not_flagged() {
+        let l = lines("If x Then\n  y = 1\nElse\n  y = 2\nEnd If");
+        assert_eq!(unknown_name(&l, &[]), None);
+    }
+
+    #[test]
+    fn procedures_controls_and_builtins_are_known_names() {
+        let l = lines(
+            "Sub Helper()\nEnd Sub\nSub Cmd_Click()\nEnd Sub\nSub Main()\n  Helper\n  Cmd_Click\n  Beep\n  lstFruit.Clear\nEnd Sub",
+        );
+        assert_eq!(unknown_name(&l, &controls(&["lstFruit", "Cmd"])), None);
+    }
+
+    #[test]
+    fn an_unknown_sub_call_is_flagged_where_it_stands() {
+        let l = lines("Sub Main()\n  Helper\nEnd Sub");
+        let d = unknown_name(&l, &[]).expect("Helper is not defined");
+        assert_eq!(d.row, 1);
+        assert!(d.message.contains("Helper"));
+    }
+
+    #[test]
+    fn a_module_that_does_not_parse_gives_no_unknown_name() {
+        // the syntax error is the report here, not an unknown name
+        assert_eq!(unknown_name(&lines("Print (2"), &[]), None);
     }
 }

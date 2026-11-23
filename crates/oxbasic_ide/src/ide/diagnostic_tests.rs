@@ -49,3 +49,32 @@ fn a_clean_module_has_no_diagnostic(cx: &mut gpui::TestAppContext) {
         assert_eq!(code_model::diagnostic(&ide.lines), None);
     });
 }
+
+#[gpui::test]
+fn a_misspelled_block_word_is_flagged_in_the_editor(cx: &mut gpui::TestAppContext) {
+    // `Elsee` is a valid line for the parser (a sub call), so only the
+    // unknown-name check can flag it
+    let (ide, mut cx) = editor_with(
+        "Sub Main()\n  If x = 1 Then\n    y = 1\n  Elsee\n    y = 2\n  End If\nEnd Sub",
+        cx,
+    );
+    let cx = &mut cx;
+    ide.read_with(cx, |ide, _| {
+        let d = ide.current_diagnostic().expect("Elsee is an unknown name");
+        assert_eq!(d.row, 3);
+        assert_eq!(d.column, 2);
+        assert!(d.message.contains("Elsee"), "{}", d.message);
+    });
+}
+
+#[gpui::test]
+fn a_correct_else_is_not_flagged_in_the_editor(cx: &mut gpui::TestAppContext) {
+    let (ide, mut cx) = editor_with(
+        "Sub Main()\n  If x = 1 Then\n    y = 1\n  Else\n    y = 2\n  End If\nEnd Sub",
+        cx,
+    );
+    let cx = &mut cx;
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.current_diagnostic(), None);
+    });
+}

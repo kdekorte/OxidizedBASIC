@@ -4,7 +4,7 @@
 use crate::*;
 
 /// Names recognized as builtins (used to disambiguate array indexing).
-pub(crate) fn is_builtin(name: &str) -> bool {
+pub fn is_builtin(name: &str) -> bool {
     matches!(
         name,
         "abs"

@@ -8,7 +8,7 @@
 mod fastmap;
 mod stdlib;
 
-pub use stdlib::pattern_matches;
+pub use stdlib::{is_builtin, pattern_matches};
 
 use fastmap::{Lowered, NameMap};
 use oxbasic_ast::*;
