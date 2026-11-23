@@ -67,7 +67,7 @@ variable starts at `0`, a `String` starts empty, and a `Boolean` starts
 | `GoSub` | `GoSub label` … `Return` | Calls a subroutine inside the procedure. `Return` goes back to the statement after the `GoSub`. A `Return` with no `GoSub` is error 3. |
 | `Return` | `Return` | Ends a `GoSub` subroutine. |
 | `Call` | `Call Name(args)` | Calls a procedure. The parentheses are optional when there are no arguments. |
-| `On Error` | `On Error GoTo label`, `On Error GoTo 0`, `On Error Resume Next` | Error handling. |
+| `On Error` | `On Error GoTo label`, `On Error GoTo 0`, `On Error Resume Next` | Error handling. An error that is not trapped stops the program and reports its number, its description and the line it happened on (`runtime error 11: division by zero on line 3`). |
 | `Resume` | `Resume`, `Resume Next`, `Resume label` | Continues after an error handler. |
 | `With` | `With obj` … `End With` | Inside the block, a leading `.Member` is a member of `obj`, so `.Caption = "x"` sets `obj.Caption`. Blocks may nest. |
 

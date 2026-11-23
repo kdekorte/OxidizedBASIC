@@ -1343,6 +1343,7 @@ pub(crate) fn err<T>(number: i32, description: &str) -> ExecResult<T> {
     Err(VbError {
         number,
         description: description.to_string(),
+        line: None,
     })
 }
 

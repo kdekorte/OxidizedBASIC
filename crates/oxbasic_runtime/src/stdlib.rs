@@ -98,6 +98,7 @@ fn arg(args: &[Variant], i: usize) -> ExecResult<&Variant> {
     args.get(i).ok_or_else(|| VbError {
         number: 450,
         description: "wrong number of arguments".into(),
+        line: None,
     })
 }
 
@@ -324,6 +325,7 @@ impl<'out> Interpreter<'out> {
                         return Err(VbError {
                             number: 5,
                             description: "invalid procedure call or argument".into(),
+                            line: None,
                         });
                     }
                     Ok(n as i32)
@@ -350,6 +352,7 @@ impl<'out> Interpreter<'out> {
                     return Err(VbError {
                         number: 53,
                         description: format!("File not found: {}", path),
+                        line: None,
                     });
                 }
                 Ok(Variant::String(path))

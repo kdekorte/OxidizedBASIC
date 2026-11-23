@@ -126,6 +126,10 @@ impl VbArray {
 pub struct VbError {
     pub number: i32,
     pub description: String,
+    /// The source line the error happened on, when the interpreter knows it
+    /// (a host's own error has none until the statement that raised it is
+    /// reached).
+    pub line: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +319,7 @@ pub trait ObjectHost {
         Err(VbError {
             number: 438,
             description: "object doesn't support this property or method".into(),
+            line: None,
         })
     }
     /// `CurrentX` / `CurrentY` of `object` (`None`: the form), where a
@@ -452,7 +457,14 @@ pub fn run_source(src: &str, out: &mut dyn Output) -> Result<(), String> {
 
 impl std::fmt::Display for VbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "runtime error {}: {}", self.number, self.description)
+        match self.line {
+            Some(line) => write!(
+                f,
+                "runtime error {}: {} on line {}",
+                self.number, self.description, line
+            ),
+            None => write!(f, "runtime error {}: {}", self.number, self.description),
+        }
     }
 }
 
@@ -462,6 +474,7 @@ pub(crate) fn err<T>(number: i32, description: &str) -> ExecResult<T> {
     Err(VbError {
         number,
         description: description.to_string(),
+        line: None,
     })
 }
 
@@ -1340,7 +1353,15 @@ impl<'out> Interpreter<'out> {
                             }
                             None => return Ok(Flow::Goto(l.clone())),
                         },
-                        ErrMode::None => return Err(e),
+                        ErrMode::None => {
+                            // the line of the statement that failed: the innermost
+                            // one, so an error from a called Sub keeps its own line
+                            let mut e = e;
+                            if e.line.is_none() {
+                                e.line = Some(f.current_line);
+                            }
+                            return Err(e);
+                        }
                     }
                 }
             }

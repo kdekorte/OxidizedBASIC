@@ -587,3 +587,30 @@ fn type_field_of_another_user_type() {
     assert_eq!(run(src), " 4 \n");
 }
 
+#[test]
+fn a_runtime_error_reports_the_line_it_happened_on() {
+    // line 3 divides by zero
+    let mut buf = Buf(String::new());
+    let e = run_source("x = 1\ny = 2\nz = 1 / 0\nPrint z\n", &mut buf).unwrap_err();
+    assert!(e.contains("on line 3"), "{}", e);
+}
+
+#[test]
+fn an_error_inside_a_sub_reports_the_line_inside_the_sub() {
+    // the error is on line 4, inside the Sub, not on the line that called it
+    let src = "Sub Boom()\n  x = 1\n  Print x\n  y = 1 / 0\nEnd Sub\nBoom\n";
+    let mut buf = Buf(String::new());
+    let e = run_source(src, &mut buf).unwrap_err();
+    assert!(e.contains("on line 4"), "{}", e);
+}
+
+#[test]
+fn an_error_handled_by_on_error_keeps_its_number() {
+    // a trapped error prints nothing; Err.Number is unchanged
+    assert_eq!(
+        run("On Error Resume Next\nx = 1 / 0\nPrint Err.Number\n"),
+        " 11 \n"
+    );
+}
+
+
