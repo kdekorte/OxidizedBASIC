@@ -107,6 +107,12 @@ impl FileTable {
         }
     }
 
+    /// Whether file `n` is open `For Binary` (its `Get`/`Put` move by bytes, not
+    /// by records).
+    pub fn is_binary(&self, n: i64) -> bool {
+        matches!(self.files.get(&n), Some(OpenFile::Direct { binary: true, .. }))
+    }
+
     /// Whether file `n` is open.
     pub fn is_open(&self, n: i64) -> bool {
         self.files.contains_key(&n)
@@ -361,14 +367,16 @@ impl FileTable {
                     }
                     *pos = (r as u64 - 1) * (*record_len as u64);
                 }
-                // a random file writes one padded record; a binary file writes
-                // exactly the bytes of the value and moves past them
+                // a random file writes one padded record; a record that is larger
+                // than the file's record length is an error, as in VB, not cut short
                 let out: Vec<u8> = if *binary {
                     bytes.to_vec()
                 } else {
+                    if bytes.len() > *record_len {
+                        return err(63, "Record is longer than the file's record length");
+                    }
                     let mut out = vec![b' '; *record_len];
-                    let k = bytes.len().min(*record_len);
-                    out[..k].copy_from_slice(&bytes[..k]);
+                    out[..bytes.len()].copy_from_slice(bytes);
                     out
                 };
                 file.seek(SeekFrom::Start(*pos)).map_err(|e| io_error("", e))?;

@@ -1175,7 +1175,8 @@ impl<'out> Interpreter<'out> {
         })?
     }
 
-    /// `obj.name = v` into a record, changed in place.
+    /// `obj.name = v` into a record, changed in place. The value takes the
+    /// field's declared type (a `String * n` field is cut or padded to n).
     fn record_field_store(
         &mut self,
         obj: &Expr,
@@ -1183,6 +1184,13 @@ impl<'out> Interpreter<'out> {
         v: Variant,
         f: &mut Frame,
     ) -> ExecResult<()> {
+        let declared = self.with_record(obj, f, |r| r.ty.clone())?;
+        let v = match self.user_types.get(&declared.to_lowercase()).and_then(|fields| {
+            fields.iter().find(|fd| fd.name.eq_ignore_ascii_case(name)).and_then(|fd| fd.ty.clone())
+        }) {
+            Some(t) if !t.is_empty() => coerce_typed(&v, &t)?,
+            _ => v,
+        };
         self.with_record(obj, f, |r| {
             match r.fields.iter_mut().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
                 Some((_, slot)) => {
@@ -1754,21 +1762,27 @@ impl<'out> Interpreter<'out> {
                 let current = self.eval(target, f)?;
                 // a binary Get reads the bytes the variable takes; a random one
                 // reads a whole record
-                let size = match &current {
-                    Variant::Record(r) => Some(self.record_bytes(r)?.len()),
-                    Variant::String(s) => match target {
-                        // a fixed-length string reads its declared size
-                        Expr::Var(name) => match self.declared_type(f, name).as_deref().and_then(crate::vbtypes::file_type_of) {
-                            Some(FileType::FixedString(n)) => Some(n),
+                // a binary Get reads the bytes the variable takes; a random one
+                // reads a whole record, whatever its strings hold
+                let size = if self.files.is_binary(n) {
+                    match &current {
+                        Variant::Record(r) => Some(self.record_bytes(r)?.len()),
+                        Variant::String(s) => match target {
+                            // a fixed-length string reads its declared size
+                            Expr::Var(name) => match self.declared_type(f, name).as_deref().and_then(crate::vbtypes::file_type_of) {
+                                Some(FileType::FixedString(n)) => Some(n),
+                                _ => Some(s.len()),
+                            },
                             _ => Some(s.len()),
                         },
-                        _ => Some(s.len()),
-                    },
-                    Variant::Integer(_) => Some(2),
-                    Variant::Long(_) | Variant::Single(_) => Some(4),
-                    Variant::Double(_) | Variant::Currency(_) | Variant::Date(_) => Some(8),
-                    Variant::Boolean(_) => Some(2),
-                    _ => None,
+                        Variant::Integer(_) => Some(2),
+                        Variant::Long(_) | Variant::Single(_) => Some(4),
+                        Variant::Double(_) | Variant::Currency(_) | Variant::Date(_) => Some(8),
+                        Variant::Boolean(_) => Some(2),
+                        _ => None,
+                    }
+                } else {
+                    None
                 };
                 let bytes = self.files.get_record(n, recnum, size)?;
                 let value = match current {
@@ -2932,6 +2946,11 @@ pub(crate) fn debug_repr(v: &Variant) -> String {
 
 fn default_for_type(ty: Option<&str>) -> Variant {
     match ty {
+        // a fixed-length string starts as its size in spaces, as VB's does
+        Some(t) if t.to_ascii_lowercase().starts_with("string*") => {
+            let n = t.to_ascii_lowercase()["string*".len()..].trim().parse::<usize>().unwrap_or(0);
+            Variant::String(" ".repeat(n))
+        }
         Some(t) if t.to_ascii_lowercase().contains("string") => Variant::String(String::new()),
         Some(t) if t.to_ascii_lowercase().contains("boolean") => Variant::Boolean(false),
         Some(t) if t.to_ascii_lowercase().contains("date") => Variant::Date(0.0),
@@ -2977,6 +2996,20 @@ pub(crate) fn coerce_typed(v: &Variant, ty: &str) -> ExecResult<Variant> {
         "currency" => Variant::Currency(to_f64(v)?),
         "boolean" => Variant::Boolean(to_bool(v)?),
         "string" => Variant::String(to_string(v)?),
+        // a fixed-length string takes exactly its declared size: cut or padded
+        // with spaces, as VB does on assignment
+        t if t.starts_with("string*") => match t["string*".len()..].trim().parse::<usize>() {
+            Ok(n) => {
+                let s = to_string(v)?;
+                let mut out: String = s.chars().take(n).collect();
+                let have = out.chars().count();
+                for _ in have..n {
+                    out.push(' ');
+                }
+                Variant::String(out)
+            }
+            Err(_) => Variant::String(to_string(v)?),
+        },
         "date" => Variant::Date(to_f64(v)?),
         _ => v.clone(), // variant / object / unknown
     })
