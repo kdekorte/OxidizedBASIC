@@ -2,7 +2,7 @@
 //! appear, where their thumbs sit, and which cell a point is over.
 
 use crate::grid::GridSpec;
-use crate::grid_layout::{GridLayout, BAR};
+use crate::grid_layout::{reveal, reveal_axis, GridLayout, BAR};
 
 /// A grid of `rows` x `cols` where every column is 100 wide and every row 20
 /// high, with one fixed row and column.
@@ -122,3 +122,51 @@ fn a_zero_sized_grid_lays_out_without_panicking() {
     assert!(!l.vbar && !l.hbar);
     GridLayout::new(&grid(5, 5), 0.0, 0.0);
 }
+
+#[test]
+fn a_target_in_view_leaves_the_view_alone() {
+    let sizes = vec![20.0; 20];
+    // 5 rows of 20 fit in 100: with the header, rows 1..=4 are in view
+    assert_eq!(reveal_axis(&sizes, 1, 1, 100.0, 3), 1);
+    assert_eq!(reveal_axis(&sizes, 1, 1, 100.0, 4), 1);
+}
+
+#[test]
+fn a_target_below_the_view_scrolls_down_just_enough() {
+    let sizes = vec![20.0; 20];
+    assert_eq!(reveal_axis(&sizes, 1, 1, 100.0, 5), 2, "one row down");
+    assert_eq!(reveal_axis(&sizes, 1, 1, 100.0, 10), 7);
+}
+
+#[test]
+fn a_target_above_the_view_scrolls_up_to_it() {
+    let sizes = vec![20.0; 20];
+    assert_eq!(reveal_axis(&sizes, 1, 9, 100.0, 4), 4);
+}
+
+#[test]
+fn a_fixed_target_never_scrolls_and_the_end_stops_at_the_last_page() {
+    let sizes = vec![20.0; 20];
+    assert_eq!(reveal_axis(&sizes, 1, 9, 100.0, 0), 9, "header is always in view");
+    assert_eq!(reveal_axis(&sizes, 1, 1, 100.0, 19), 16, "the last page");
+}
+
+#[test]
+fn reveal_moves_both_axes_and_says_whether_it_did() {
+    let mut g = grid(20, 10);
+    g.select(15, 8);
+    assert!(reveal(&mut g, 300.0, 100.0));
+    let l = GridLayout::new(&g, 300.0, 100.0);
+    assert!(l.rows.iter().any(|s| s.0 == 15), "row 15 is in view");
+    assert!(l.cols.iter().any(|s| s.0 == 8), "col 8 is in view");
+    assert!(!reveal(&mut g, 300.0, 100.0), "already in view: nothing moves");
+}
+
+#[test]
+fn reveal_in_a_grid_that_fits_does_nothing() {
+    let mut g = grid(3, 3);
+    g.select(2, 2);
+    assert!(!reveal(&mut g, 400.0, 200.0));
+}
+
+

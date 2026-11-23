@@ -20,6 +20,9 @@
 
 mod form;
 pub mod grid;
+pub mod grid_edit;
+#[cfg(test)]
+mod grid_edit_tests;
 pub mod grid_layout;
 #[cfg(test)]
 mod grid_layout_tests;
@@ -272,6 +275,26 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
             ("QueryUnload", "Cancel As Integer, UnloadMode As Integer"),
             ("Resize", ""),
             ("Unload", "Cancel As Integer"),
+        ],
+        // the DataGrid, as MSFlexGrid has it, with the editing events: a cell
+        // can be refused (ValidateEdit's Cancel) before AfterEdit reports it
+        "datagrid" => &[
+            ("AfterEdit", "Row As Long, Col As Long"),
+            ("Click", ""),
+            ("DblClick", ""),
+            ("EnterCell", ""),
+            ("GotFocus", ""),
+            ("KeyDown", KEY_UPDOWN),
+            ("KeyPress", KEY_PRESS),
+            ("KeyUp", KEY_UPDOWN),
+            ("LeaveCell", ""),
+            ("LostFocus", ""),
+            ("MouseDown", MOUSE),
+            ("MouseMove", MOUSE),
+            ("MouseUp", MOUSE),
+            ("RowColChange", ""),
+            ("Scroll", ""),
+            ("ValidateEdit", "Row As Long, Col As Long, Cancel As Integer"),
         ],
         // the file browsing lists: a list's events, and Change when Path or
         // Pattern changes (a file list's double click opens the file)

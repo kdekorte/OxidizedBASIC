@@ -126,3 +126,43 @@ impl GridLayout {
         Some((find(&self.rows, y)?, find(&self.cols, x)?))
     }
 }
+
+/// The first scrolling index to show so that `target` is in view whole, on
+/// one axis: `sizes` of every item, the first `fixed` of which never scroll,
+/// `start` the index now first, `room` the length available. A fixed item is
+/// always in view. Scrolls the least: up to `target` when it is before
+/// `start`, else down just far enough, and never past the last page.
+pub fn reveal_axis(sizes: &[f32], fixed: usize, start: usize, room: f32, target: usize) -> usize {
+    let fixed_len: f32 = sizes[..fixed.min(sizes.len())].iter().sum();
+    let last = max_start(sizes, fixed, room - fixed_len);
+    let start = start.max(fixed).min(last);
+    if target < fixed {
+        return start;
+    }
+    if target < start {
+        return target.min(last);
+    }
+    // the length from `start` through `target`
+    let mut first = start;
+    while first < target.min(last) {
+        let used: f32 = sizes[first..=target.min(sizes.len() - 1)].iter().sum();
+        if fixed_len + used <= room + 0.01 {
+            break;
+        }
+        first += 1;
+    }
+    first
+}
+
+/// Scroll `g` the least that brings its current cell into view in an area
+/// `w` x `h` (the grid's inside, less its border), as moving by key or setting
+/// `Row` / `Col` does. Returns whether `TopRow` or `LeftCol` moved.
+pub fn reveal(g: &mut GridSpec, w: f32, h: f32) -> bool {
+    let (top, left) = (g.top_row, g.left_col);
+    // the bars take room, and which are needed depends on the content, not on
+    // where the view is: lay out once to learn the view's size
+    let l = GridLayout::new(g, w, h);
+    g.top_row = reveal_axis(&g.row_heights, g.fixed_rows, g.top_row, l.view_h, g.row);
+    g.left_col = reveal_axis(&g.col_widths, g.fixed_cols, g.left_col, l.view_w, g.col);
+    (g.top_row, g.left_col) != (top, left)
+}
