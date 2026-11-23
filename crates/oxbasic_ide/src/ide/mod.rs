@@ -867,6 +867,8 @@ mod diagnostic_tests;
 #[cfg(test)]
 mod fold_tests;
 #[cfg(test)]
+mod grid_draw_tests;
+#[cfg(test)]
 mod event_tests;
 #[cfg(test)]
 mod member_tests;

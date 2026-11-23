@@ -20,6 +20,9 @@
 
 mod form;
 pub mod grid;
+pub mod grid_layout;
+#[cfg(test)]
+mod grid_layout_tests;
 #[cfg(test)]
 mod grid_tests;
 #[cfg(test)]
@@ -41,6 +44,8 @@ pub mod gpui_backend;
 pub mod gpui_controls;
 #[cfg(feature = "gpui")]
 pub mod gpui_text_hit;
+#[cfg(feature = "gpui")]
+pub mod grid_paint;
 #[cfg(test)]
 mod menu_editor_tests;
 #[cfg(test)]

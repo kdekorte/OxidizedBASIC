@@ -663,12 +663,8 @@ pub fn paint_control<V: 'static>(
             hook(Part::Body, body, cx)
         }
         ControlKind::TextBox => hook(Part::Body, text_field(base, c, look).bg(back(0xFFFFFF)), cx),
-        // DataGrid: the cells are drawn in a later step; for now its frame
-        ControlKind::DataGrid => hook(
-            Part::Body,
-            base.bg(back(0xFFFFFF)).border_1().border_color(rgb(BUTTON_BORDER)),
-            cx,
-        ),
+        // DataGrid: the visible cells, the current one framed, and scrollbars
+        ControlKind::DataGrid => hook(Part::Body, crate::grid_paint::paint_grid(base, c, look), cx),
         // VB's TabControl: a strip of tabs across the top, the selected one
         // raised; the page below is the control's body (its controls draw on it)
         ControlKind::TabControl => {
