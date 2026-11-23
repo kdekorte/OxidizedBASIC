@@ -30,6 +30,8 @@ mod grid_layout_tests;
 mod grid_tests;
 #[cfg(test)]
 mod grid_host_tests;
+#[cfg(test)]
+mod grid_user_tests;
 pub mod menu;
 #[cfg(feature = "gpui")]
 pub mod menu_bar;
@@ -280,6 +282,7 @@ pub fn event_signatures(control: &str) -> &'static [(&'static str, &'static str)
         // can be refused (ValidateEdit's Cancel) before AfterEdit reports it
         "datagrid" => &[
             ("AfterEdit", "Row As Long, Col As Long"),
+            ("Change", ""),
             ("Click", ""),
             ("DblClick", ""),
             ("EnterCell", ""),

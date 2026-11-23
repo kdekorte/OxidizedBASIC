@@ -36,6 +36,24 @@ pub struct Doc {
     saved_form: String,
     saved_code: String,
 }
+/// The icon as the project file should store it: relative to the project's
+/// folder when the icon is inside it (so the project still works when moved),
+/// otherwise as given. An empty or already relative path is unchanged.
+pub fn relative_to(icon: &str, project_dir: &std::path::Path) -> String {
+    if icon.is_empty() {
+        return String::new();
+    }
+    let path = std::path::Path::new(icon);
+    if !path.is_absolute() {
+        return icon.to_string();
+    }
+    match path.strip_prefix(project_dir) {
+        Ok(rel) => rel.to_string_lossy().to_string(),
+        Err(_) => icon.to_string(),
+    }
+}
+
+
 
 /// `text` as editor lines (an empty file is one empty line).
 pub fn to_lines(text: &str) -> Vec<String> {
@@ -399,7 +417,7 @@ impl Workspace {
         let mut project = Project::new(&self.name);
         project.startup = self.startup.clone();
         project.version = self.version.clone();
-        project.icon = self.icon.clone();
+        project.icon = relative_to(&self.icon, &self.dir());
         project.bundle_id = self.bundle_id.clone();
         for d in &self.docs {
             match d.kind {
@@ -646,5 +664,24 @@ mod tests {
         // and the choice is kept in the project file
         let back = Workspace::open(&file).unwrap();
         assert_eq!(back.startup, "Form2");
+    }
+
+    #[test]
+    fn an_icon_inside_the_project_is_saved_relative_to_it() {
+        let dir = std::path::Path::new("/work/game");
+        assert_eq!(relative_to("/work/game/icons/app.png", dir), "icons/app.png");
+    }
+
+    #[test]
+    fn an_icon_outside_the_project_stays_as_given() {
+        let dir = std::path::Path::new("/work/game");
+        assert_eq!(relative_to("/elsewhere/app.png", dir), "/elsewhere/app.png");
+    }
+
+    #[test]
+    fn an_empty_or_relative_icon_is_unchanged() {
+        let dir = std::path::Path::new("/work/game");
+        assert_eq!(relative_to("", dir), "");
+        assert_eq!(relative_to("icon.icns", dir), "icon.icns");
     }
 }

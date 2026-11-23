@@ -81,4 +81,13 @@ mod tests {
     fn a_missing_project_is_an_error() {
         assert!(project_program(&example("nope.oxproj")).is_err());
     }
+
+    #[test]
+    fn the_datagrid_example_builds_its_form_with_the_grid_handlers() {
+        let (spec, _) = project_program(&example("datagrid/datagrid.oxproj")).expect("it builds");
+        assert_eq!(spec.forms[spec.startup].name, "frmGrid", "frmGrid starts");
+        for handler in ["Grid1_RowColChange", "Grid1_ValidateEdit", "Grid1_AfterEdit", "Grid1_Scroll"] {
+            assert!(spec.source.contains(handler), "{} is in the program", handler);
+        }
+    }
 }

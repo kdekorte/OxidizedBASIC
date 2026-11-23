@@ -95,8 +95,8 @@ pub fn tokenize_line(line: &str) -> Vec<(String, Tok)> {
     }
 }
 
-/// The grammar's leaves for `line`, as spans, or `None` when the line has a
-/// syntax error or its leaves don't cover its text.
+// The grammar's leaves for `line`, as spans, or `None` when the line has a
+// syntax error or its leaves don't cover its text.
 thread_local! {
     /// One Tree-sitter parser per thread, for the editor's colouring.
     static PARSER: std::cell::RefCell<tree_sitter::Parser> = std::cell::RefCell::new({

@@ -103,3 +103,31 @@ fn choosing_a_control_brings_back_its_properties(cx: &mut gpui::TestAppContext) 
     );
     assert!(cx.debug_bounds(sel("prop-version".into())).is_none());
 }
+
+/// The Icon field edits like a text box: paste a path, move the caret back
+/// with the arrow key, type in the middle, and the project's icon follows.
+#[gpui::test]
+fn the_icon_field_takes_paste_and_caret_editing(cx: &mut gpui::TestAppContext) {
+    let (ide, cx) = ide_window(cx);
+    let row = cx
+        .debug_bounds(sel("project-row".into()))
+        .expect("the project row");
+    cx.simulate_click(row.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    let field = cx
+        .debug_bounds(sel("prop-icon".into()))
+        .expect("the Icon field");
+    cx.simulate_click(field.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    // clear the field, paste a path, then step the caret back and type
+    cx.simulate_keystrokes("cmd-a backspace");
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("icons/app.png".into()));
+    cx.simulate_keystrokes("cmd-v");
+    cx.run_until_parked();
+    cx.simulate_keystrokes("left left left left");
+    cx.simulate_input("X");
+    cx.run_until_parked();
+    ide.read_with(cx, |ide, _| {
+        assert_eq!(ide.workspace.icon, "icons/appX.png", "pasted, then typed mid-path");
+    });
+}

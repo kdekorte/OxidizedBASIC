@@ -127,6 +127,11 @@ impl GridLayout {
     }
 }
 
+/// The area a grid's cells use inside its control's `rect`: less the border.
+pub fn inside(r: &crate::Rect) -> (f32, f32) {
+    ((r.width.max(4.0) - 2.0).max(0.0), (r.height.max(4.0) - 2.0).max(0.0))
+}
+
 /// The first scrolling index to show so that `target` is in view whole, on
 /// one axis: `sizes` of every item, the first `fixed` of which never scroll,
 /// `start` the index now first, `room` the length available. A fixed item is

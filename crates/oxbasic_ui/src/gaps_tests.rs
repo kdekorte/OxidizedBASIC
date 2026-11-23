@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 /// A scratch folder with two files, `apple.bas` and `notes.txt`.
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("oxbasic-gaps-{}", name));
+    let dir = std::env::temp_dir().join(format!("oxbasic-gaps-{}-{}", name, std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("apple.bas"), "").unwrap();

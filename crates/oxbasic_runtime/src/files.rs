@@ -14,20 +14,17 @@ pub const MAX_FILE_NUMBER: i64 = 511;
 pub enum OpenFile {
     /// Opened for `Input`: the lines not read yet, and the file's path.
     Input {
-        path: String,
         lines: std::collections::VecDeque<String>,
         /// The fields of the line being read by `Input #`, not yet used.
         fields: std::collections::VecDeque<Field>,
     },
     /// Opened for `Output` or `Append`: the writer.
     Output {
-        path: String,
         file: std::io::BufWriter<std::fs::File>,
     },
     /// Opened `For Random` or `For Binary`: read and written by byte position.
     /// `record_len` is the size of a random record (1 for binary files).
     Direct {
-        path: String,
         file: std::fs::File,
         record_len: usize,
         /// `true` for `For Binary`: values are written unpadded.
@@ -144,7 +141,6 @@ impl FileTable {
                     .collect();
                 OpenFile::Input {
                     fields: std::collections::VecDeque::new(),
-                    path: path.to_string(),
                     lines,
                 }
             }
@@ -157,7 +153,6 @@ impl FileTable {
                     .open(full)
                     .map_err(|e| io_error(path, e))?;
                 OpenFile::Output {
-                    path: path.to_string(),
                     file: std::io::BufWriter::new(file),
                 }
             }
@@ -170,7 +165,6 @@ impl FileTable {
                     .open(full)
                     .map_err(|e| io_error(path, e))?;
                 OpenFile::Direct {
-                    path: path.to_string(),
                     file,
                     record_len: record_len.unwrap_or(128).max(1) as usize,
                     binary: mode == oxbasic_ast::FileMode::Binary,

@@ -81,6 +81,96 @@ pub fn delete_forward(text: &mut String, caret: usize) -> usize {
     caret
 }
 
+/// The selected range of a single-line text: `anchor` is where the selection
+/// began, `caret` where it is now (equal when nothing is selected).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sel {
+    pub anchor: usize,
+    pub caret: usize,
+}
+
+impl Sel {
+    /// Nothing selected, the caret at `at`.
+    pub fn at(at: usize) -> Sel {
+        Sel { anchor: at, caret: at }
+    }
+
+    /// The selected characters as a range `(from, to)`, `from <= to`.
+    pub fn range(&self) -> (usize, usize) {
+        (self.anchor.min(self.caret), self.anchor.max(self.caret))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.anchor == self.caret
+    }
+}
+
+/// Delete the selected characters (if any) and put the caret where they were.
+/// Returns the new selection (empty).
+pub fn delete_selection(text: &mut String, sel: Sel) -> Sel {
+    if sel.is_empty() {
+        return sel;
+    }
+    let (from, to) = sel.range();
+    let start = byte_index(text, from);
+    let end = byte_index(text, to);
+    text.replace_range(start..end, "");
+    Sel::at(from)
+}
+
+/// Type `s` over the selection (or at the caret): returns the new selection.
+pub fn insert_over(text: &mut String, sel: Sel, s: &str) -> Sel {
+    let sel = delete_selection(text, sel);
+    let at = insert(text, sel.caret, s);
+    Sel::at(at)
+}
+
+/// Backspace: deletes the selection, or the character before the caret.
+pub fn backspace_sel(text: &mut String, sel: Sel) -> Sel {
+    if !sel.is_empty() {
+        return delete_selection(text, sel);
+    }
+    Sel::at(backspace(text, sel.caret))
+}
+
+/// Delete: deletes the selection, or the character after the caret.
+pub fn delete_sel(text: &mut String, sel: Sel) -> Sel {
+    if !sel.is_empty() {
+        return delete_selection(text, sel);
+    }
+    Sel::at(delete_forward(text, sel.caret))
+}
+
+/// Move the caret by `m`. With `extend` (Shift) the selection grows from its
+/// anchor; without it the selection collapses at the new caret.
+pub fn move_sel(text: &str, sel: Sel, m: Move, extend: bool) -> Sel {
+    let caret = moved(text, sel.caret, m);
+    if extend {
+        Sel { anchor: sel.anchor, caret }
+    } else {
+        Sel::at(caret)
+    }
+}
+
+/// Select everything (⌘A): the caret at the end, the anchor at the start.
+pub fn select_all(text: &str) -> Sel {
+    Sel { anchor: 0, caret: text.chars().count() }
+}
+
+/// The horizontal scroll (in characters) that keeps `caret` inside a field
+/// showing `visible` characters, moving the current `scroll` the least.
+pub fn scrolled_to_caret(scroll: usize, caret: usize, visible: usize) -> usize {
+    let visible = visible.max(1);
+    if caret < scroll {
+        caret
+    } else if caret >= scroll + visible {
+        caret + 1 - visible
+    } else {
+        scroll
+    }
+}
+
+
 /// The byte offset of character `i` (the text's length if `i` is past it).
 fn byte_index(text: &str, i: usize) -> usize {
     text.char_indices()
@@ -150,4 +240,53 @@ mod tests {
         assert_eq!(backspace(&mut t, 2), 1, "removes the €");
         assert_eq!(t, "éx");
     }
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    #[test]
+    fn typing_replaces_the_selection() {
+        let mut t = String::from("C:/icons/app.png");
+        let after = insert_over(&mut t, Sel { anchor: 3, caret: 9 }, "X");
+        assert_eq!(t, "C:/Xapp.png");
+        assert_eq!(after, Sel::at(4));
+    }
+
+    #[test]
+    fn backspace_and_delete_remove_the_selection_first() {
+        let mut t = String::from("abcdef");
+        let s = backspace_sel(&mut t, Sel { anchor: 1, caret: 4 });
+        assert_eq!((t.as_str(), s), ("aef", Sel::at(1)));
+        let mut u = String::from("abc");
+        assert_eq!(backspace_sel(&mut u, Sel::at(2)), Sel::at(1));
+        assert_eq!(u, "ac");
+        let mut v = String::from("abc");
+        assert_eq!(delete_sel(&mut v, Sel::at(0)), Sel::at(0));
+        assert_eq!(v, "bc");
+    }
+
+    #[test]
+    fn shift_moves_extend_and_plain_moves_collapse() {
+        let t = "hello";
+        let ext = move_sel(t, Sel::at(2), Move::Right, true);
+        assert_eq!(ext, Sel { anchor: 2, caret: 3 });
+        assert_eq!(ext.range(), (2, 3));
+        assert_eq!(move_sel(t, ext, Move::Left, false), Sel::at(2));
+    }
+
+    #[test]
+    fn select_all_covers_the_text() {
+        assert_eq!(select_all("abc").range(), (0, 3));
+    }
+
+    #[test]
+    fn the_scroll_follows_the_caret_and_stays_put_inside_the_view() {
+        // 10 visible characters: a caret past the end scrolls it into view
+        assert_eq!(scrolled_to_caret(0, 12, 10), 3);
+        assert_eq!(scrolled_to_caret(5, 2, 10), 2, "left of the view");
+        assert_eq!(scrolled_to_caret(3, 7, 10), 3, "already visible: no scroll");
+    }
+}
+
 }

@@ -1,0 +1,15 @@
+{
+  "name": "datagrid",
+  "startup": "frmGrid",
+  "forms": [
+    {
+      "name": "frmGrid",
+      "layout": "frmGrid.oxform",
+      "code": "frmGrid.bas"
+    }
+  ],
+  "modules": [],
+  "version": "1.0.0",
+  "icon": "",
+  "bundleId": ""
+}

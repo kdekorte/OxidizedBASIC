@@ -7,17 +7,17 @@ use super::*;
 use std::sync::mpsc::channel;
 
 /// The live window of `form` running `src`, as member_tests builds it.
-struct Live<'a> {
+pub(super) struct Live<'a> {
     ide: Entity<Ide>,
     session: DebugSession,
     rx: std::sync::mpsc::Receiver<DebugEvent>,
     handle: WindowHandle<FormRunner>,
-    win: gpui::VisualTestContext,
+    pub(super) win: gpui::VisualTestContext,
     cx: &'a mut gpui::VisualTestContext,
 }
 
 impl<'a> Live<'a> {
-    fn start(form: FormSpec, src: &str, cx: &'a mut gpui::TestAppContext) -> Live<'a> {
+    pub(super) fn start(form: FormSpec, src: &str, cx: &'a mut gpui::TestAppContext) -> Live<'a> {
         let (ide, cx) = super::toolbox_tests::ide_window(cx);
         let (tx, rx) = channel();
         let session = DebugSession::start_with_form(
@@ -40,20 +40,20 @@ impl<'a> Live<'a> {
         live
     }
 
-    fn settle(&mut self) {
+    pub(super) fn settle(&mut self) {
         self.win.run_until_parked();
         settle(&self.ide, &self.rx, &mut self.win, self.cx);
     }
 
-    fn read<T>(&self, f: impl FnOnce(&FormRunner) -> T) -> T {
+    pub(super) fn read<T>(&self, f: impl FnOnce(&FormRunner) -> T) -> T {
         self.handle.read_with(&self.win, |r, _| f(r)).unwrap()
     }
 
-    fn caption(&self, i: usize) -> String {
+    pub(super) fn caption(&self, i: usize) -> String {
         self.read(|r| r.form.controls[i].caption.clone())
     }
 
-    fn stop(&mut self) {
+    pub(super) fn stop(&mut self) {
         self.session.send(DebugCommand::Stop);
     }
 }

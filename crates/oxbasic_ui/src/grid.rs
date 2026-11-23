@@ -37,6 +37,10 @@ pub struct GridSpec {
     pub left_col: usize,
     /// `ScrollBars`: 0 none, 1 horizontal, 2 vertical, 3 both.
     pub scroll_bars: u8,
+    /// The text the user has typed into the current cell while it is being
+    /// edited, as `ValidateEdit` reads it as `Text`; `None` when not editing.
+    #[serde(skip)]
+    pub pending_text: Option<String>,
 }
 
 impl Default for GridSpec {
@@ -63,6 +67,7 @@ impl GridSpec {
             top_row: 0,
             left_col: 0,
             scroll_bars: 3,
+            pending_text: None,
         };
         g.resize(rows, cols);
         g.row = g.fixed_rows.min(g.rows.saturating_sub(1));

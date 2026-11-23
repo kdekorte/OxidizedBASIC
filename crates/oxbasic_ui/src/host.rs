@@ -390,6 +390,30 @@ pub enum UserEdit {
         rows: Vec<usize>,
         index: Option<usize>,
     },
+    /// The user made `(row, col)` the current cell of a DataGrid (a click or
+    /// a key): `LeaveCell`, then `EnterCell` and `RowColChange` run.
+    GridSelect { control: usize, row: usize, col: usize },
+    /// The user scrolled a DataGrid (the wheel, a bar, or keeping the
+    /// current cell in view): `Scroll` runs when the view moved.
+    GridView {
+        control: usize,
+        top_row: usize,
+        left_col: usize,
+    },
+    /// The user finished editing a DataGrid cell with `text`: `ValidateEdit`
+    /// runs first (its `Cancel` refuses the text), then `AfterEdit`.
+    GridCell {
+        control: usize,
+        row: usize,
+        col: usize,
+        text: String,
+    },
+    /// The text typed into the current cell so far (`None` once the edit
+    /// ends): what the program reads as the grid's `Text` in ValidateEdit.
+    GridEditing {
+        control: usize,
+        text: Option<String>,
+    },
 }
 
 /// The OptionButtons that act as one group with `i`: as in VB, the ones in
@@ -446,6 +470,9 @@ pub(crate) struct Watched {
     path: String,
     pattern: String,
     tab: u8,
+    /// A DataGrid's current cell and first scrolling row and column.
+    cell: (usize, usize),
+    view: (usize, usize),
 }
 
 /// The live form, owned by the program's side. The interpreter reads and
@@ -461,7 +488,7 @@ pub struct FormHost {
     pub(crate) focus: Option<usize>,
     /// Events the program's own changes raised, for the interpreter to run
     /// (`Text1.Text = "x"` raises `Text1_Change`).
-    raised: Vec<RaisedEvent>,
+    pub(crate) raised: Vec<RaisedEvent>,
     /// The controls the form had at design time, by name and index: their
     /// array elements can't be unloaded.
     pub(crate) designed: Vec<(String, Option<i32>)>,
@@ -523,12 +550,14 @@ impl FormHost {
             path: c.path.clone(),
             pattern: c.pattern.clone(),
             tab: s.tab,
+            cell: (c.grid.row, c.grid.col),
+            view: (c.grid.top_row, c.grid.left_col),
         }
     }
 
     /// Queue `control`'s `event` for the interpreter (with its `Index` in a
     /// control array).
-    fn raise(&mut self, i: usize, event: &str) {
+    pub(crate) fn raise(&mut self, i: usize, event: &str) {
         let c = &self.form.controls[i];
         self.raised.push(RaisedEvent {
             form: self.form.name.clone(),
@@ -582,6 +611,18 @@ impl FormHost {
                 self.raise(i, "Click")
             }
             ControlKind::PictureBox if after.size != before.size => self.raise(i, "Resize"),
+            // a DataGrid: moving the current cell leaves one and enters the
+            // other; moving the view scrolls
+            ControlKind::DataGrid => {
+                if after.cell != before.cell {
+                    self.raise(i, "LeaveCell");
+                    self.raise(i, "RowColChange");
+                    self.raise(i, "EnterCell");
+                }
+                if after.view != before.view {
+                    self.raise(i, "Scroll");
+                }
+            }
             _ => {}
         }
     }
@@ -728,6 +769,23 @@ impl FormHost {
                     self.form.width = width;
                     self.form.height = height;
                 }
+            }
+            UserEdit::GridSelect { control, row, col } => self.grid_select(control, row, col),
+            UserEdit::GridView {
+                control,
+                top_row,
+                left_col,
+            } => self.grid_view(control, top_row, left_col),
+            UserEdit::GridCell {
+                control,
+                row,
+                col,
+                text,
+            } => {
+                self.grid_cell(control, row, col, text);
+            }
+            UserEdit::GridEditing { control, text } => {
+                self.grid_editing(control, text);
             }
         }
     }

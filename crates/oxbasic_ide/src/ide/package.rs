@@ -184,8 +184,7 @@ pub fn write_package(spec: &PackageSpec) -> Result<(), String> {
     }
 
     if let Some(icon) = &spec.icon {
-        std::fs::copy(icon, resources.join(format!("{}.icns", spec.name)))
-            .map_err(|e| format!("cannot copy the icon: {}", e))?;
+        write_icns(icon, &resources.join(format!("{}.icns", spec.name)))?;
     }
 
     std::fs::write(contents.join("Info.plist"), info_plist(spec))
@@ -228,6 +227,73 @@ pub fn info_plist(spec: &PackageSpec) -> String {
         version = spec.version,
     )
 }
+
+/// Write the app icon to `to` as a real `.icns`, which Finder needs. An
+/// `.icns` is copied as it is; any other picture (a PNG) is resized into an
+/// icon set with `sips` and built with `iconutil`, both part of macOS.
+fn write_icns(from: &Path, to: &Path) -> Result<(), String> {
+    let is_icns = from
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("icns"));
+    if is_icns {
+        return std::fs::copy(from, to)
+            .map(|_| ())
+            .map_err(|e| format!("cannot copy the icon: {}", e));
+    }
+    let work = std::env::temp_dir().join(format!("oxbasic-icon-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    let set = work.join("AppIcon.iconset");
+    std::fs::create_dir_all(&set).map_err(|e| format!("cannot make the icon set: {}", e))?;
+    // the sizes an .icns holds, and the 2x names of the same sizes
+    let sizes: [(u32, &str); 10] = [
+        (16, "icon_16x16.png"),
+        (32, "icon_16x16@2x.png"),
+        (32, "icon_32x32.png"),
+        (64, "icon_32x32@2x.png"),
+        (128, "icon_128x128.png"),
+        (256, "icon_128x128@2x.png"),
+        (256, "icon_256x256.png"),
+        (512, "icon_256x256@2x.png"),
+        (512, "icon_512x512.png"),
+        (1024, "icon_512x512@2x.png"),
+    ];
+    for (px, name) in sizes {
+        let status = std::process::Command::new("sips")
+            .arg("-z")
+            .arg(px.to_string())
+            .arg(px.to_string())
+            .arg(from)
+            .arg("--out")
+            .arg(set.join(name))
+            .output()
+            .map_err(|e| format!("cannot run sips: {}", e))?;
+        if !status.status.success() {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(format!(
+                "cannot make the icon from {}: {}",
+                from.display(),
+                String::from_utf8_lossy(&status.stderr).trim()
+            ));
+        }
+    }
+    let status = std::process::Command::new("iconutil")
+        .arg("-c")
+        .arg("icns")
+        .arg(&set)
+        .arg("-o")
+        .arg(to)
+        .output()
+        .map_err(|e| format!("cannot run iconutil: {}", e))?;
+    let _ = std::fs::remove_dir_all(&work);
+    if !status.status.success() {
+        return Err(format!(
+            "cannot build the .icns: {}",
+            String::from_utf8_lossy(&status.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
 
 #[cfg(unix)]
 fn set_executable(path: &Path) -> Result<(), String> {
@@ -595,5 +661,26 @@ mod bundle_tests {
             assert_eq!(again.icon, "icon.icns");
             std::fs::remove_dir_all(file.parent().unwrap()).ok();
         }
+
+    /// A PNG icon becomes a real .icns (macOS only: it needs sips and iconutil).
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_png_icon_is_written_as_a_real_icns() {
+        let png = example_icon_png();
+        let out = std::env::temp_dir().join(format!("oxbasic-test-{}.icns", std::process::id()));
+        let _ = std::fs::remove_file(&out);
+        write_icns(&png, &out).expect("the PNG becomes an icns");
+        let bytes = std::fs::read(&out).expect("the .icns exists");
+        assert_eq!(&bytes[0..4], b"icns", "the file starts with the icns header");
+        let _ = std::fs::remove_file(&out);
+    }
+
+    /// A small PNG to convert: the showcase's icon, which the repo ships.
+    #[cfg(target_os = "macos")]
+    fn example_icon_png() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/showcase/OxidizedBASIC Showcase Icon.png")
+    }
+
     }
 }

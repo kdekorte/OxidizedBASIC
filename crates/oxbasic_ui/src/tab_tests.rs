@@ -106,6 +106,7 @@ fn a_program_tab_change_reaches_an_open_windows_strip() {
     assert!(form.shown(3), "Adv (page 2) shows");
 }
 
+#[cfg(feature = "gpui")]
 #[test]
 fn a_press_on_the_strip_picks_the_tab_under_it() {
     use crate::gpui_controls::{tab_at, tab_width};

@@ -569,6 +569,23 @@ struct Server<'a, 'out> {
 }
 
 impl Server<'_, '_> {
+    /// Ask the program whether a DataGrid cell edit may be stored: its
+    /// `ValidateEdit(Row, Col, Cancel)` runs now, and a `Cancel` it sets to a
+    /// non-zero value refuses the edit. Returns true when refused.
+    fn validate_cell(&mut self, form: usize, control: usize, row: usize, col: usize) -> bool {
+        use oxbasic_runtime::Variant;
+        let args = vec![
+            Variant::Integer(row as i16),
+            Variant::Integer(col as i16),
+            Variant::Integer(0),
+        ];
+        let out = self.raise(form, Some(control), "ValidateEdit", args);
+        out.get(2)
+            .and_then(|v| v.as_f64().ok())
+            .map(|n| n != 0.0)
+            .unwrap_or(false)
+    }
+
     /// Run `object`'s `event` handler of form `form` with `args` (a control
     /// array element's `Index` first), if the program has one; returns the
     /// arguments as the handler left them. Errors in it are reported, and
@@ -796,10 +813,24 @@ fn serve(
                 let control = match &e {
                     UserEdit::Scroll { control, .. }
                     | UserEdit::Value { control, .. }
+                    | UserEdit::GridSelect { control, .. }
+                    | UserEdit::GridView { control, .. }
+                    | UserEdit::GridCell { control, .. }
+                    | UserEdit::GridEditing { control, .. }
                     | UserEdit::Tab { control, .. } => Some(*control),
                     _ => None,
                 };
+                // a DataGrid's ValidateEdit runs before the text is stored:
+                // its Cancel (set by the handler) refuses the edit
+                if let UserEdit::GridCell { control, row, col, .. } = &e {
+                    if s.validate_cell(form, *control, *row, *col) {
+                        // refused: the typed text is no longer pending
+                        s.h.borrow_mut().apply_edit(form, UserEdit::GridEditing { control: *control, text: None });
+                        continue;
+                    }
+                }
                 apply_edit(host, form, e);
+
                 // a user's edit can raise events (a scrollbar's Change):
                 // run their handlers now, as a key's are run
                 for ev in take_edit_raised(host) {

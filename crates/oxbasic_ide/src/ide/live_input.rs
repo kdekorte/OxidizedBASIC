@@ -252,6 +252,173 @@ impl FormRunner {
         ));
     }
 
+    /// Typing into a focused DataGrid edits its current cell: the first
+    /// character starts it over the cell's text. Enter and Tab keep the text,
+    /// Escape puts the old text back; a commit sends `GridCell` if it changed.
+    /// Returns whether the key was taken.
+    fn cell_key(&mut self, idx: usize, ks: &gpui::Keystroke) -> bool {
+        let c = self.form.controls[idx].clone();
+        if c.kind != ControlKind::DataGrid || !c.enabled {
+            return false;
+        }
+        let m = &ks.modifiers;
+        if m.control || m.platform || m.alt {
+            return false;
+        }
+        let key = ks.key.as_str();
+        // an edit is open: it takes the keys
+        if let Some((ci, edit)) = self.cell_edit.clone() {
+            if ci == idx {
+                return self.edit_cell_key(idx, edit, ks);
+            }
+        }
+        // no edit: a printable key starts one over the current cell
+        let typed = ks_text(ks);
+        if let Some(text) = typed.clone().filter(|t| !t.is_empty()) {
+            if let Some(mut edit) = oxbasic_ui::grid_edit::CellEdit::begin(
+                &c.grid,
+                c.grid.row,
+                c.grid.col,
+                true,
+            ) {
+                edit.insert(&text);
+                self.tell_editing(idx, &edit);
+                self.cell_edit = Some((idx, edit));
+                return true;
+            }
+        }
+        // F2 edits the text as it is, the caret at its end
+        if key == "f2" {
+            if let Some(edit) = oxbasic_ui::grid_edit::CellEdit::begin(
+                &c.grid,
+                c.grid.row,
+                c.grid.col,
+                false,
+            ) {
+                self.tell_editing(idx, &edit);
+                self.cell_edit = Some((idx, edit));
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The text being typed into the cell reaches the program now, so its
+    /// ValidateEdit reads it as the grid's Text.
+    fn tell_editing(&self, idx: usize, edit: &oxbasic_ui::grid_edit::CellEdit) {
+        self.tell(UserEdit::GridEditing { control: idx, text: Some(edit.text.clone()) });
+    }
+
+    /// One key into the open cell edit `edit` of control `idx`.
+    fn edit_cell_key(
+        &mut self,
+        idx: usize,
+        mut edit: oxbasic_ui::grid_edit::CellEdit,
+        ks: &gpui::Keystroke,
+    ) -> bool {
+        use oxbasic_ui::grid_edit::EditEnd;
+        let key = ks.key.as_str();
+        let end = match key {
+            "enter" | "tab" => Some(EditEnd::Commit),
+            "escape" => Some(EditEnd::Cancel),
+            _ => None,
+        };
+        if let Some(end) = end {
+            self.cell_edit = None;
+            let text = edit.result(end).to_string();
+            let (row, col) = (edit.row, edit.col);
+            let original = edit.original.clone();
+            if text != original {
+                self.tell(UserEdit::GridCell { control: idx, row, col, text });
+            }
+            return true;
+        }
+        match key {
+            "backspace" => {
+                edit.backspace();
+            }
+            "delete" => {
+                edit.delete();
+            }
+            "left" | "right" | "home" | "end" => {
+                edit.move_caret(key);
+            }
+            _ => {
+                if let Some(text) = ks_text(ks).filter(|t| !t.is_empty()) {
+                    edit.insert(&text);
+                }
+            }
+        }
+        self.tell_editing(idx, &edit);
+        self.cell_edit = Some((idx, edit));
+        true
+    }
+
+    /// A navigation key with a DataGrid focused moves its current cell (the
+    /// arrows, Tab, Enter, the paging keys), as `grid_edit::move_by_key`
+    /// says. Returns whether the key was taken.
+    fn grid_key(&mut self, idx: usize, ks: &gpui::Keystroke) -> bool {
+        let c = self.form.controls[idx].clone();
+        if c.kind != ControlKind::DataGrid || !c.enabled {
+            return false;
+        }
+        let m = &ks.modifiers;
+        if m.control || m.platform || m.alt {
+            return false;
+        }
+        let (w, h) = oxbasic_ui::grid_layout::inside(&c.rect);
+        let layout = oxbasic_ui::grid_layout::GridLayout::new(&c.grid, w, h);
+        // a page is the scrolling rows in view
+        let page = layout.rows.len().saturating_sub(c.grid.fixed_rows).max(1);
+        let key = ks.key.as_str();
+        let Some((row, col)) = oxbasic_ui::grid_edit::move_by_key(&c.grid, key, m.shift, page)
+        else {
+            return false;
+        };
+        if (row, col) != (c.grid.row, c.grid.col) {
+            self.tell(UserEdit::GridSelect { control: idx, row, col });
+        }
+        true
+    }
+
+    /// A left press on a DataGrid's cells makes that cell the current one:
+    /// the program is told (`LeaveCell`, `EnterCell`, `RowColChange`).
+    fn grid_press(&mut self, idx: usize, part: Part, ev: &MouseDownEvent) {
+        let c = self.form.controls[idx].clone();
+        if c.kind != ControlKind::DataGrid || part != Part::Body || !c.enabled {
+            return;
+        }
+        let (x, y) = self.local(Some(idx), ev.position);
+        let (w, h) = oxbasic_ui::grid_layout::inside(&c.rect);
+        let layout = oxbasic_ui::grid_layout::GridLayout::new(&c.grid, w, h);
+        // the cells sit inside the control's border, 1 pixel in
+        if let Some((row, col)) = layout.cell_at(x - 1.0, y - 1.0) {
+            self.tell(UserEdit::GridSelect { control: idx, row, col });
+        }
+    }
+
+    /// The scroll wheel over a DataGrid: its view moves up or down a row per
+    /// notch, the program is told (its `Scroll` follows if the view moved).
+    pub(super) fn grid_wheel(&self, target: usize, ev: &gpui::ScrollWheelEvent) {
+        let c = &self.form.controls[target];
+        if c.kind != ControlKind::DataGrid || !c.enabled {
+            return;
+        }
+        let dy = f32::from(ev.delta.pixel_delta(gpui::px(16.0)).y);
+        if dy == 0.0 {
+            return;
+        }
+        let (w, h) = oxbasic_ui::grid_layout::inside(&c.rect);
+        let max = oxbasic_ui::grid_layout::GridLayout::new(&c.grid, w, h).max_top_row;
+        let top = c.grid.top_row;
+        let to = if dy < 0.0 { (top + 1).min(max) } else { top.saturating_sub(1) };
+        self.tell(UserEdit::GridView {
+            control: target,
+            top_row: to,
+            left_col: c.grid.left_col,
+        });
+    }
+
     /// The scroll wheel over a list: its `Scroll` event.
     pub(super) fn scroll(&self, target: usize) {
         if matches!(
@@ -277,6 +444,11 @@ impl FormRunner {
         ks: &gpui::Keystroke,
         win: &mut Window,
     ) -> bool {
+        if let Some(idx) = target {
+            if self.cell_key(idx, ks) || self.grid_key(idx, ks) {
+                return true;
+            }
+        }
         let m = &ks.modifiers;
         if ks.key == "tab" && !m.control && !m.platform {
             let to = ev::tab_target(&self.focusable(), self.focused, m.shift);
@@ -573,8 +745,9 @@ fn run_part(
         },
     ))
     .on_scroll_wheel(cx.listener(
-        move |this: &mut FormRunner, _ev: &gpui::ScrollWheelEvent, _w, _cx| {
+        move |this: &mut FormRunner, ev: &gpui::ScrollWheelEvent, _w, _cx| {
             this.scroll(idx);
+            this.grid_wheel(idx, ev);
         },
     ))
 }
@@ -590,6 +763,7 @@ impl FormRunner {
         self.mouse_down(Some(idx), clicks, ev, win);
         if left {
             self.act_on_press(idx, part);
+            self.grid_press(idx, part, ev);
         }
         // a press on a scrollbar starts a drag from the value it has: each
         // move adds the pointer's travel, so the window's offset cancels

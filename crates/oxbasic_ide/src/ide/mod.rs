@@ -46,6 +46,7 @@ mod showcase_control_tests;
 mod showcase_flow_tests;
 #[cfg(test)]
 mod showcase_form_tests;
+#[cfg(test)]
 mod fileio_project_tests;
 #[cfg(test)]
 mod showcase_menu_tests;
@@ -365,6 +366,11 @@ pub struct Ide {
     drag: Option<DesignDrag>, // moving or resizing a control, with the last pointer position
     // property inspector buffers: (control idx or FORM_IDX, prop) -> live text
     prop_bufs: HashMap<(usize, &'static str), String>,
+    /// The caret and selection of each project package field (Version, Icon,
+    /// Bundle Id), keyed by the field's name.
+    prop_sel: HashMap<&'static str, text_field::Sel>,
+    /// The first character a project field shows (scrolled to keep the caret in view).
+    prop_scroll: HashMap<&'static str, usize>,
     /// one focus handle per inspector field, so keystrokes always edit the
     /// row that was clicked
     prop_focus: HashMap<(usize, &'static str), FocusHandle>,
@@ -505,6 +511,8 @@ Print \"Total = \" & CStr(Total)
             drag: None,
             prop_bufs: HashMap::new(),
             prop_focus: HashMap::new(),
+            prop_sel: HashMap::new(),
+            prop_scroll: HashMap::new(),
             rename_error: None,
             code_window: None,
             code_menu: None,
@@ -868,6 +876,8 @@ mod diagnostic_tests;
 mod fold_tests;
 #[cfg(test)]
 mod grid_draw_tests;
+#[cfg(test)]
+mod grid_input_tests;
 #[cfg(test)]
 mod event_tests;
 #[cfg(test)]
@@ -2072,7 +2082,6 @@ impl Ide {
                 .collect();
             let error_from = diag.as_ref().filter(|d| d.row == idx).map(|d| d.column);
             code = code.child(render_code_line(
-                &line,
                 &token_rows[idx],
                 selected,
                 caret,
@@ -2151,7 +2160,6 @@ const FIND_CURRENT_BG: u32 = 0xFFB020;
 /// (`(from, to)`; `to` is `None` when the selection runs on into the next
 /// line) tinted, and the caret drawn as a thin bar before column `caret`.
 fn render_code_line(
-    line: &str,
     tokens: &[(String, highlight::Tok)],
     selected: Option<(usize, Option<usize>)>,
     caret: Option<usize>,
@@ -2676,6 +2684,8 @@ struct FormRunner {
     /// Keys sent to the program whose answer hasn't come back: the window
     /// applies each when the program says whether, and what, it types.
     pending_keys: HashMap<u64, (usize, gpui::Keystroke)>,
+    /// The DataGrid cell being typed into, if any (its control and edit).
+    cell_edit: Option<(usize, oxbasic_ui::grid_edit::CellEdit)>,
     key_serial: u64,
     /// The window's last inner size, to raise `Form_Resize` when it changes.
     last_size: Option<(f32, f32)>,
@@ -2716,6 +2726,7 @@ impl FormRunner {
             pressed: None,
             focused: None,
             pending_keys: HashMap::new(),
+            cell_edit: None,
             key_serial: 0,
             last_size: None,
             active: false,
@@ -3536,8 +3547,98 @@ impl Ide {
         self.project_selected = false;
     }
 
+    /// A key in a project package field (Version, Icon, Bundle Id): a real
+    /// single-line edit with a caret, a selection, the clipboard (⌘A ⌘C ⌘X
+    /// ⌘V) and scrolling. Enter applies the value, Escape reverts it.
+    fn project_field_key(&mut self, key: &'static str, ev: &KeyDownEvent, cx: &mut Context<Self>) {
+        use text_field::{Move, Sel};
+        let ks = &ev.keystroke;
+        let m = &ks.modifiers;
+        let mut buf = self.prop_bufs.get(&(PROJECT_IDX, key)).cloned().unwrap_or_default();
+        let len = buf.chars().count();
+        let mut sel = self.prop_sel.get(key).copied().unwrap_or(Sel::at(len));
+        // the text may have changed since the selection was kept
+        sel = Sel { anchor: sel.anchor.min(len), caret: sel.caret.min(len) };
+        let cmd = m.platform || m.control;
+        match ks.key.as_str() {
+            "enter" => {
+                self.apply_prop(PROJECT_IDX, key, &buf);
+                self.prop_bufs.insert((PROJECT_IDX, key), buf);
+                self.prop_sel.remove(key);
+                return;
+            }
+            "escape" => {
+                let v = self.prop_value(PROJECT_IDX, key);
+                self.prop_bufs.insert((PROJECT_IDX, key), v);
+                self.prop_sel.remove(key);
+                return;
+            }
+            "left" | "right" | "home" | "end" if !cmd => {
+                let mv = match ks.key.as_str() {
+                    "left" => Move::Left,
+                    "right" => Move::Right,
+                    "home" => Move::Home,
+                    _ => Move::End,
+                };
+                sel = text_field::move_sel(&buf, sel, mv, m.shift);
+            }
+            "backspace" => sel = text_field::backspace_sel(&mut buf, sel),
+            "delete" => sel = text_field::delete_sel(&mut buf, sel),
+            "a" if cmd => sel = text_field::select_all(&buf),
+            "c" if cmd => {
+                let (a, b) = sel.range();
+                let s: String = buf.chars().skip(a).take(b - a).collect();
+                if !s.is_empty() {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(s));
+                }
+                return;
+            }
+            "x" if cmd => {
+                let (a, b) = sel.range();
+                let s: String = buf.chars().skip(a).take(b - a).collect();
+                if !s.is_empty() {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(s));
+                    sel = text_field::delete_selection(&mut buf, sel);
+                }
+            }
+            "v" if cmd => {
+                if let Some(paste) = cx.read_from_clipboard().and_then(|i| i.text()) {
+                    // a path or version is one line: line breaks are dropped
+                    let one_line: String = paste.chars().filter(|c| *c != '\r' && *c != '\n').collect();
+                    sel = text_field::insert_over(&mut buf, sel, &one_line);
+                }
+            }
+            _ => {
+                if cmd {
+                    return;
+                }
+                match typed_text(ev) {
+                    Some(s) => sel = text_field::insert_over(&mut buf, sel, &s),
+                    None => return,
+                }
+            }
+        }
+        self.prop_bufs.insert((PROJECT_IDX, key), buf.clone());
+        // the project takes the value as it is typed (Enter only confirms it)
+        self.apply_prop(PROJECT_IDX, key, &buf);
+        self.prop_sel.insert(key, sel);
+        // the field scrolls so the caret stays in view (about 30 characters show)
+        let scroll = self.prop_scroll.get(key).copied().unwrap_or(0);
+        let scroll = text_field::scrolled_to_caret(scroll, sel.caret, 30);
+        self.prop_scroll.insert(key, scroll);
+    }
+
+
+
     /// One keystroke into inspector field `key` of `idx`.
-    fn prop_key(&mut self, idx: usize, key: &'static str, ev: &KeyDownEvent, win: &mut Window) {
+    fn prop_key(&mut self, idx: usize, key: &'static str, ev: &KeyDownEvent, win: &mut Window, cx: &mut Context<Self>) {
+        // the project's package fields have their own editor (caret, selection,
+        // clipboard, scrolling); the form's and control's rows keep theirs
+        if idx == PROJECT_IDX {
+            self.project_field_key(key, ev, cx);
+            return;
+        }
+
         let ks = &ev.keystroke;
         if ks.modifiers.platform || ks.modifiers.control {
             return;
@@ -3582,6 +3683,34 @@ impl Ide {
             self.apply_prop(idx, key, &val);
         }
     }
+
+    /// The Icon's ▸ button: the native file picker, and the file chosen becomes
+    /// the project's icon (applied at once, as Enter would).
+    fn choose_icon(&mut self, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            let chosen = match rx.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            if let Some(path) = chosen {
+                let _ = this.update(cx, |ide, cx| {
+                    let v = path.to_string_lossy().to_string();
+                    ide.prop_bufs.insert((PROJECT_IDX, "icon"), v.clone());
+                    ide.apply_prop(PROJECT_IDX, "icon", &v);
+                    ide.prop_sel.remove("icon");
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
 
     fn prop_row(
         &mut self,
@@ -3644,12 +3773,19 @@ impl Ide {
             )
             .on_key_down(
                 cx.listener(move |this: &mut Ide, ev: &KeyDownEvent, win, cx| {
-                    this.prop_key(idx, key, ev, win);
+                    this.prop_key(idx, key, ev, win, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
             )
-            .child(SharedString::from(text));
+            .child(SharedString::from(if idx == PROJECT_IDX {
+                // a package field shows the text from its scroll on, so the
+                // caret and the end of a long path stay in view
+                let scroll = self.prop_scroll.get(key).copied().unwrap_or(0);
+                text.chars().skip(scroll).collect::<String>()
+            } else {
+                text.clone()
+            }));
         if key == "name" {
             field = field.font_weight(gpui::FontWeight::SEMIBOLD);
         }
@@ -3805,7 +3941,34 @@ impl Ide {
                 ("icon", "Icon"),
                 ("bundleid", "Bundle Id"),
             ] {
-                list = list.child(self.prop_row(PROJECT_IDX, key, label, win, cx));
+                let row = self.prop_row(PROJECT_IDX, key, label, win, cx);
+                if key == "icon" {
+                    // the Icon's file picker, beside the field
+                    let pick = div()
+                        .id("project-icon-pick")
+                        .debug_selector(|| "project-icon-pick".into())
+                        .flex_none()
+                        .px_2()
+                        .h_6()
+                        .flex()
+                        .items_center()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .bg(rgb(BG))
+                        .cursor_pointer()
+                        .child("…")
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(|this: &mut Ide, _ev: &MouseDownEvent, _win, cx| {
+                                cx.stop_propagation();
+                                this.choose_icon(cx);
+                            }),
+                        );
+                    list = list.child(div().flex().items_center().gap_1().child(row).child(pick));
+                } else {
+                    list = list.child(row);
+                }
             }
             return div()
                 .flex_1()

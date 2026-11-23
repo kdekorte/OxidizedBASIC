@@ -93,7 +93,11 @@ pub fn paint_grid(base: Stateful<Div>, c: &ControlSpec, look: &ControlLook) -> S
             let fixed = g.is_fixed(r, col);
             // the header of the current row and column is tinted
             let tint = fixed && (r == g.row || col == g.col) && !(r < g.fixed_rows && col < g.fixed_cols);
-            let text = g.cell(r, col).unwrap_or("");
+            // the current cell shows the text being typed, as the user types it
+            let text = match (&g.pending_text, r == g.row && col == g.col) {
+                (Some(p), true) => p.as_str(),
+                _ => g.cell(r, col).unwrap_or(""),
+            };
             let mut el = cell(text, (x, y, cw, rh), fixed, tint)
                 .debug_selector(|| format!("{}-cell-{}-{}", c.name, r, col));
             if !fixed && r == g.row && col == g.col {
