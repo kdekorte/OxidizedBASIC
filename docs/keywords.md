@@ -148,8 +148,8 @@ Dialogs and the interface: `MsgBox`, `InputBox`, `OpenFileDialog`,
 | `EOF` | `EOF(n)` | True once the last line of file `n` has been read. |
 | `Open … For Random` | `Open path For Random As #n [Len = size]` | Fixed-length records, `size` bytes each (default 128). |
 | `Open … For Binary` | `Open path For Binary As #n` | Raw bytes, read and written at a position. |
-| `Get` | `Get #n, [recnum], var` | Reads a record (random) or `var`-sized bytes at the position (binary). |
-| `Put` | `Put #n, [recnum], value` | Writes a record, padded to the record length. |
+| `Get` | `Get #n, [recnum], var` | Reads a record (random) into `var`, decoding each field from VB's binary layout. |
+| `Put` | `Put #n, [recnum], value` | Writes a record in VB's binary layout, padded to the record length. |
 | `Seek` | `Seek #n, pos` | Moves to a 1-based position: a record number (random), a byte (binary). |
 | `Loc` | `Loc(n)` | Random: the last record number. Binary: the next byte position. |
 | `Lof` | `Lof(n)` | The file's length in bytes. |
@@ -159,9 +159,14 @@ IDE). Errors: 52 bad file number, 53 file not found, 54 wrong use for the file's
 mode, 55 file already open, 62 input past the end of the file, 63 bad record
 number.
 
-Records and bytes are stored as text, padded to the record length. This is not
-VB's binary layout: a file written here is not byte-compatible with one written
-by VB, and `Get` returns text, so numbers come back as strings.
+Records use VB's binary layout. A `Type` is its fields in order with no padding,
+each in its VB form: `Integer` 2 bytes, `Long` 4, `Single` 4, `Double` 8,
+`Currency` 8 (scaled by 10,000), `Date` 8, `Boolean` 2 (`-1` or `0`), a
+`String * n` field exactly `n` bytes space-padded, and a dynamic `String`
+length-prefixed. A nested `Type` is laid out field by field. The record is then
+padded to the `Len =` length. `Get` decodes the bytes back into the variable,
+with each field's own type. Layouts were checked against the byte sequences VB
+documents; a file written by real VB is not yet compared.
 
 
 - `Property Get`, `Property Let` and `Property Set`. A procedure written with

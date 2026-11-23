@@ -30,6 +30,8 @@ pub enum OpenFile {
         path: String,
         file: std::fs::File,
         record_len: usize,
+        /// `true` for `For Binary`: values are written unpadded.
+        binary: bool,
         /// Byte offset of the next `Get`/`Put` in a binary file (set by `Seek`).
         pos: u64,
     },
@@ -165,6 +167,7 @@ impl FileTable {
                     path: path.to_string(),
                     file,
                     record_len: record_len.unwrap_or(128).max(1) as usize,
+                    binary: mode == oxbasic_ast::FileMode::Binary,
                     pos: 0,
                 }
             }
@@ -258,12 +261,16 @@ impl FileTable {
     /// `n` is not open for direct access.
     pub fn seek(&mut self, n: i64, pos: i64) -> ExecResult<()> {
         match self.files.get_mut(&n) {
-            Some(OpenFile::Direct { pos: p, record_len, .. }) => {
+            Some(OpenFile::Direct { pos: p, record_len, binary, .. }) => {
                 if pos < 1 {
                     return err(63, "Bad record number");
                 }
                 // a random file's position is a record number; a binary one is a byte
-                *p = (pos as u64 - 1) * (*record_len as u64);
+                *p = if *binary {
+                    pos as u64 - 1
+                } else {
+                    (pos as u64 - 1) * (*record_len as u64)
+                };
                 Ok(())
             }
             Some(_) => err(54, "Bad file mode"),
@@ -304,7 +311,7 @@ impl FileTable {
     /// `Get #n, [recnum], target`: reads `record_len` bytes at `recnum` (a
     /// random file) or at the current position (binary), and returns them.
     /// `recnum` is 1-based. Error 62 past the end of the file.
-    pub fn get_record(&mut self, n: i64, recnum: Option<i64>) -> ExecResult<Vec<u8>> {
+    pub fn get_record(&mut self, n: i64, recnum: Option<i64>, size: Option<usize>) -> ExecResult<Vec<u8>> {
         use std::io::{Read, Seek as _, SeekFrom};
         match self.files.get_mut(&n) {
             Some(OpenFile::Direct { file, record_len, pos, .. }) => {
@@ -314,8 +321,11 @@ impl FileTable {
                     }
                     *pos = (r as u64 - 1) * (*record_len as u64);
                 }
+                // a random file reads a whole record; a binary `Get` reads the
+                // bytes of the variable it fills
+                let want = size.unwrap_or(*record_len);
                 file.seek(SeekFrom::Start(*pos)).map_err(|e| io_error("", e))?;
-                let mut buf = vec![0u8; *record_len];
+                let mut buf = vec![0u8; want];
                 let mut got = 0;
                 while got < buf.len() {
                     match file.read(&mut buf[got..]) {
@@ -327,12 +337,11 @@ impl FileTable {
                 if got == 0 {
                     return err(62, "Input past end of file");
                 }
-                // a short record is padded with spaces, as VB pads it
-                buf.truncate(*record_len);
+                // a short read is padded with spaces, as VB pads it
                 for b in buf.iter_mut().skip(got) {
                     *b = b' ';
                 }
-                *pos += *record_len as u64;
+                *pos += want as u64;
                 Ok(buf)
             }
             Some(_) => err(54, "Bad file mode"),
@@ -345,19 +354,26 @@ impl FileTable {
     pub fn put_record(&mut self, n: i64, recnum: Option<i64>, bytes: &[u8]) -> ExecResult<()> {
         use std::io::{Seek as _, SeekFrom, Write};
         match self.files.get_mut(&n) {
-            Some(OpenFile::Direct { file, record_len, pos, .. }) => {
+            Some(OpenFile::Direct { file, record_len, pos, binary, .. }) => {
                 if let Some(r) = recnum {
                     if r < 1 {
                         return err(63, "Bad record number");
                     }
                     *pos = (r as u64 - 1) * (*record_len as u64);
                 }
-                let mut out = vec![b' '; *record_len];
-                let k = bytes.len().min(*record_len);
-                out[..k].copy_from_slice(&bytes[..k]);
+                // a random file writes one padded record; a binary file writes
+                // exactly the bytes of the value and moves past them
+                let out: Vec<u8> = if *binary {
+                    bytes.to_vec()
+                } else {
+                    let mut out = vec![b' '; *record_len];
+                    let k = bytes.len().min(*record_len);
+                    out[..k].copy_from_slice(&bytes[..k]);
+                    out
+                };
                 file.seek(SeekFrom::Start(*pos)).map_err(|e| io_error("", e))?;
                 file.write_all(&out).map_err(|e| io_error("", e))?;
-                *pos += *record_len as u64;
+                *pos += out.len() as u64;
                 Ok(())
             }
             Some(_) => err(54, "Bad file mode"),

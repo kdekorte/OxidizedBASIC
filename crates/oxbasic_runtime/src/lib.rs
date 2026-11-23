@@ -1001,6 +1001,58 @@ impl<'out> Interpreter<'out> {
 
     /// The starting value of a variable declared `As ty`: a record for a
     /// user-defined `Type`, else the scalar default for the built-in type.
+    /// The VB binary bytes of a user `Type` value, its fields in order. A
+    /// field that is itself a user `Type` is laid out the same way, recursively.
+    fn record_bytes(&self, r: &Record) -> ExecResult<Vec<u8>> {
+        let Some(fields) = self.user_types.get(&r.ty.to_lowercase()) else {
+            return err(5, "Invalid procedure call");
+        };
+        let mut out = Vec::new();
+        for fd in fields {
+            let Some((_, v)) = r.fields.iter().find(|(n, _)| n.eq_ignore_ascii_case(&fd.name)) else {
+                return err(9, "record field missing");
+            };
+            let ty_name = fd.ty.clone().unwrap_or_default();
+            match v {
+                Variant::Record(inner) if self.user_types.contains_key(&inner.ty.to_lowercase()) => {
+                    out.extend(self.record_bytes(inner)?);
+                }
+                _ => {
+                    let Some(ty) = crate::vbtypes::file_type_of(&ty_name) else {
+                        return err(5, "Type of a record field is not supported in a file");
+                    };
+                    out.extend(encode_value(&ty, v)?);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Decode a user `Type` value of `ty_name`'s layout from `bytes` at `*at`,
+    /// keeping the record's own type. Nested `Type` fields decode recursively.
+    fn record_from_bytes(&self, ty_name: &str, bytes: &[u8], at: &mut usize) -> ExecResult<Record> {
+        let Some(fields) = self.user_types.get(&ty_name.to_lowercase()) else {
+            return err(5, "Invalid procedure call");
+        };
+        let mut out = Vec::with_capacity(fields.len());
+        for fd in fields {
+            let ty_name_field = fd.ty.clone().unwrap_or_default();
+            let v = if self.user_types.contains_key(&ty_name_field.to_lowercase()) {
+                Variant::Record(self.record_from_bytes(&ty_name_field, bytes, at)?)
+            } else {
+                let Some(ty) = crate::vbtypes::file_type_of(&ty_name_field) else {
+                    return err(5, "Type of a record field is not supported in a file");
+                };
+                decode_value(&ty, bytes, at)?
+            };
+            out.push((fd.name.clone(), v));
+        }
+        Ok(Record {
+            ty: ty_name.to_string(),
+            fields: out,
+        })
+    }
+
     fn default_value(&self, ty: Option<&str>) -> ExecResult<Variant> {
         let Some(t) = ty else {
             return Ok(Variant::Empty);
@@ -1699,31 +1751,35 @@ impl<'out> Interpreter<'out> {
                     Some(e) => Some(to_i64(&self.eval(e, f)?)?),
                     None => None,
                 };
-                let bytes = self.files.get_record(n, recnum)?;
                 let current = self.eval(target, f)?;
+                // a binary Get reads the bytes the variable takes; a random one
+                // reads a whole record
+                let size = match &current {
+                    Variant::Record(r) => Some(self.record_bytes(r)?.len()),
+                    Variant::String(s) => match target {
+                        // a fixed-length string reads its declared size
+                        Expr::Var(name) => match self.declared_type(f, name).as_deref().and_then(crate::vbtypes::file_type_of) {
+                            Some(FileType::FixedString(n)) => Some(n),
+                            _ => Some(s.len()),
+                        },
+                        _ => Some(s.len()),
+                    },
+                    Variant::Integer(_) => Some(2),
+                    Variant::Long(_) | Variant::Single(_) => Some(4),
+                    Variant::Double(_) | Variant::Currency(_) | Variant::Date(_) => Some(8),
+                    Variant::Boolean(_) => Some(2),
+                    _ => None,
+                };
+                let bytes = self.files.get_record(n, recnum, size)?;
                 let value = match current {
                     // a user Type: decode each field in order into the record
                     Variant::Record(r) => {
-                        let Some(fields) = self.user_types.get(&r.ty.to_lowercase()) else {
-                            return err(5, "Invalid procedure call");
-                        };
-                        let fields: Vec<(String, String)> = fields
-                            .iter()
-                            .map(|fd| (fd.name.clone(), fd.ty.clone().unwrap_or_default()))
-                            .collect();
                         let mut at = 0usize;
-                        let mut out = Vec::with_capacity(fields.len());
-                        for (name, ty_name) in &fields {
-                            let Some(ty) = crate::vbtypes::file_type_of(ty_name) else {
-                                return err(5, "Type of a record field is not supported in a file yet");
-                            };
-                            out.push((name.clone(), decode_value(&ty, &bytes, &mut at)?));
-                        }
-                        Variant::Record(crate::Record { ty: r.ty, fields: out })
+                        Variant::Record(self.record_from_bytes(&r.ty, &bytes, &mut at)?)
                     }
                     // a scalar: decoded as the variable's own type
                     other => {
-                        let ty = match other {
+                        let ty = match &other {
                             Variant::Integer(_) => FileType::Integer,
                             Variant::Long(_) => FileType::Long,
                             Variant::Single(_) => FileType::Single,
@@ -1731,6 +1787,13 @@ impl<'out> Interpreter<'out> {
                             Variant::Currency(_) => FileType::Currency,
                             Variant::Date(_) => FileType::Date,
                             Variant::Boolean(_) => FileType::Boolean,
+                            // a fixed-length string is its declared size, not length-prefixed
+                            Variant::String(_) => match size {
+                                Some(n) if matches!(target, Expr::Var(nm) if matches!(self.declared_type(f, nm).as_deref().and_then(crate::vbtypes::file_type_of), Some(FileType::FixedString(_)))) => {
+                                    FileType::FixedString(n)
+                                }
+                                _ => FileType::String,
+                            },
                             _ => FileType::String,
                         };
                         let mut at = 0usize;
@@ -1752,17 +1815,9 @@ impl<'out> Interpreter<'out> {
                 };
                 let bytes = match self.eval(value, f)? {
                     // a user Type: its fields in order, in VB's layout
-                    Variant::Record(r) => {
-                        let Some(fields) = self.user_types.get(&r.ty.to_lowercase()) else {
-                            return err(5, "Invalid procedure call");
-                        };
-                        let decl: Vec<(String, String)> = fields
-                            .iter()
-                            .map(|fd| (fd.name.clone(), fd.ty.clone().unwrap_or_default()))
-                            .collect();
-                        crate::vbtypes::encode_record(&decl, &r.fields)?
-                    }
-                    // a scalar: its own VB type
+                    Variant::Record(r) => self.record_bytes(&r)?,
+                    // a scalar: its own VB type; a fixed-length string variable
+                    // writes its declared size, with no length prefix
                     other => {
                         let ty = match &other {
                             Variant::Integer(_) => FileType::Integer,
@@ -1772,6 +1827,13 @@ impl<'out> Interpreter<'out> {
                             Variant::Currency(_) => FileType::Currency,
                             Variant::Date(_) => FileType::Date,
                             Variant::Boolean(_) => FileType::Boolean,
+                            Variant::String(_) => match value {
+                                Expr::Var(nm) => match self.declared_type(f, nm).as_deref().and_then(crate::vbtypes::file_type_of) {
+                                    Some(FileType::FixedString(n)) => FileType::FixedString(n),
+                                    _ => FileType::String,
+                                },
+                                _ => FileType::String,
+                            },
                             _ => FileType::String,
                         };
                         encode_value(&ty, &other)?
