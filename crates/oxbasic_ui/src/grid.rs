@@ -31,6 +31,12 @@ pub struct GridSpec {
     /// `ColWidth(c)` and `RowHeight(r)`, in pixels.
     pub col_widths: Vec<f32>,
     pub row_heights: Vec<f32>,
+    /// `TopRow` and `LeftCol`: the first scrolling row and column in view
+    /// (the fixed ones always show).
+    pub top_row: usize,
+    pub left_col: usize,
+    /// `ScrollBars`: 0 none, 1 horizontal, 2 vertical, 3 both.
+    pub scroll_bars: u8,
 }
 
 impl Default for GridSpec {
@@ -54,6 +60,9 @@ impl GridSpec {
             cells: Vec::new(),
             col_widths: Vec::new(),
             row_heights: Vec::new(),
+            top_row: 0,
+            left_col: 0,
+            scroll_bars: 3,
         };
         g.resize(rows, cols);
         g.row = g.fixed_rows.min(g.rows.saturating_sub(1));
@@ -76,6 +85,15 @@ impl GridSpec {
         self.fixed_cols = self.fixed_cols.min(cols);
         self.row = self.row.min(rows.saturating_sub(1));
         self.col = self.col.min(cols.saturating_sub(1));
+        self.clamp_view();
+    }
+
+    /// Pull `TopRow` and `LeftCol` back to a scrolling row and column.
+    pub fn clamp_view(&mut self) {
+        let last_row = self.rows.saturating_sub(1).max(self.fixed_rows);
+        let last_col = self.cols.saturating_sub(1).max(self.fixed_cols);
+        self.top_row = self.top_row.max(self.fixed_rows).min(last_row);
+        self.left_col = self.left_col.max(self.fixed_cols).min(last_col);
     }
 
     /// Whether `(r, c)` is a cell of the grid.
@@ -140,6 +158,7 @@ impl GridSpec {
         self.row_heights.remove(r);
         self.rows -= 1;
         self.row = self.row.min(self.rows.saturating_sub(1));
+        self.clamp_view();
         true
     }
 
@@ -158,6 +177,7 @@ impl GridSpec {
             return false;
         }
         self.fixed_rows = n;
+        self.clamp_view();
         true
     }
 
@@ -167,6 +187,7 @@ impl GridSpec {
             return false;
         }
         self.fixed_cols = n;
+        self.clamp_view();
         true
     }
 

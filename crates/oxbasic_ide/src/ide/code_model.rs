@@ -451,6 +451,14 @@ const PICTURE_MEMBERS: &[&str] = &[
     "picture", "autosize", "currentx", "currenty", "cls", "line", "pset", "circle", "setfocus",
 ];
 
+/// The members of a DataGrid: what the runtime handles (`host_grid.rs`) and
+/// the MSFlexGrid names the grid is meant to grow into.
+const GRID_MEMBERS: &[&str] = &[
+    "rows", "cols", "fixedrows", "fixedcols", "editable", "row", "col", "toprow", "leftcol",
+    "scrollbars", "textmatrix", "colwidth", "rowheight", "additem", "removeitem", "clear",
+    "setfocus",
+];
+
 /// The member names a control of kind `kind` (its type name, as the Properties
 /// window shows it) can be asked for, beyond the common ones. `None` when the
 /// kind's table is not written down yet: such a control is not checked.
@@ -459,6 +467,7 @@ fn kind_members(kind: &str) -> Option<&'static [&'static str]> {
         "listbox" => Some(LIST_MEMBERS),
         "combobox" => Some(COMBO_MEMBERS),
         "picturebox" => Some(PICTURE_MEMBERS),
+        "datagrid" => Some(GRID_MEMBERS),
         _ => None,
     }
 }
@@ -835,6 +844,18 @@ mod tests {
     fn a_real_method_and_a_common_property_are_not_flagged() {
         let l = lines("Sub Main()\n  lstFruit.RemoveItem 2\n  lstFruit.Caption = \"x\"\n  lstFruit.Clear\nEnd Sub");
         assert_eq!(unknown_member(&l, &kinds(&[("lstFruit", "ListBox")])), None);
+    }
+
+    #[test]
+    fn a_misspelled_grid_method_is_flagged_and_a_real_one_is_not() {
+        let k = kinds(&[("Grid1", "DataGrid")]);
+        let l = lines("Sub Main()\n  Grid1.AddIten \"a\"\nEnd Sub");
+        let d = unknown_member(&l, &k).expect("a typo");
+        assert!(d.message.contains("Grid1.AddIten"), "{}", d.message);
+        let ok = lines(
+            "Sub Main()\n  Grid1.AddItem \"a\"\n  Grid1.RemoveItem 1\n  Grid1.Clear\nEnd Sub",
+        );
+        assert_eq!(unknown_member(&ok, &k), None);
     }
 
     #[test]

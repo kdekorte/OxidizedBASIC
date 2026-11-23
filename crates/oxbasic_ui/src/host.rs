@@ -771,6 +771,12 @@ impl FormHost {
 }
 impl FormHost {
     fn get_control(&self, i: usize, p: &str, args: &[Variant]) -> ExecResult<Variant> {
+        if self.form.controls[i].kind == ControlKind::DataGrid {
+            match self.get_grid(i, p, args) {
+                Err(e) if e.number == 438 => {}
+                other => return other,
+            }
+        }
         let c = &self.form.controls[i];
         let s = &self.state[i];
         let is_list = matches!(
@@ -990,6 +996,12 @@ impl FormHost {
         value: &Variant,
     ) -> ExecResult<()> {
         let kind = self.form.controls[i].kind;
+        if kind == ControlKind::DataGrid {
+            match self.set_grid(i, p, args, value) {
+                Err(e) if e.number == 438 => {}
+                other => return other,
+            }
+        }
         let is_list = matches!(
             kind,
             ControlKind::ListBox
@@ -1549,6 +1561,7 @@ impl ObjectHost for FormHost {
             if matches!(
                 m.as_str(),
                 "list" | "listcount" | "listindex" | "text" | "selected"
+                    | "textmatrix" | "colwidth" | "rowheight"
             ) {
                 return self.get_control(i, &m, args);
             }
@@ -1568,6 +1581,17 @@ impl ObjectHost for FormHost {
                 }
                 _ => unsupported(),
             };
+        }
+        // a DataGrid's methods
+        if let Target::Control(i) = target {
+            if self.form.controls[i].kind == ControlKind::DataGrid {
+                let result = self.call_grid(i, &m, args);
+                if result.is_ok() {
+                    self.changed = true;
+                    self.touched[i] = true;
+                }
+                return result;
+            }
         }
         // the remaining methods are the list controls'
         let i = match target {

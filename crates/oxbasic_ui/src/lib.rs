@@ -22,6 +22,8 @@ mod form;
 pub mod grid;
 #[cfg(test)]
 mod grid_tests;
+#[cfg(test)]
+mod grid_host_tests;
 pub mod menu;
 #[cfg(feature = "gpui")]
 pub mod menu_bar;
@@ -52,6 +54,7 @@ pub mod canvas;
 pub mod events;
 pub mod host;
 mod host_controls;
+mod host_grid;
 mod host_draw;
 #[cfg(target_os = "macos")]
 extern crate objc;

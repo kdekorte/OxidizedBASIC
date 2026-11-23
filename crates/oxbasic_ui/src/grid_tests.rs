@@ -142,3 +142,18 @@ fn a_datagrid_control_carries_its_grid_through_oxform_json() {
     let b = ControlSpec::new("B", ControlKind::CommandButton, Rect::new(0.0, 0.0, 9.0, 9.0));
     assert!(!serde_json::to_string(&b).unwrap().contains("grid"));
 }
+
+
+#[test]
+fn the_view_starts_below_the_headers_and_stays_on_a_scrolling_row() {
+    let mut g = GridSpec::default();
+    assert_eq!((g.top_row, g.left_col, g.scroll_bars), (1, 1, 3));
+    g.top_row = 0;
+    g.clamp_view();
+    assert_eq!((g.top_row, g.left_col), (1, 1), "a fixed row can't be the top row");
+    g.top_row = 4;
+    g.remove_item(4);
+    assert_eq!(g.top_row, 3, "removing rows pulls the view back inside");
+    g.resize(2, 2);
+    assert_eq!((g.top_row, g.left_col), (1, 1));
+}
