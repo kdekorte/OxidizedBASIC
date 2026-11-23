@@ -9,8 +9,10 @@ mod fastmap;
 mod files;
 use files::Field;
 mod stdlib;
+mod vbbinary;
 
 pub use stdlib::{is_builtin, pattern_matches};
+pub use vbbinary::{decode_value, encode_value, FileType};
 
 use fastmap::{Lowered, NameMap};
 use oxbasic_ast::*;
