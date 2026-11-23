@@ -1,0 +1,20 @@
+{
+  "name": "fileio",
+  "startup": "frmRecords",
+  "forms": [
+    {
+      "name": "frmRecords",
+      "layout": "frmRecords.oxform",
+      "code": "frmRecords.bas"
+    }
+  ],
+  "modules": [
+    {
+      "name": "Module1",
+      "code": "Module1.bas"
+    }
+  ],
+  "version": "1.0.0",
+  "icon": "",
+  "bundleId": ""
+}

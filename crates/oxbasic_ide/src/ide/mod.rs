@@ -46,6 +46,7 @@ mod showcase_control_tests;
 mod showcase_flow_tests;
 #[cfg(test)]
 mod showcase_form_tests;
+mod fileio_project_tests;
 #[cfg(test)]
 mod showcase_menu_tests;
 #[cfg(test)]
