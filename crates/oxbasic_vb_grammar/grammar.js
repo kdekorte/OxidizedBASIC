@@ -68,6 +68,7 @@ module.exports = grammar({
 
     _statement: ($) =>
       choice(
+        $.block_word,
         $.procedure_definition,
         $.declaration,
         $.if_statement,
@@ -103,8 +104,9 @@ module.exports = grammar({
       ),
 
 
-    // a command: a name (or member) followed by arguments with no parentheses.
-    // An argument may be a parenthesised group, as in PSet (x, y), colour.
+    // A command: a name (or member) with arguments and no parentheses. A block
+    // keyword is not a command name, so a bare `Else` or `End` on its own line
+    // stays the keyword.
     command_statement: ($) =>
       prec.left(
         seq(
@@ -112,6 +114,12 @@ module.exports = grammar({
           optional(commaSep1(choice($.argument_group, $.expression))),
         ),
       ),
+
+    // `Else` on a line of its own: the continuation word of an `If` block,
+    // kept as a keyword rather than read as a call to a sub named Else. The
+    // other block words (`Next`, `Loop`, `Wend`, `End`, `Case`) are consumed by
+    // their own blocks, so they are not standalone statements here.
+    block_word: ($) => prec(5, kw('Else')),
 
     argument_group: ($) => prec(3, seq('(', commaSep1($.expression), ')')),
 

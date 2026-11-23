@@ -348,4 +348,20 @@ mod grammar_used_tests {
         assert!(grammar_tokens("End Sub").is_none());
         assert!(grammar_tokens("Sub Form_Load()").is_none());
     }
+
+    #[test]
+    fn a_bare_else_line_is_a_keyword_not_a_command() {
+        // the `Else` of a block If, on its own line, is coloured as a keyword
+        let toks = tokenize_line("    Else");
+        let kw: Vec<&str> = toks
+            .iter()
+            .filter(|(_, k)| *k == Tok::Keyword)
+            .map(|(t, _)| t.as_str())
+            .collect();
+        assert!(kw.iter().any(|t| t.eq_ignore_ascii_case("Else")), "{:?}", toks);
+        assert!(toks
+            .iter()
+            .all(|(t, k)| !(t.eq_ignore_ascii_case("Else") && *k == Tok::Ident)));
+    }
+
 }

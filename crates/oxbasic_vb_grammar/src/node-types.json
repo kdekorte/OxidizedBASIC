@@ -192,6 +192,11 @@
     }
   },
   {
+    "type": "block_word",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "builtin_type",
     "named": true,
     "fields": {}
@@ -251,6 +256,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_word",
           "named": true
         },
         {
@@ -499,6 +508,10 @@
           "named": true
         },
         {
+          "type": "block_word",
+          "named": true
+        },
+        {
           "type": "call_or_index",
           "named": true
         },
@@ -634,6 +647,10 @@
           "named": true
         },
         {
+          "type": "block_word",
+          "named": true
+        },
+        {
           "type": "call_or_index",
           "named": true
         },
@@ -762,6 +779,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_word",
           "named": true
         },
         {
@@ -1033,6 +1054,10 @@
           "named": true
         },
         {
+          "type": "block_word",
+          "named": true
+        },
+        {
           "type": "call_or_index",
           "named": true
         },
@@ -1218,6 +1243,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_word",
           "named": true
         },
         {
@@ -1595,6 +1624,10 @@
           "named": true
         },
         {
+          "type": "block_word",
+          "named": true
+        },
+        {
           "type": "call_or_index",
           "named": true
         },
@@ -1829,6 +1862,10 @@
           "named": true
         },
         {
+          "type": "block_word",
+          "named": true
+        },
+        {
           "type": "call_or_index",
           "named": true
         },
@@ -2037,6 +2074,10 @@
           "named": true
         },
         {
+          "type": "block_word",
+          "named": true
+        },
+        {
           "type": "call_or_index",
           "named": true
         },
@@ -2185,6 +2226,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_word",
           "named": true
         },
         {

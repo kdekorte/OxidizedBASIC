@@ -119,6 +119,10 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "block_word"
+        },
+        {
+          "type": "SYMBOL",
           "name": "procedure_definition"
         },
         {
@@ -314,6 +318,19 @@
             ]
           }
         ]
+      }
+    },
+    "block_word": {
+      "type": "PREC",
+      "value": 5,
+      "content": {
+        "type": "ALIAS",
+        "content": {
+          "type": "PATTERN",
+          "value": "[eE][lL][sS][eE]"
+        },
+        "named": false,
+        "value": "Else"
       }
     },
     "argument_group": {
