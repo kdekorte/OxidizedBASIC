@@ -139,7 +139,7 @@ becomes active.
 The OxidizedBASIC IDE is a native GPUI application providing sub-millisecond editor responsiveness:
 
 1. **Form Canvas (Visual Designer):** Drag-and-drop form layout canvas using absolute positioning or flexbox bounds. Visual handles allow resizing controls, outputting `.oxform` JSON layout specifications.
-2. **Code Editor:** Utilizes Tree-sitter for instant syntax highlighting, diagnostics, and code folding backed by a fast Rope data structure.
+2. **Code Editor:** Utilizes Tree-sitter for syntax highlighting, syntax diagnostics (a red underline on the first line the parser cannot read), and code folding for blocks. The editor keeps its text as lines (`Vec<String>`), not a rope: a rope was benchmarked and was faster for edits, but the gain did not justify rewriting the editing core for typical module sizes.
 3. **Property Inspector:** Reactive side panel rendering active widget properties (Colors, Dimensions, Captions, Events).
 4. **Immediate Window / REPL:** Interactive execution window connected directly to the `oxbasic_runtime` environment context.
 5. **Menu Editor:** Properties → Menu Editor… edits a form's `menus` list (New, Delete, Indent, Outdent, Apply, and shortcuts from modifier toggles and a key box). Closing the window keeps the menu.
@@ -168,7 +168,7 @@ The OxidizedBASIC IDE is a native GPUI application providing sub-millisecond edi
 - Build the visual Form Designer in GPUI Kit. (Done: drag, resize handles, toolbox, Property Inspector.)
 - Integrate Tree-sitter syntax highlighting editor and Property Inspector. (Done for highlighting: the `oxbasic_vb_grammar` crate parses each line; a line that cannot parse alone falls back to a hand-written tokenizer. Not done: whole-document parsing so block headers and footers are coloured by the grammar.)
 - Implement debug controls (Breakpoints, Step-over, Variable Watch). (Done. Step-into is not implemented.)
-- Open items: editor diagnostics (error underlines) are not implemented. The editor stores lines in a `Vec<String>`, not a rope, by decision: a rope was benchmarked on a 20,000-line module and was about 5x faster for edits (2.1ms against 11.0ms for 4,000 edits), but a typical BASIC module is a few hundred lines where both are instant, and the editing core (caret, selection, undo) would have to be rewritten to gain it. Code folding is done for blocks (Sub, Function, loops, If, Select, With, Type, Enum).
+- Editor diagnostics are done: a line the parser cannot read is underlined, and its message shows in the status line with the caret on it (`parse_diagnostic` in the parser's `check`). Only the first error is marked. The editor stores lines in a `Vec<String>`, not a rope, by decision: a rope was benchmarked on a 20,000-line module and was about 5x faster for edits (2.1ms against 11.0ms for 4,000 edits), but a typical BASIC module is a few hundred lines where both are instant, and the editing core (caret, selection, undo) would have to be rewritten to gain it. Code folding is done for blocks (Sub, Function, loops, If, Select, With, Type, Enum).
 
 ### Phase 4: JIT Codegen & Packaging (Months 10–12)
 - Integrate Cranelift JIT backend for compiling BASIC routines directly to native assembly.

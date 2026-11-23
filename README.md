@@ -4,7 +4,8 @@ An open-source, ultra-fast, memory-safe classic BASIC programming suite
 written entirely in Rust, per `oxidizedbasic_technical_specification.md`.
 Full syntax and semantic compatibility with Visual Basic 6.0 / classic VBA
 is the goal; GPUI-based GUI rendering and the visual IDE follow in later
-phases.
+phases. For every keyword the language accepts, see
+[`docs/keywords.md`](docs/keywords.md).
 
 ![The OxidizedBASIC IDE running the showcase project](docs/ide-screenshot.png)
 
@@ -70,6 +71,15 @@ Immediate pane below.*
     the system clipboard, and **Undo / Redo** (⌘Z ⇧⌘Z) step through the
     edits (a run of typing is one step; an inserted event placeholder is
     one too). All are also on the new Edit menu.
+  - **Code folding**: a `▾` beside a block's first line folds it (`Sub`,
+    `Function`, `For`, `Do`, `While`, block `If`, `Select Case`, `With`,
+    `Type`, `Enum`); `▸` opens it again. The header and the closing line stay
+    visible, and moving the caret into a folded block opens it. Folding only
+    changes what is drawn, so line numbers and breakpoints are unaffected.
+  - **Syntax diagnostics**: a line the parser cannot read is underlined in
+    red from the bad text to the end of the line. With the caret on that line,
+    the status line shows the message and its line number. Only the first
+    error is marked.
   - **Visual form designer**: the form canvas renders the `.oxform`
     layout; click to select controls, **drag to move** them and **drag
     the eight selection handles** to resize them (like VB6), and add
