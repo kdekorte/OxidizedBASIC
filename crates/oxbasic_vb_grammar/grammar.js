@@ -181,9 +181,13 @@ module.exports = grammar({
     // A type after As: a built-in type (Integer, String...) or a class name.
     // The built-in types take precedence over a plain identifier.
     type_name: ($) =>
-      choice(
-        prec(2, $.builtin_type),
-        $.identifier,
+      seq(
+        choice(
+          prec(2, $.builtin_type),
+          $.identifier,
+        ),
+        // a fixed-length string's size: String * 10
+        optional(seq('*', $.number)),
       ),
 
     builtin_type: ($) =>
@@ -296,7 +300,7 @@ module.exports = grammar({
         $.identifier,
         optional(seq('(', optional(commaSep1($.expression)), ')')),
         kw('As'),
-        $.identifier,
+        $.type_name,
         $._eol,
       ),
 

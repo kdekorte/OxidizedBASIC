@@ -125,11 +125,19 @@ fn ident(pair: Pair<Rule>) -> String {
 }
 
 fn type_name(pair: Pair<Rule>) -> String {
-    pair.into_inner()
+    // a fixed-length string's size follows a `*`: `String*10`
+    let mut name = pair
+        .clone()
+        .into_inner()
         .filter(|p| p.as_rule() == Rule::Ident)
         .map(|p| p.as_str().to_string())
         .collect::<Vec<_>>()
-        .join(".")
+        .join(".");
+    if let Some(size) = pair.into_inner().find(|p| p.as_rule() == Rule::Number) {
+        name.push('*');
+        name.push_str(size.as_str().trim());
+    }
+    name
 }
 
 /// Statements of a `Lines` region: children are `Line` pairs.

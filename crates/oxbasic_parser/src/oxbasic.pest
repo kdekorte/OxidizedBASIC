@@ -214,7 +214,7 @@ ParamMod = _{ (kw_optional | kw_byval | kw_byref | kw_paramarray) }
 DimStmt = { (kw_dim | kw_static | kw_public | kw_private | kw_global) ~ VarDecl ~ ("," ~ VarDecl)* }
 VarDecl = { Ident ~ ArrayDims? ~ (kw_as ~ kw_new? ~ TypeName)? }
 ArrayDims = { "(" ~ (Expr ~ ("," ~ Expr)*)? ~ ")" }
-TypeName = { Ident ~ ("." ~ Ident)* }
+TypeName = { Ident ~ ("." ~ Ident)* ~ ("*" ~ Number)? }
 
 ConstStmt = { kw_const ~ ConstDecl ~ ("," ~ ConstDecl)* }
 ConstDecl = { Ident ~ "=" ~ Expr }

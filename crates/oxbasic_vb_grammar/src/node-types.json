@@ -2423,6 +2423,10 @@
         {
           "type": "identifier",
           "named": true
+        },
+        {
+          "type": "type_name",
+          "named": true
         }
       ]
     }
@@ -2432,7 +2436,7 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": true,
       "types": [
         {
@@ -2441,6 +2445,10 @@
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "number",
           "named": true
         }
       ]
