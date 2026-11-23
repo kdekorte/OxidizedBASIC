@@ -1960,6 +1960,9 @@ impl Ide {
         }
         // Diagnostics: a syntax error in the module is underlined on its row.
         let diag = self.current_diagnostic();
+        // Colouring: the whole module is parsed once, so a block's header and
+        // footer lines get their grammar colours.
+        let token_rows = highlight::tokenize_module(&self.lines);
         let hidden = code_model::hidden_rows(&folds, &self.folded);
         let fold_of_row: std::collections::HashMap<usize, bool> = folds
             .iter()
@@ -2064,7 +2067,14 @@ impl Ide {
                 })
                 .collect();
             let error_from = diag.as_ref().filter(|d| d.row == idx).map(|d| d.column);
-            code = code.child(render_code_line(&line, selected, caret, &found, error_from));
+            code = code.child(render_code_line(
+                &line,
+                &token_rows[idx],
+                selected,
+                caret,
+                &found,
+                error_from,
+            ));
 
             list = list.child(
                 div()
@@ -2138,6 +2148,7 @@ const FIND_CURRENT_BG: u32 = 0xFFB020;
 /// line) tinted, and the caret drawn as a thin bar before column `caret`.
 fn render_code_line(
     line: &str,
+    tokens: &[(String, highlight::Tok)],
     selected: Option<(usize, Option<usize>)>,
     caret: Option<usize>,
     found: &[(usize, usize, bool)],
@@ -2146,7 +2157,7 @@ fn render_code_line(
     // colour each character by its token, then cut the line wherever the
     // selection, a find match or the caret starts or ends
     let mut colors: Vec<(char, u32)> = Vec::new();
-    for (text, kind) in highlight::tokenize_line(line) {
+    for (text, kind) in tokens {
         let color = match kind {
             highlight::Tok::Keyword => C_KEYWORD,
             highlight::Tok::Str => C_STRING,

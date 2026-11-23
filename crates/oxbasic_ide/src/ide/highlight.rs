@@ -97,15 +97,17 @@ pub fn tokenize_line(line: &str) -> Vec<(String, Tok)> {
 
 /// The grammar's leaves for `line`, as spans, or `None` when the line has a
 /// syntax error or its leaves don't cover its text.
+thread_local! {
+    /// One Tree-sitter parser per thread, for the editor's colouring.
+    static PARSER: std::cell::RefCell<tree_sitter::Parser> = std::cell::RefCell::new({
+        let mut p = tree_sitter::Parser::new();
+        p.set_language(&oxbasic_vb_grammar::LANGUAGE.into())
+            .expect("the grammar loads");
+        p
+    });
+}
+
 fn grammar_tokens(line: &str) -> Option<Vec<(String, Tok)>> {
-    thread_local! {
-        static PARSER: std::cell::RefCell<tree_sitter::Parser> = std::cell::RefCell::new({
-            let mut p = tree_sitter::Parser::new();
-            p.set_language(&oxbasic_vb_grammar::LANGUAGE.into())
-                .expect("the grammar loads");
-            p
-        });
-    }
     if line.trim().is_empty() {
         return None;
     }
@@ -265,6 +267,101 @@ pub fn tokenize_line_plain(line: &str) -> Vec<(String, Tok)> {
     }
     out
 }
+/// Tokenize a whole module at once, one token list per row, from one parse of
+/// the whole text. A block's first and last lines (`Sub`, `End If`) only mean
+/// something inside the block, so they are coloured by the grammar here rather
+/// than the fallback tokenizer. A row the grammar still cannot colour (a
+/// syntax error on it) falls back to [`tokenize_line_plain`].
+pub fn tokenize_module(lines: &[String]) -> Vec<Vec<(String, Tok)>> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let source = lines.join("\n") + "\n";
+    let tree = PARSER.with(|p| p.borrow_mut().parse(&source, None));
+    let error_at = |row: usize| -> Option<Vec<(String, Tok)>> { grammar_tokens_in(tree.as_ref()?, lines, row) };
+    let errors = tree
+        .as_ref()
+        .map(|t| error_rows(&t.root_node()))
+        .unwrap_or_default();
+    (0..lines.len())
+        .map(|row| {
+            if errors.contains(&row) {
+                tokenize_line_plain(&lines[row])
+            } else {
+                error_at(row).unwrap_or_else(|| tokenize_line_plain(&lines[row]))
+            }
+        })
+        .collect()
+}
+
+/// The rows a tree's error or missing nodes sit on.
+fn error_rows(root: &tree_sitter::Node) -> Vec<usize> {
+    let mut rows = Vec::new();
+    let mut stack = vec![*root];
+    while let Some(node) = stack.pop() {
+        if node.is_error() || node.is_missing() {
+            rows.push(node.start_position().row);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.has_error() || child.is_missing() {
+                stack.push(child);
+            }
+        }
+    }
+    rows
+}
+
+/// The leaves of `tree` that lie on `row`, as the row's spans, covering the
+/// row's text exactly; `None` when they don't.
+fn grammar_tokens_in(
+    tree: &tree_sitter::Tree,
+    lines: &[String],
+    row: usize,
+) -> Option<Vec<(String, Tok)>> {
+    let line = lines.get(row)?;
+    if line.trim().is_empty() {
+        return None;
+    }
+    // byte offset of the row's start in the whole text
+    let row_start: usize = lines[..row].iter().map(|l| l.len() + 1).sum();
+    let mut leaves = Vec::new();
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if node.child_count() == 0 {
+            if node.start_position().row == row && node.end_position().row == row {
+                leaves.push(node);
+            }
+        } else {
+            let mut cursor = node.walk();
+            let mut kids: Vec<_> = node.children(&mut cursor).collect();
+            kids.reverse();
+            stack.extend(kids);
+        }
+    }
+    leaves.sort_by_key(|n| n.start_byte());
+    let mut out: Vec<(String, Tok)> = Vec::new();
+    let mut pos = 0usize;
+    for node in leaves {
+        let start = node.start_byte().checked_sub(row_start)?;
+        let end = node.end_byte().checked_sub(row_start)?;
+        if start < pos || end > line.len() {
+            return None;
+        }
+        if start > pos {
+            out.push((line[pos..start].to_string(), Tok::Punct));
+        }
+        out.push((line[start..end].to_string(), leaf_kind(&node)));
+        pos = end;
+    }
+    if pos < line.len() {
+        out.push((line[pos..].to_string(), Tok::Punct));
+    }
+    let joined: String = out.iter().map(|(t, _)| t.as_str()).collect();
+    (joined == *line).then_some(out)
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -363,5 +460,52 @@ mod grammar_used_tests {
             .iter()
             .all(|(t, k)| !(t.eq_ignore_ascii_case("Else") && *k == Tok::Ident)));
     }
+
+    fn module(src: &str) -> Vec<String> {
+        src.split('\n').map(String::from).collect()
+    }
+
+    #[test]
+    fn a_block_header_and_footer_are_coloured_by_the_grammar() {
+        // `End Sub` on its own is not a grammar line on its own; in the module
+        // its `End` is read as the block's keyword
+        let l = module("Sub Main()\n  x = 1\nEnd Sub");
+        let rows = tokenize_module(&l);
+        assert_eq!(rows.len(), 3);
+        let footer = &rows[2];
+        assert!(
+            footer.iter().any(|(t, k)| t == "End" && *k == Tok::Keyword),
+            "{:?}",
+            footer
+        );
+    }
+
+    #[test]
+    fn every_row_covers_its_text_exactly() {
+        let l = module(
+            "Sub A()\n  If x Then\n    y = \"s\" ' note\n  Else\n    y = 2\n  End If\nEnd Sub",
+        );
+        for (row, toks) in tokenize_module(&l).iter().enumerate() {
+            let joined: String = toks.iter().map(|(t, _)| t.as_str()).collect();
+            assert_eq!(joined, l[row], "row {}", row);
+        }
+    }
+
+    #[test]
+    fn a_row_with_a_syntax_error_still_gets_colours() {
+        let l = module("Sub A()\n  Print (2\nEnd Sub");
+        let rows = tokenize_module(&l);
+        assert_eq!(rows.len(), 3);
+        let joined: String = rows[1].iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(joined, l[1]);
+    }
+
+    #[test]
+    fn a_bare_else_in_a_block_is_a_keyword_in_the_module() {
+        let l = module("If x Then\n  y = 1\nElse\n  y = 2\nEnd If");
+        let rows = tokenize_module(&l);
+        assert!(rows[2].iter().any(|(t, k)| t == "Else" && *k == Tok::Keyword));
+    }
+
 
 }
