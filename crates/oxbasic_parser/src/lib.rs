@@ -392,6 +392,36 @@ fn stmt(pair: Pair<Rule>) -> Result<Stmt, String> {
             let pos = expr(children.next().unwrap())?;
             Ok(Stmt::FileSeek { number, pos })
         }
+        Rule::FileLockStmt | Rule::FileUnlockStmt => {
+            let is_lock = pair.as_rule() == Rule::FileLockStmt;
+            let mut number: Option<Expr> = None;
+            let mut range_from: Option<Expr> = None;
+            let mut range_to: Option<Expr> = None;
+            for child in filter_kw(pair.into_inner()) {
+                match child.as_rule() {
+                    Rule::FileNumber => {
+                        let n = child.into_inner().find(|c| c.as_rule() == Rule::Expr).unwrap();
+                        number = Some(expr(n)?);
+                    }
+                    _ => {
+                        // the range's expressions, in order: from, then to
+                        let e = expr(child)?;
+                        if range_from.is_none() {
+                            range_from = Some(e);
+                        } else {
+                            range_to = Some(e);
+                        }
+                    }
+                }
+            }
+            let number = number.ok_or("Lock/Unlock needs a file number")?;
+            let range = range_from.map(|from| (from, range_to));
+            Ok(if is_lock {
+                Stmt::LockFile { number, range }
+            } else {
+                Stmt::UnlockFile { number, range }
+            })
+        }
         Rule::FileCloseStmt => {
             let mut numbers = Vec::new();
             for child in filter_kw(pair.into_inner()) {

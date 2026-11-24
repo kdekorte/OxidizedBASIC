@@ -1,0 +1,224 @@
+//! Checks the claims in docs/keywords.md by running the programs they describe:
+//! each documented built-in gives the value the doc states, and each "not
+//! supported" item fails the way the doc says. If the runtime changes, these
+//! fail, so the doc is updated with it.
+
+use oxbasic_runtime::{run_source, Output};
+
+struct Buf(String);
+
+impl Output for Buf {
+    fn write(&mut self, s: &str) {
+        self.0.push_str(s);
+    }
+}
+
+/// The output of `src`, or its error text.
+fn run(src: &str) -> Result<String, String> {
+    let mut buf = Buf(String::new());
+    run_source(src, &mut buf).map_err(|e| e.to_string())?;
+    Ok(buf.0)
+}
+
+/// The output of `src`, which must run.
+fn out(src: &str) -> String {
+    run(&format!("{}\n", src)).unwrap_or_else(|e| panic!("{} failed: {}", src, e))
+}
+
+#[test]
+fn math_functions_give_the_documented_values() {
+    assert_eq!(out("Print Abs(-3)"), " 3 \n");
+    assert_eq!(out("Print Sgn(-4)"), " -1 \n");
+    // Int floors; Fix truncates toward zero
+    assert_eq!(out("Print Int(-2.5)"), " -3 \n");
+    assert_eq!(out("Print Fix(-2.5)"), " -2 \n");
+    // Round is banker's rounding: half goes to the even neighbour
+    assert_eq!(out("Print Round(2.5)"), " 2 \n");
+    assert_eq!(out("Print Round(3.5)"), " 4 \n");
+    assert_eq!(out("Print Sqr(16)"), " 4 \n");
+    assert_eq!(out("Print Exp(0)"), " 1 \n");
+    assert_eq!(out("Print Log(1)"), " 0 \n");
+    assert_eq!(out("Print Rnd() < 1"), "True\n");
+    assert_eq!(out("Randomize 42\nPrint Rnd() < 1"), "True\n");
+}
+
+#[test]
+fn string_functions_give_the_documented_values() {
+    assert_eq!(out("Print Len(\"hello\")"), " 5 \n");
+    assert_eq!(out("Print Left(\"hello\", 2)"), "he\n");
+    assert_eq!(out("Print Mid(\"hello\", 2, 3)"), "ell\n");
+    assert_eq!(out("Print InStr(\"hello\", \"l\")"), " 3 \n");
+    assert_eq!(out("Print InStrRev(\"abcabc\", \"b\")"), " 5 \n");
+    assert_eq!(out("Print Replace(\"aXbX\", \"X\", \"-\")"), "a-b-\n");
+    assert_eq!(out("Print Space(3) & \"|\""), "   |\n");
+    assert_eq!(out("Print String(3, \"x\")"), "xxx\n");
+    assert_eq!(out("Print StrReverse(\"abc\")"), "cba\n");
+    assert_eq!(out("Print LTrim(\"  a \") & \"|\""), "a |\n");
+    assert_eq!(out("Print Asc(\"A\")"), " 65 \n");
+    assert_eq!(out("Print Chr(66)"), "B\n");
+    assert_eq!(out("Print Val(\"12abc\")"), " 12 \n");
+    assert_eq!(out("Print Str(5)"), " 5\n");
+    assert_eq!(out("Print StrComp(\"a\", \"b\")"), " -1 \n");
+    assert_eq!(out("Print Hex(255)"), "FF\n");
+    assert_eq!(out("Print Oct(8)"), "10\n");
+    assert_eq!(out("Print Join(Array(\"a\", \"b\"), \"-\")"), "a-b\n");
+    assert_eq!(out("Dim parts\nparts = Split(\"a,b,c\", \",\")\nPrint parts(1)"), "b\n");
+}
+
+#[test]
+fn choice_and_conversion_functions_give_the_documented_values() {
+    assert_eq!(out("Print IIf(1 > 0, \"y\", \"n\")"), "y\n");
+    assert_eq!(out("Print Choose(2, \"a\", \"b\", \"c\")"), "b\n");
+    assert_eq!(out("Print Switch(0, \"a\", 1, \"b\")"), "b\n");
+    assert_eq!(out("Print CInt(2.5)"), " 3 \n");
+    assert_eq!(out("Print CLng(3.5)"), " 4 \n");
+    assert_eq!(out("Print CBool(5)"), "True\n");
+    assert_eq!(out("Print CStr(1.5)"), "1.5\n");
+    assert_eq!(out("Print Cdbl(\"1.5\") + 1"), " 2.5 \n");
+}
+
+#[test]
+fn type_tests_give_the_documented_values() {
+    assert_eq!(out("Print VarType(1)"), " 3 \n");
+    assert_eq!(out("Print TypeName(\"x\")"), "String\n");
+    assert_eq!(out("Print IsNumeric(\"12\")"), "True\n");
+    assert_eq!(out("Print IsDate(\"x\")"), "False\n");
+    assert_eq!(out("Print IsEmpty(x)"), "True\n");
+    assert_eq!(out("Print IsNull(Null)"), "True\n");
+    assert_eq!(out("Print IsArray(Array(1))"), "True\n");
+}
+
+#[test]
+fn array_functions_give_the_documented_bounds() {
+    assert_eq!(out("Print LBound(Array(5, 6))"), " 0 \n");
+    assert_eq!(out("Print UBound(Array(5, 6))"), " 1 \n");
+}
+
+#[test]
+fn date_functions_give_the_documented_values() {
+    assert_eq!(out("Print Format(DateSerial(2024, 3, 5), \"yyyy-mm-dd\")"), "2024-03-05\n");
+    assert_eq!(out("Print Weekday(DateSerial(2024, 3, 5))"), " 3 \n");
+    assert_eq!(out("Print DateAdd(\"d\", 1, DateSerial(2024, 1, 31))"), " 2024-02-01 \n");
+    assert_eq!(out("Print DateValue(\"2024-03-05\")"), " 2024-03-05 \n");
+    assert_eq!(out("Print Hour(TimeSerial(13, 5, 6))"), " 13 \n");
+    assert_eq!(out("Print TypeName(Now) <> \"\""), "True\n");
+}
+
+#[test]
+fn format_gives_the_documented_named_and_numeric_formats() {
+    assert_eq!(out("Print Format(1234.5, \"Currency\")"), "1,234.50\n");
+    assert_eq!(out("Print Format(0.5, \"Percent\")"), "50.00%\n");
+    assert_eq!(out("Print Format(12, \"Yes/No\")"), "Yes\n");
+    assert_eq!(out("Print Format(-1, \"On/Off\")"), "On\n");
+    assert_eq!(out("Print Format(3.14159, \"0.00\")"), "3.14\n");
+    assert_eq!(out("Print Format(1234567, \"#,##0\")"), "1,234,567\n");
+    assert_eq!(out("Print Format(1, \"0.0E+00\")"), "1.0E+00\n");
+}
+
+#[test]
+fn file_functions_need_an_open_file() {
+    // Lof and Loc name a file number: with none open, error 52
+    assert!(run("Print Lof(1)\n").unwrap_err().contains("52"));
+    assert!(run("Print Loc(1)\n").unwrap_err().contains("52"));
+}
+
+#[test]
+fn not_supported_items_fail_as_the_doc_says() {
+    // Property procedures are not in the grammar: a syntax error
+    assert!(run("Property Get Name()\nEnd Property\n").is_err());
+    // Lock is not a statement: a syntax error
+    assert!(run("Dim x\nLock #1\n").is_err());
+    // Option Base is 0 or 1 only
+    assert!(run("Option Base 2\n").unwrap_err().contains("0 or 1"));
+}
+
+/// A temporary folder for one test's files, cleared first.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("oxbasic-claims-{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn freefile_is_the_lowest_unused_file_number() {
+    // with nothing open, the first number is free
+    assert_eq!(out("Print FreeFile"), " 1 \n");
+    assert_eq!(out("Print FreeFile()"), " 1 \n");
+    let dir = scratch("freefile");
+    let p = dir.join("a.txt");
+    let src = format!(
+        "Open \"{}\" For Output As #1\nPrint FreeFile\nOpen \"{}\" For Output As #2\nPrint FreeFile\nClose #1\nPrint FreeFile\n",
+        p.display(),
+        dir.join("b.txt").display()
+    );
+    // 2 is the next free number, then with #2 open 3, then #1 is freed: 1
+    assert_eq!(out(&src), " 2 \n 3 \n 1 \n");
+}
+
+#[test]
+fn lof_gives_the_length_of_a_sequential_input_file() {
+    let dir = scratch("lof-input");
+    let p = dir.join("in.txt");
+    std::fs::write(&p, "hello\nworld\n").unwrap();
+    let src = format!(
+        "Open \"{}\" For Input As #1\nPrint Lof(1)\nClose #1\n",
+        p.display()
+    );
+    // 12 bytes: "hello\n" (6) and "world\n" (6)
+    assert_eq!(out(&src), " 12 \n");
+}
+
+#[test]
+fn lof_counts_text_still_buffered_in_a_sequential_output_file() {
+    let dir = scratch("lof-output");
+    let p = dir.join("out.txt");
+    // nothing is flushed to disk yet when Lof is asked: it must still count it
+    let src = format!(
+        "Open \"{}\" For Output As #1\nPrint #1, \"abc\"\nPrint Lof(1)\nClose #1\n",
+        p.display()
+    );
+    // "abc" then the newline the write adds: 4 bytes
+    assert_eq!(out(&src), " 4 \n");
+}
+
+#[test]
+fn lock_and_unlock_work_on_an_open_file() {
+    let dir = scratch("lock-ok");
+    let p = dir.join("r.dat");
+    let src = format!(
+        "Open \"{}\" For Random As #1 Len = 8\nLock #1\nUnlock #1\nLock #1, 3\nUnlock #1, 3\nPrint \"done\"\nClose #1\n",
+        p.display()
+    );
+    assert_eq!(out(&src), "done\n");
+}
+
+#[test]
+fn lock_on_a_closed_file_is_error_52() {
+    let err = run("Lock #1\n").unwrap_err();
+    assert!(err.contains("52"), "{}", err);
+}
+
+#[test]
+fn an_overlapping_lock_is_error_70() {
+    let dir = scratch("lock-conflict");
+    let p = dir.join("r.dat");
+    let src = format!(
+        "Open \"{}\" For Random As #1 Len = 8\nLock #1, 1 To 5\nLock #1, 4\n",
+        p.display()
+    );
+    let err = run(&src).unwrap_err();
+    assert!(err.contains("70"), "{}", err);
+}
+
+#[test]
+fn unlocking_a_range_never_locked_is_error_70() {
+    let dir = scratch("unlock-unknown");
+    let p = dir.join("r.dat");
+    let src = format!(
+        "Open \"{}\" For Random As #1 Len = 8\nUnlock #1, 2\n",
+        p.display()
+    );
+    let err = run(&src).unwrap_err();
+    assert!(err.contains("70"), "{}", err);
+}

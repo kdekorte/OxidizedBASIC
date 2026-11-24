@@ -50,6 +50,7 @@ pub fn is_builtin(name: &str) -> bool {
             | "eof"
             | "loc"
             | "lof"
+            | "freefile"
             | "split"
             | "join"
             | "strcomp"
@@ -671,6 +672,7 @@ impl<'out> Interpreter<'out> {
                 let n = want_i64(args, 0)?;
                 Ok(Variant::Long(self.files.lof(n)? as i32))
             }
+            "freefile" => Ok(Variant::Long(self.files.free_file()? as i32)),
             "timer" => {
                 let serial = now_serial();
                 let secs = (serial - serial.floor()) * 86_400.0;

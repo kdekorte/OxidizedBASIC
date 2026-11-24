@@ -152,7 +152,10 @@ Dialogs and the interface: `MsgBox`, `InputBox`, `OpenFileDialog`,
 | `Put` | `Put #n, [recnum], value` | Writes a record in VB's binary layout, padded to the record length. |
 | `Seek` | `Seek #n, pos` | Moves to a 1-based position: a record number (random), a byte (binary). |
 | `Loc` | `Loc(n)` | Random: the last record number. Binary: the next byte position. |
-| `Lof` | `Lof(n)` | The file's length in bytes. |
+| `Lof` | `Lof(n)` | The file's length in bytes. Works for sequential files too: an output file's buffered text is counted. |
+| `Lock` | `Lock #n [, record \| , from To to]` | Locks a file, or the records in a range. A range that overlaps one already locked is error 70, Permission denied. Locks are released when the file is closed. |
+| `Unlock` | `Unlock #n [, record \| , from To to]` | Releases a lock made with the same range. Unlocking a range that is not locked is error 70. |
+| `FreeFile` | `FreeFile` or `FreeFile()` | The lowest file number (1 to 511) not in use. Error 67 when all are in use. |
 
 Relative file names are in the program's folder (or the project's, from the
 IDE). Errors: 52 bad file number, 53 file not found, 54 wrong use for the file's
@@ -174,8 +177,8 @@ documents; a file written by real VB is not yet compared.
 - Classes, and `New` for anything other than the built-in controls and `Err`.
 ## Not supported
 
-- File I/O is sequential, random and binary. Not supported: `Lock`/`Unlock`,
-  and the file functions `FreeFile` and `LOF` on a sequential file.
+- File I/O is sequential, random and binary. Every file statement and function
+  in the table above is supported.
 - `Step Into` in the debugger. Step Over is supported.
 - `Option Base` values other than `0` and `1`.
 

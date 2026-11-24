@@ -147,6 +147,8 @@ Statement = _{
     | EndStmt
     | FileOpenStmt
     | FileCloseStmt
+    | FileLockStmt
+    | FileUnlockStmt
     | FileLineInputStmt
     | FileInputStmt
     | FilePrintStmt
@@ -304,6 +306,11 @@ FileSeekStmt = { kw_seek ~ "#"? ~ Expr ~ "," ~ Expr }
 // `Close`, `Close #1`, `Close #1, #2`
 FileCloseStmt = { kw_close ~ (FileNumber ~ ("," ~ FileNumber)*)? }
 FileNumber = { "#"? ~ Expr }
+// `Lock #1`, `Lock #1, 5`, `Lock #1, 5 To 9`; `Unlock` takes the same form
+FileLockStmt = { kw_lock ~ FileNumber ~ ("," ~ Expr ~ (kw_to ~ Expr)?)? }
+FileUnlockStmt = { kw_unlock ~ FileNumber ~ ("," ~ Expr ~ (kw_to ~ Expr)?)? }
+kw_lock = @{ ^"lock" ~ !IdentChar }
+kw_unlock = @{ ^"unlock" ~ !IdentChar }
 // `Input #1, a, b`: reads values into variables (`kw_input` is not a call)
 FileInputStmt = { kw_input ~ "#" ~ Expr ~ "," ~ Expr ~ ("," ~ Expr)* }
 // `Line Input #1, text`: one whole line into a variable

@@ -17,10 +17,13 @@ pub enum OpenFile {
         lines: std::collections::VecDeque<String>,
         /// The fields of the line being read by `Input #`, not yet used.
         fields: std::collections::VecDeque<Field>,
+        /// The file on disk, so `Lof` can report its length.
+        full: std::path::PathBuf,
     },
-    /// Opened for `Output` or `Append`: the writer.
+    /// Opened for `Output` or `Append`: the writer, and the file on disk.
     Output {
         file: std::io::BufWriter<std::fs::File>,
+        full: std::path::PathBuf,
     },
     /// Opened `For Random` or `For Binary`: read and written by byte position.
     /// `record_len` is the size of a random record (1 for binary files).
@@ -92,6 +95,9 @@ pub fn split_fields(line: &str) -> std::collections::VecDeque<Field> {
 #[derive(Default)]
 pub struct FileTable {
     files: BTreeMap<i64, OpenFile>,
+    /// The record ranges locked on each open file (`Lock`): `(from, to)`, inclusive.
+    /// A plain `Lock #n` locks the whole file, as `(1, u64::MAX)`.
+    locks: BTreeMap<i64, Vec<(u64, u64)>>,
 }
 
 impl FileTable {
@@ -142,6 +148,7 @@ impl FileTable {
                 OpenFile::Input {
                     fields: std::collections::VecDeque::new(),
                     lines,
+                    full: full.to_path_buf(),
                 }
             }
             oxbasic_ast::FileMode::Output | oxbasic_ast::FileMode::Append => {
@@ -154,6 +161,7 @@ impl FileTable {
                     .map_err(|e| io_error(path, e))?;
                 OpenFile::Output {
                     file: std::io::BufWriter::new(file),
+                    full: full.to_path_buf(),
                 }
             }
             oxbasic_ast::FileMode::Random | oxbasic_ast::FileMode::Binary => {
@@ -176,9 +184,48 @@ impl FileTable {
         Ok(())
     }
 
+    /// `Lock #n [, range]`: locks file `n` (or the records `from` to `to`). A
+    /// range that overlaps one already locked is error 70, Permission denied.
+    /// The file must be open (error 52).
+    pub fn lock(&mut self, n: i64, range: Option<(u64, u64)>) -> ExecResult<()> {
+        if !self.is_open(n) {
+            return err(52, "Bad file name or number");
+        }
+        let r = range.unwrap_or((1, u64::MAX));
+        let held = self.locks.entry(n).or_default();
+        if held.iter().any(|&(a, b)| a <= r.1 && r.0 <= b) {
+            return err(70, "Permission denied");
+        }
+        held.push(r);
+        Ok(())
+    }
+
+    /// `Unlock #n [, range]`: releases a lock made by `Lock` with the same range.
+    /// A range that was not locked is error 70, as VB gives for an unknown lock.
+    pub fn unlock(&mut self, n: i64, range: Option<(u64, u64)>) -> ExecResult<()> {
+        if !self.is_open(n) {
+            return err(52, "Bad file name or number");
+        }
+        let r = range.unwrap_or((1, u64::MAX));
+        let held = self.locks.entry(n).or_default();
+        match held.iter().position(|&x| x == r) {
+            Some(i) => {
+                held.remove(i);
+                Ok(())
+            }
+            None => err(70, "Permission denied"),
+        }
+    }
+
+    /// Close file `n` also releases its locks.
+    fn forget_locks(&mut self, n: i64) {
+        self.locks.remove(&n);
+    }
+
     /// Close file `n`; an unopened number is error 52 in VB. Closing an
     /// output file writes its buffered text.
     pub fn close(&mut self, n: i64) -> ExecResult<()> {
+        self.forget_locks(n);
         match self.files.remove(&n) {
             Some(OpenFile::Output { mut file, .. }) => {
                 file.flush().map_err(|e| io_error("", e))
@@ -296,16 +343,36 @@ impl FileTable {
         }
     }
 
-    /// `Lof(n)`: the length of direct-access file `n` in bytes.
-    pub fn lof(&self, n: i64) -> ExecResult<i64> {
-        match self.files.get(&n) {
+    /// `Lof(n)`: the length of file `n` in bytes, for any open mode. A sequential
+    /// `Output` file is flushed first, so the text still in its buffer counts.
+    pub fn lof(&mut self, n: i64) -> ExecResult<i64> {
+        use std::io::Write as _;
+        match self.files.get_mut(&n) {
             Some(OpenFile::Direct { file, .. }) => match file.metadata() {
                 Ok(m) => Ok(m.len() as i64),
                 Err(e) => Err(io_error("", e)),
             },
-            Some(_) => err(54, "Bad file mode"),
+            Some(OpenFile::Input { full, .. }) => match std::fs::metadata(full) {
+                Ok(m) => Ok(m.len() as i64),
+                Err(e) => Err(io_error("", e)),
+            },
+            Some(OpenFile::Output { file, full }) => {
+                file.flush().map_err(|e| io_error("", e))?;
+                match std::fs::metadata(full) {
+                    Ok(m) => Ok(m.len() as i64),
+                    Err(e) => Err(io_error("", e)),
+                }
+            }
             None => err(52, "Bad file name or number"),
         }
+    }
+
+    /// `FreeFile`: the lowest file number not in use (1 to 511), as VB gives.
+    /// Error 67 (too many files) when every number is taken.
+    pub fn free_file(&self) -> ExecResult<i64> {
+        (1..=MAX_FILE_NUMBER)
+            .find(|n| !self.files.contains_key(n))
+            .ok_or_else(|| err::<i64>(67, "Too many files").unwrap_err())
     }
 
     /// `Get #n, [recnum], target`: reads `record_len` bytes at `recnum` (a

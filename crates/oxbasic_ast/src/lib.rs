@@ -211,6 +211,16 @@ pub enum Stmt {
     },
     /// `Close [#n [, #m]]`: closes the files named, or all of them.
     CloseFile(Vec<Expr>),
+    /// `Lock #n [, record | , from To to]`: locks a file (or a range of records).
+    /// `Unlock` has the same shape.
+    LockFile {
+        number: Expr,
+        range: Option<(Expr, Option<Expr>)>,
+    },
+    UnlockFile {
+        number: Expr,
+        range: Option<(Expr, Option<Expr>)>,
+    },
     /// `Input #n, v1, v2`: reads comma-separated values into variables.
     InputFile {
         number: Expr,

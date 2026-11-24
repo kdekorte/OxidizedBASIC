@@ -1868,6 +1868,18 @@ impl<'out> Interpreter<'out> {
                 Ok(Flow::Normal)
             }
 
+            Stmt::LockFile { number, range } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                let range = self.lock_range(range, f)?;
+                self.files.lock(n, range)?;
+                Ok(Flow::Normal)
+            }
+            Stmt::UnlockFile { number, range } => {
+                let n = to_i64(&self.eval(number, f)?)?;
+                let range = self.lock_range(range, f)?;
+                self.files.unlock(n, range)?;
+                Ok(Flow::Normal)
+            }
             Stmt::CloseFile(numbers) => {
                 if numbers.is_empty() {
                     self.files.close_all()?;
@@ -2800,6 +2812,24 @@ impl<'out> Interpreter<'out> {
         }
     }
 
+    /// The record range of a `Lock`/`Unlock` (`from` alone locks one record;
+    /// `from To to` a span), as the table stores it. `None` is the whole file.
+    fn lock_range(
+        &mut self,
+        range: &Option<(oxbasic_ast::Expr, Option<oxbasic_ast::Expr>)>,
+        f: &mut Frame,
+    ) -> ExecResult<Option<(u64, u64)>> {
+        let Some((from, to)) = range else {
+            return Ok(None);
+        };
+        let a = to_i64(&self.eval(from, f)?)?.max(1) as u64;
+        let b = match to {
+            Some(e) => to_i64(&self.eval(e, f)?)?.max(1) as u64,
+            None => a,
+        };
+        Ok(Some((a.min(b), a.max(b))))
+    }
+
     fn eval_var(&mut self, name: &str, f: &mut Frame) -> ExecResult<Variant> {
         let lowered = Lowered::new(name);
         let ln = lowered.as_str();
@@ -2818,6 +2848,11 @@ impl<'out> Interpreter<'out> {
         // name, looked up above, takes precedence)
         if ln == "timer" {
             return self.builtin("timer", &[], f);
+        }
+        // `FreeFile` is a function that takes no arguments, so it is called
+        // without parentheses too
+        if ln == "freefile" {
+            return self.builtin("freefile", &[], f);
         }
         if self.option_explicit {
             return err(500, &format!("Variable not defined: {}", name));
