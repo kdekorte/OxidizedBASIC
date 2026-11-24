@@ -13,7 +13,7 @@ phases. For every keyword the language accepts, see
 the toolbox on the left, the project and properties on the right, and the
 Immediate pane below.*
 
-## Status — Phases 1, 2 & 3 complete; Phase 4 (JIT and packaging) next
+## Status — Phases 1, 2 & 3 complete; Phase 4 (JIT and packaging) started
 
 ### Phase 1: syntax parser & core runtime
 - **Parser** (`oxbasic_parser`): `pest` grammar for the classic VB6/VBA
@@ -293,4 +293,9 @@ of the form's menu shows disabled.
 
 ## Roadmap
 
-- Phase 4: Cranelift JIT backend and `.app` packaging
+- Phase 4: Cranelift JIT backend and `.app` packaging. Started: integer `For`
+  loops compile to native code with the `jit` feature
+  (`cargo build --release -p oxbasic_ide --features oxbasic_runtime/jit`), which
+  runs `examples/basica.bas` in 0.01 to 0.02 s instead of 1.26 s; see
+  `docs/jit.md`. Still to do: more loop types, calls and arrays, turning the
+  feature on in the shipped build, and a signed, notarised `.app`.

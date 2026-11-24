@@ -48,7 +48,7 @@ fn stmt_supported(s: &Stmt) -> bool {
     }
 }
 
-fn expr_supported(e: &Expr) -> bool {
+pub(crate) fn expr_supported(e: &Expr) -> bool {
     match e {
         Expr::Lit(Lit::Int(_)) | Expr::Var(_) => true,
         Expr::Unary { op, expr } => {
@@ -79,6 +79,112 @@ fn expr_supported(e: &Expr) -> bool {
 
 #[cfg(feature = "jit")]
 pub use native::{compile_for, Compiled};
+
+/// A loop shorter than this is not worth compiling: compiling costs more than
+/// the interpreter takes to run it.
+#[cfg(feature = "jit")]
+const MIN_TRIPS: i64 = 1000;
+
+#[cfg(feature = "jit")]
+impl crate::Interpreter<'_> {
+    /// Run the `For` loop `s` as native code when it qualifies; `Ok(true)` when
+    /// it ran (its variables are updated), `Ok(false)` when the interpreter must
+    /// run it. Nothing is changed until the compiled run has succeeded, so a
+    /// refusal leaves the interpreter to do the whole loop.
+    pub(crate) fn try_jit_for(&mut self, s: &Stmt, f: &mut crate::Frame) -> crate::ExecResult<bool> {
+        use crate::Variant;
+        // compiled code cannot pause at a breakpoint or step
+        if self.debug_hook.is_some() || self.breakpoints.is_some() {
+            return Ok(false);
+        }
+        let Stmt::For { var, start, end, step, body } = s else {
+            return Ok(false);
+        };
+        let key = s as *const Stmt as usize;
+        let cached = self.jit_cache.get(&key).cloned();
+        if matches!(cached, Some(None)) {
+            return Ok(false);
+        }
+        if cached.is_none() && !stmt_supported(s) {
+            self.jit_cache.insert(key, None);
+            return Ok(false);
+        }
+        // the bounds use only literals and variables, so reading them is pure; the
+        // interpreter reads them first too, so an error is the same error
+        let sv = self.eval(start, f)?;
+        let ev = self.eval(end, f)?;
+        let stv = match step {
+            Some(e) => self.eval(e, f)?,
+            None => Variant::Long(1),
+        };
+        let (Variant::Long(s0), Variant::Long(e0), Variant::Long(st)) = (sv, ev, stv) else {
+            return Ok(false);
+        };
+        let (s0, e0, st) = (i64::from(s0), i64::from(e0), i64::from(st));
+        if st == 0 {
+            return Ok(false); // the interpreter raises the error
+        }
+        let ran = if st > 0 { s0 <= e0 } else { s0 >= e0 };
+        let trips = if !ran { 0 } else { (e0 - s0) / st + 1 };
+        if cached.is_none() && trips < MIN_TRIPS {
+            return Ok(false);
+        }
+        let lvar = var.to_lowercase();
+        let compiled = match cached {
+            Some(Some(c)) => c,
+            _ => {
+                let names: Vec<String> = crate::slots::names_in_stmts(std::slice::from_ref(s))
+                    .iter()
+                    .map(|n| n.to_lowercase())
+                    .collect();
+                let made = compile_for(var, start, end, step.as_ref(), body, &names)
+                    .map(std::rc::Rc::new);
+                self.jit_cache.insert(key, made.clone());
+                match made {
+                    Some(c) => c,
+                    None => return Ok(false),
+                }
+            }
+        };
+        // the counter may be new; any other variable must already hold a Long
+        let counter_new = self.lookup_ref(f, &lvar).is_none();
+        if counter_new
+            && (self.option_explicit
+                || self.implicit_type(&lvar).is_some()
+                || self.constants.contains_key(lvar.as_str())
+                || self.is_host_object(var, f))
+        {
+            return Ok(false);
+        }
+        let mut values = Vec::with_capacity(compiled.names.len());
+        for n in &compiled.names {
+            if f.ret_name.as_deref() == Some(n.as_str()) {
+                return Ok(false);
+            }
+            match self.lookup_ref(f, n) {
+                Some(rc) => match &*rc.borrow() {
+                    Variant::Long(v) => values.push(i64::from(*v)),
+                    _ => return Ok(false),
+                },
+                None if *n == lvar => values.push(0),
+                None => return Ok(false),
+            }
+        }
+        let Some(out) = compiled.run(&values) else {
+            return Ok(false);
+        };
+        for (n, v) in compiled.names.iter().zip(out) {
+            let v = Variant::Long(v as i32);
+            match self.lookup_ref(f, n) {
+                Some(rc) => *rc.borrow_mut() = v,
+                // a new counter exists only if the loop ran, as in the interpreter
+                None if ran => self.set_var(f, var, v)?,
+                None => {}
+            }
+        }
+        Ok(true)
+    }
+}
 
 #[cfg(feature = "jit")]
 mod native {
@@ -371,10 +477,10 @@ mod native {
                 Stmt::For { var, start, end, step, body } => {
                     let counter = *self.vars.get(&var.to_lowercase())?;
                     // start, end and step are evaluated once, as the interpreter does
-                    let s0 = self.expr(start)?;
-                    let e0 = self.expr(end)?;
+                    let s0 = self.int(start)?;
+                    let e0 = self.int(end)?;
                     let st = match step {
-                        Some(e) => self.expr(e)?,
+                        Some(e) => self.int(e)?,
                         None => self.b.ins().iconst(types::I64, 1),
                     };
                     // a zero step is an error in the interpreter

@@ -429,6 +429,12 @@ pub struct Interpreter<'out> {
     with_stack: Vec<Expr>,
     /// The files the program has open, by number (`Open ... As #n`).
     pub(crate) files: files::FileTable,
+    /// Compiled `For` loops by the loop statement's address (`None`: refused).
+    /// An address is only trusted while its statement lives: procedure bodies
+    /// live as long as the interpreter, and the main body's clone is made once
+    /// per run, with the cache emptied there.
+    #[cfg(feature = "jit")]
+    pub(crate) jit_cache: HashMap<usize, Option<Rc<jit::Compiled>>>,
 }
 
 /// Debugger pause notification: where execution stopped and what the
@@ -527,6 +533,8 @@ impl<'out> Interpreter<'out> {
             with_stack: Vec::new(),
             files: files::FileTable::default(),
             base_dir: None,
+            #[cfg(feature = "jit")]
+            jit_cache: HashMap::new(),
         };
         it.add_program(prog);
         it
@@ -606,6 +614,8 @@ impl<'out> Interpreter<'out> {
 
     pub fn run(&mut self) -> ExecResult<()> {
         let stmts = self.top_level.clone();
+        #[cfg(feature = "jit")]
+        self.jit_cache.clear();
         let mut f = Frame::main(Rc::new(stmts.clone()));
         let result = self.exec_block(&stmts, &mut f);
         // files are closed when the program ends, error or not, so output
@@ -639,6 +649,8 @@ impl<'out> Interpreter<'out> {
                 Item::Stmt(s) => Some(s.clone()),
             })
             .collect();
+        #[cfg(feature = "jit")]
+        self.jit_cache.clear();
         let mut f = Frame::main(Rc::new(stmts.clone()));
         self.exec_block(&stmts, &mut f)
             .map(|_| ())
@@ -1989,6 +2001,10 @@ impl<'out> Interpreter<'out> {
                 step,
                 body,
             } => {
+                #[cfg(feature = "jit")]
+                if self.try_jit_for(s, f)? {
+                    return Ok(Flow::Normal);
+                }
                 let sv = self.eval(start, f)?;
                 let ev = self.eval(end, f)?;
                 let stv = match step {

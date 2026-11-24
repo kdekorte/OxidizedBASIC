@@ -65,7 +65,43 @@ interpreter. This is the loop's compiled cost only: it does not include reading
 the variables from the interpreter's frame or writing the results back, which the
 next step must add and measure.
 
+## Wired into the interpreter
+
+With the `jit` feature the interpreter's `For` handler (`try_jit_for` in
+`crates/oxbasic_runtime/src/jit.rs`) runs a qualifying loop as native code and
+falls back to the interpreter otherwise. Build with
+`cargo build --release -p oxbasic_ide --features oxbasic_runtime/jit`.
+
+A loop is compiled only when all of these hold:
+
+- its body is in the subset above (integer variables, `+ - * \ Mod`,
+  comparisons, `And`/`Or`/`Not`, `If`, nested `For`);
+- it would run at least 1000 times (shorter loops cost more to compile than to run);
+- every variable it uses already holds a `Long` (the counter may be new);
+- no debugger is attached (compiled code cannot stop at a breakpoint or step).
+
+The compiled code reports no answer, and the interpreter runs the whole loop
+from the start, when a result leaves the `Long` range (VB promotes), a divisor
+is zero, or the step is zero. Nothing is written back until the compiled run has
+succeeded.
+
+| Version | Time (3 runs) | Result |
+|---|---|---|
+| Interpreter (`oxbasic run examples/basica.bas`) | 1.26 s user | `-5000000` |
+| Interpreter with the JIT | 0.01 to 0.02 s user | `-5000000` |
+
+That is about 60 to 120 times faster for this loop. It includes compiling the
+loop, reading its variables and writing them back.
+
+Tests: `crates/oxbasic_runtime/src/jit_tests.rs` runs each loop both ways and
+compares every variable; `crates/oxbasic_runtime/tests/jit_loops.rs` runs whole
+programs. Both need `--features jit`.
+
 ## Still to do
+
+- Turn the feature on in the shipped IDE build (it is off by default).
+- Loops over `Integer`, `Single` or `Double` variables, arrays, and calls.
+- Cache compiled loops across runs in the IDE (each run compiles again).
 
 - Connect the compiler to the runtime: recognise a qualifying `For` loop, read
   its variables from the frame, run the compiled code and write the results back.
