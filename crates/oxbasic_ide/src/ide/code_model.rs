@@ -547,29 +547,76 @@ const COMMON_MEMBERS: &[&str] = &[
     "fontunderline", "fontstrikethru", "caption", "text", "setfocus",
 ];
 
-/// The members of a list control (ListBox), from the ListBox table.
+/// The members of a list control (ListBox), from the runtime (the probe in
+/// `oxbasic_ui`'s member tests): what it answers beyond the common members.
 const LIST_MEMBERS: &[&str] = &[
     "list", "listcount", "listindex", "additem", "removeitem", "clear", "selected", "selcount",
     "multiselect",
 ];
 
-/// The members of a ComboBox, from its table.
+/// The members of a ComboBox, from the runtime.
 const COMBO_MEMBERS: &[&str] = &[
-    "text", "style", "list", "listcount", "listindex", "selstart", "sellength", "seltext",
-    "locked", "additem", "removeitem", "clear", "setfocus",
+    "selstart", "sellength", "seltext", "locked", "selected", "list", "listcount", "listindex",
+    "additem", "removeitem", "clear", "style",
 ];
 
-/// The members of a PictureBox, from its table.
+/// The members of a PictureBox, from the runtime. `Line`, `PSet`, `Circle` and
+/// `Cls` are drawing statements, which the parser knows.
 const PICTURE_MEMBERS: &[&str] = &[
-    "picture", "autosize", "currentx", "currenty", "cls", "line", "pset", "circle", "setfocus",
+    "picture", "autosize", "currentx", "currenty", "cls", "line", "pset", "circle",
 ];
 
-/// The members of a DataGrid: what the runtime handles (`host_grid.rs`) and
-/// the MSFlexGrid names the grid is meant to grow into.
+/// The members of a TextBox, from the runtime.
+const TEXTBOX_MEMBERS: &[&str] = &[
+    "selstart", "sellength", "seltext", "locked", "maxlength", "multiline", "scrollbars",
+];
+
+/// The members of a DataGrid, from the runtime (`host_grid.rs`).
 const GRID_MEMBERS: &[&str] = &[
-    "rows", "cols", "fixedrows", "fixedcols", "editable", "row", "col", "toprow", "leftcol",
-    "scrollbars", "textmatrix", "colwidth", "rowheight", "additem", "removeitem", "clear",
-    "setfocus",
+    "scrollbars", "additem", "removeitem", "clear", "rows", "cols", "row", "col", "toprow",
+    "leftcol", "textmatrix", "fixedrows", "fixedcols", "editable", "colwidth", "rowheight",
+];
+
+/// The members of a CheckBox or OptionButton, from the runtime.
+const VALUE_MEMBERS: &[&str] = &["value"];
+
+/// The members of an Image, from the runtime.
+const IMAGE_MEMBERS: &[&str] = &["picture", "stretch"];
+
+/// The members of a Timer, from the runtime.
+const TIMER_MEMBERS: &[&str] = &["interval"];
+
+/// The members of a scrollbar, a Slider or a ProgressBar, from the runtime.
+const RANGE_MEMBERS: &[&str] = &["min", "max", "smallchange", "largechange", "value"];
+
+/// The members of a Slider: its range and its orientation.
+const SLIDER_MEMBERS: &[&str] = &[
+    "min", "max", "smallchange", "largechange", "value", "orientation",
+];
+
+/// The members of a Shape, from the runtime.
+const SHAPE_MEMBERS: &[&str] = &["shape", "fillstyle"];
+
+/// The members of a Line, from the runtime.
+const LINE_MEMBERS: &[&str] = &["diagonal"];
+
+/// The members of a TabControl, from the runtime.
+const TAB_MEMBERS: &[&str] = &["tab", "tabcaption", "tabs"];
+
+/// The members of a directory list, from the runtime.
+const DIR_MEMBERS: &[&str] = &[
+    "selected", "list", "listcount", "listindex", "additem", "removeitem", "clear", "path",
+];
+
+/// The members of a file list, from the runtime.
+const FILE_MEMBERS: &[&str] = &[
+    "selected", "list", "listcount", "listindex", "additem", "removeitem", "clear", "path",
+    "pattern", "filename",
+];
+
+/// The members of a volume list, from the runtime.
+const VOLUME_MEMBERS: &[&str] = &[
+    "selected", "list", "listcount", "listindex", "additem", "removeitem", "clear",
 ];
 
 /// The member names a control of kind `kind` (its type name, as the Properties
@@ -581,6 +628,18 @@ fn kind_members(kind: &str) -> Option<&'static [&'static str]> {
         "combobox" => Some(COMBO_MEMBERS),
         "picturebox" => Some(PICTURE_MEMBERS),
         "datagrid" => Some(GRID_MEMBERS),
+        "textbox" => Some(TEXTBOX_MEMBERS),
+        "checkbox" | "optionbutton" => Some(VALUE_MEMBERS),
+        "image" => Some(IMAGE_MEMBERS),
+        "timer" => Some(TIMER_MEMBERS),
+        "hscrollbar" | "vscrollbar" | "progressbar" => Some(RANGE_MEMBERS),
+        "slider" => Some(SLIDER_MEMBERS),
+        "shape" => Some(SHAPE_MEMBERS),
+        "line" => Some(LINE_MEMBERS),
+        "tabcontrol" => Some(TAB_MEMBERS),
+        "dirlistbox" => Some(DIR_MEMBERS),
+        "filelistbox" => Some(FILE_MEMBERS),
+        "volumelistbox" => Some(VOLUME_MEMBERS),
         _ => None,
     }
 }
@@ -589,6 +648,27 @@ fn kind_members(kind: &str) -> Option<&'static [&'static str]> {
 /// misspelled method such as `lstFruit.RemooveItem`. `controls` gives each
 /// control's name and kind (its type name). Only a control whose kind has a
 /// written table is checked, so a valid name is never reported as a typo. A
+/// The `control.member` a member access names that the control's kind does not
+/// have, when that kind has a written table (see [`kind_members`]); `None` when
+/// the member is fine, the control is unknown, or its kind is not written down.
+fn member_problem(
+    obj: &oxbasic_ast::Expr,
+    name: &str,
+    controls: &[(String, String)],
+) -> Option<String> {
+    let oxbasic_ast::Expr::Var(control) = obj else {
+        return None;
+    };
+    let (_, kind) = controls.iter().find(|(n, _)| n.eq_ignore_ascii_case(control))?;
+    let table = kind_members(kind)?;
+    let m = name.to_ascii_lowercase();
+    if COMMON_MEMBERS.contains(&m.as_str()) || table.contains(&m.as_str()) {
+        return None;
+    }
+    Some(format!("{}.{}", control, name))
+}
+
+
 /// member the table lists but the runtime does not do yet is not reported.
 pub fn unknown_member(lines: &[String], controls: &[(String, String)]) -> Option<Diagnostic> {
     let src = lines.join("\n");
@@ -608,18 +688,18 @@ pub fn unknown_member(lines: &[String], controls: &[(String, String)]) -> Option
             match s {
                 Stmt::LineMarker(l) => *line = *l,
                 Stmt::Call { target: Expr::Member { obj, name }, .. } => {
-                    if let Expr::Var(control) = obj.as_ref() {
-                        if let Some((_, kind)) =
-                            controls.iter().find(|(n, _)| n.eq_ignore_ascii_case(control))
-                        {
-                            if let Some(table) = kind_members(kind) {
-                                let m = name.to_ascii_lowercase();
-                                if !COMMON_MEMBERS.contains(&m.as_str())
-                                    && !table.contains(&m.as_str())
-                                {
-                                    *found = Some((*line, format!("{}.{}", control, name)));
-                                }
-                            }
+                    if found.is_none() {
+                        if let Some(bad) = member_problem(obj, name, controls) {
+                            *found = Some((*line, bad));
+                        }
+                    }
+                }
+                // a property written with `=` (`txt.Multiline2 = True`) is a
+                // member too, checked like a method call
+                Stmt::Assign { target: Expr::Member { obj, name }, .. } => {
+                    if found.is_none() {
+                        if let Some(bad) = member_problem(obj, name, controls) {
+                            *found = Some((*line, bad));
                         }
                     }
                 }
@@ -1009,11 +1089,13 @@ mod tests {
     }
 
     #[test]
-    fn a_valid_member_the_runtime_lacks_is_not_a_typo() {
-        // ListBox.Sorted is in the VB6 set the table lists as a valid member
-        // but the runtime does not implement it: it is not reported as a typo
+    fn a_member_the_runtime_lacks_is_reported_when_written() {
+        // `Sorted` is not a ListBox member the runtime has, so a write to it is
+        // reported, as a call to a missing method is: the same check applies
+        // to a property assigned with `=`
         let l = lines("Sub Main()\n  lstFruit.Sorted = True\nEnd Sub");
-        assert_eq!(unknown_member(&l, &kinds(&[("lstFruit", "ListBox")])), None);
+        let d = unknown_member(&l, &kinds(&[("lstFruit", "ListBox")])).expect("Sorted is not a member");
+        assert!(d.message.contains("Sorted"), "{}", d.message);
     }
 
     #[test]
@@ -1022,5 +1104,70 @@ mod tests {
         let l = lines("Sub Main()\n  Frame1.Anything\nEnd Sub");
         assert_eq!(unknown_member(&l, &kinds(&[("Frame1", "Frame")])), None);
     }
+
+    #[test]
+    fn a_misspelled_member_of_a_newly_tabled_kind_is_flagged() {
+        let l = lines("Sub Main()\n  txtName.Multiline2 = True\nEnd Sub");
+        let d = unknown_member(&l, &kinds(&[("txtName", "TextBox")])).expect("a typo");
+        assert!(d.message.contains("Multiline2"), "{}", d.message);
+    }
+
+    #[test]
+    fn valid_members_of_the_newly_tabled_kinds_are_not_flagged() {
+        let l = lines(
+            "Sub Main()\n  txt.MaxLength = 5\n  chk.Value = 1\n  tmr.Interval = 100\n  sld.Orientation = 1\n  tabs.Tab = 2\n  f.Pattern = \"*.bas\"\nEnd Sub",
+        );
+        let k = kinds(&[
+            ("txt", "TextBox"),
+            ("chk", "CheckBox"),
+            ("tmr", "Timer"),
+            ("sld", "Slider"),
+            ("tabs", "TabControl"),
+            ("f", "FileListBox"),
+        ]);
+        assert_eq!(unknown_member(&l, &k), None);
+    }
+
+    /// The example projects are valid code: with each form's real controls and
+    /// kinds, the member check must flag nothing in them. A table that lists
+    /// too few members for a kind shows up here as a false error.
+    #[test]
+    fn the_example_projects_have_no_member_flags() {
+        let mut flagged: Vec<String> = vec![];
+        for dir in ["fileio", "fractal", "showcase", "datagrid"] {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples")
+                .join(dir);
+            let mut ctl: Vec<(String, String)> = vec![];
+            for e in std::fs::read_dir(&root).unwrap().flatten() {
+                let p = e.path();
+                if p.extension().map(|x| x == "oxform").unwrap_or(false) {
+                    let v: serde_json::Value =
+                        serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+                    for c in v["controls"].as_array().into_iter().flatten() {
+                        let name = c["name"].as_str().unwrap().to_string();
+                        let kind = c["kind"].as_str().unwrap().to_string();
+                        ctl.push((name, kind));
+                    }
+                }
+            }
+            for e in std::fs::read_dir(&root).unwrap().flatten() {
+                let p = e.path();
+                if p.extension().map(|x| x == "bas").unwrap_or(false) {
+                    let lines: Vec<String> = std::fs::read_to_string(&p)
+                        .unwrap()
+                        .lines()
+                        .map(|s| s.to_string())
+                        .collect();
+                    if let Some(d) = unknown_member(&lines, &ctl) {
+                        flagged.push(format!("{}:{} {}", p.display(), d.row + 1, d.message));
+                    }
+                }
+            }
+        }
+        assert!(flagged.is_empty(), "valid example code is flagged: {:?}", flagged);
+    }
+
+
 }
 

@@ -83,7 +83,11 @@ Immediate pane below.*
     run (a misspelled `Else` such as `Elsee`, or a call to a sub that does not
     exist) is marked the same way, as an unknown name. A misspelled member of
     a control (`lstFruit.RemooveItem`) is marked when the control's kind has
-    its member list written down: ListBox, ComboBox, PictureBox and DataGrid.
+    its member list written down: TextBox, CheckBox, OptionButton, ListBox,
+    ComboBox, PictureBox, Image, Timer, the scrollbars, ProgressBar, Slider,
+    Shape, Line, TabControl, the file-browser lists and DataGrid. The check
+    covers a property written with `=` as well as a method call. The lists
+    are checked against the runtime by a test, so they cannot drift from it.
     A name inside an expression is checked too: `x = Helpr(2)` is marked,
     while declared variables, procedures (in any module of the project),
     controls, built-ins, built-in constants (`vbCrLf`) and `Err` are known.

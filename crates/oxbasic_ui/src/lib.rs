@@ -32,6 +32,8 @@ mod grid_tests;
 mod grid_host_tests;
 #[cfg(test)]
 mod grid_user_tests;
+#[cfg(test)]
+mod member_probe_tests;
 pub mod menu;
 #[cfg(feature = "gpui")]
 pub mod menu_bar;
