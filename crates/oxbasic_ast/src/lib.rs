@@ -340,6 +340,9 @@ pub enum ResumeKind {
 pub enum Expr {
     Lit(Lit),
     Var(String),
+    /// A variable of a procedure, resolved to its frame slot. Only the runtime
+    /// makes these (in its own copy of a body); the parser never does.
+    Slot { name: String, slot: usize },
     /// `.Member` inside a `With` block: a member of the With object.
     WithRef(String),
     /// `Name(arg1, arg2)` — also used for array indexing; the runtime

@@ -544,7 +544,8 @@ impl<'out> Interpreter<'out> {
                 Item::Proc(p) => {
                     self.proc_index
                         .insert(p.name.to_lowercase(), self.decls.len());
-                    self.slot_tables.push(slots::table_for(&p.params, &p.body));
+                    let table = slots::table_for(&p.params, &p.body);
+                    self.slot_tables.push(table);
                     self.decls.push(Rc::new(p.clone()));
                 }
                 Item::Stmt(s) => {
@@ -2760,6 +2761,15 @@ impl<'out> Interpreter<'out> {
                 Lit::Nothing => Variant::Nothing,
             }),
             Expr::Var(name) => self.eval_var(name, f),
+            // a procedure's variable, by its slot: the cell is in the frame when
+            // the variable is bound; otherwise the name-based read decides (for a
+            // variable that is implicit, constant or the function's result)
+            Expr::Slot { name, slot } => {
+                if let Some(Some(rc)) = f.slots.get(*slot) {
+                    return Ok(rc.borrow().clone());
+                }
+                self.eval_var(name, f)
+            }
             // `.Caption` inside a With block: read the member of the With object
             Expr::WithRef(name) => {
                 let member = self.resolve_with(name)?;
