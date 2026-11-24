@@ -224,6 +224,9 @@ pub(crate) struct Frame {
     body: Rc<Vec<Stmt>>,
     /// How many `GoSub`s are running in this frame (a `Return` needs one).
     gosub_depth: usize,
+    /// The frame's cells by slot (see `SlotTable`): kept in step with `locals`
+    /// by `bind`, so a slot read is an index, not a name lookup.
+    slots: Vec<Option<Rc<RefCell<Variant>>>>,
 }
 
 impl Frame {
@@ -231,6 +234,7 @@ impl Frame {
         Frame {
             name: String::new(),
             is_main: true,
+            slots: Vec::new(),
             locals: NameMap::default(),
             local_types: NameMap::default(),
             ret_name: None,
@@ -245,10 +249,11 @@ impl Frame {
         }
     }
 
-    fn proc(decl: &ProcDecl) -> Frame {
+    fn proc(decl: &ProcDecl, slot_count: usize) -> Frame {
         Frame {
             name: decl.name.to_lowercase(),
             is_main: false,
+            slots: vec![None; slot_count],
             locals: NameMap::default(),
             local_types: NameMap::default(),
             ret_name: match decl.kind {
@@ -840,7 +845,7 @@ impl<'out> Interpreter<'out> {
             return err(28, "out of stack space");
         }
         let decl = self.decls[idx].clone();
-        let mut callee = Frame::proc(&decl);
+        let mut callee = Frame::proc(&decl, self.slot_tables[idx].len());
         let nparams = decl.params.len();
         let has_param_array = decl.params.iter().any(|p| p.param_array);
         if args.len() > nparams && !has_param_array {
@@ -2629,7 +2634,7 @@ impl<'out> Interpreter<'out> {
                 return err(28, "out of stack space");
             }
             let decl = self.decls[idx].clone();
-            let mut callee = Frame::proc(&decl);
+            let mut callee = Frame::proc(&decl, self.slot_tables[idx].len());
             let nparams = decl.params.len();
             let nargs = arg_exprs.len();
             if nargs > nparams && !decl.params.iter().any(|p| p.param_array) {
