@@ -384,7 +384,7 @@ fn declared_names(stmts: &[oxbasic_ast::Stmt], out: &mut std::collections::HashS
 fn undefined_in(expr: &oxbasic_ast::Expr, known: &std::collections::HashSet<String>) -> Option<String> {
     use oxbasic_ast::Expr;
     match expr {
-        Expr::Var(name) | Expr::Slot { name, .. } | Expr::Call { name, .. } => {
+        Expr::Var(name) | Expr::Call { name, .. } => {
             let lower = name.to_lowercase();
             if known.contains(&lower)
                 || oxbasic_runtime::is_builtin(&lower)

@@ -37,7 +37,7 @@ proven to match, the loop falls back to the interpreter.
 
 ## Out of scope for the first step
 
-- Procedures, parameters and `ByRef` (the frame and slot work comes first).
+- Procedures, parameters and `ByRef` (not started).
 - Strings, arrays, objects, `With` and event handlers.
 - Any change to the interpreter's behaviour when the JIT is off.
 

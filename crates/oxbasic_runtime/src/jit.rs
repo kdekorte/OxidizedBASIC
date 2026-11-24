@@ -142,7 +142,7 @@ impl crate::Interpreter<'_> {
         let compiled = match cached {
             Some(Some(c)) => c,
             _ => {
-                let names: Vec<String> = crate::slots::names_in_stmts(std::slice::from_ref(s))
+                let names: Vec<String> = crate::varnames::names_in_stmts(std::slice::from_ref(s))
                     .iter()
                     .map(|n| n.to_lowercase())
                     .collect();

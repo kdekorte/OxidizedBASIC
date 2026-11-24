@@ -1,54 +1,8 @@
-//! Slot resolution, step 1: the variable names a procedure (or the main
-//! module) uses, in a stable order, so each can later get an index. Pure: it
-//! reads the AST and reports names, and changes nothing at run time.
+//! The variable names a list of statements uses, for the JIT: it needs every
+//! variable a `For` loop reads or writes. Pure: it reads the AST and reports
+//! names, and changes nothing at run time.
 
 use oxbasic_ast::{CaseItem, Expr, GPoint, Graphic, PrintItem, Stmt, VarDecl};
-
-/// The slots of one procedure (or the main module): each name it uses, lowercased,
-/// with its index. The index is fixed for the procedure's life, so a frame's
-/// slot vector has one entry per index.
-#[derive(Debug, Clone, Default)]
-pub struct SlotTable {
-    index: std::collections::HashMap<String, usize>,
-    names: Vec<String>,
-}
-
-impl SlotTable {
-    /// The slot for `name` (any case), if the procedure uses it.
-    pub fn slot(&self, name: &str) -> Option<usize> {
-        self.index.get(&name.to_lowercase()).copied()
-    }
-
-    /// How many slots the table has.
-    pub fn len(&self) -> usize {
-        self.names.len()
-    }
-}
-
-/// The slot table of a procedure: its parameters first (so a parameter's slot
-/// is its position), then every other name its body uses, in first-use order.
-pub fn table_for(params: &[oxbasic_ast::Param], body: &[Stmt]) -> SlotTable {
-    let mut names: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut add = |n: &str, names: &mut Vec<String>| {
-        let l = n.to_lowercase();
-        if seen.insert(l.clone()) {
-            names.push(l);
-        }
-    };
-    for p in params {
-        add(&p.name, &mut names);
-    }
-    for n in names_in_stmts(body) {
-        add(&n, &mut names);
-    }
-    let index = names
-        .iter()
-        .enumerate()
-        .map(|(i, n)| (n.clone(), i))
-        .collect();
-    SlotTable { index, names }
-}
 
 /// Every variable name a list of statements mentions, in first-use order and
 /// without repeats (names are kept as written; the caller lowercases them).
@@ -69,7 +23,7 @@ fn push(out: &mut Vec<String>, name: &str) {
 fn expr_names(e: &Expr, out: &mut Vec<String>) {
     match e {
         Expr::Lit(_) => {}
-        Expr::Var(name) | Expr::Slot { name, .. } => push(out, name),
+        Expr::Var(name) => push(out, name),
         // a `.Member` inside `With` names no variable of its own
         Expr::WithRef(_) => {}
         // an array element or a call: the name may be a variable (an array)
@@ -317,54 +271,8 @@ fn stmt_names(s: &Stmt, out: &mut Vec<String>) {
 mod tests {
     use super::*;
 
-    /// The names the walker finds in a program's statements (the module's own
-    /// top-level statements), lowercased and sorted for comparison.
-
-    /// The slot table of the first procedure in `src`.
-    fn table_of(src: &str) -> SlotTable {
-        let prog = oxbasic_parser::parse(src).expect("the source parses");
-        for item in prog.items {
-            if let oxbasic_ast::Item::Proc(p) = item {
-                return table_for(&p.params, &p.body);
-            }
-        }
-        panic!("no procedure in the source");
-    }
-
-    #[test]
-    fn parameters_take_the_first_slots_in_order() {
-        let t = table_of("Sub Add(a, b)\n  c = a + b\nEnd Sub\n");
-        assert_eq!(t.slot("a"), Some(0));
-        assert_eq!(t.slot("b"), Some(1));
-        assert_eq!(t.slot("c"), Some(2));
-    }
-
-    #[test]
-    fn slot_lookup_ignores_case() {
-        let t = table_of("Sub S(Total)\n  total = total + 1\nEnd Sub\n");
-        assert_eq!(t.slot("TOTAL"), Some(0));
-        assert_eq!(t.slot("total"), Some(0));
-    }
-
-    #[test]
-    fn every_name_the_body_uses_has_a_slot_and_nothing_else_does() {
-        let t = table_of("Sub S()\n  x = y\n  For i = 1 To 3\n  Next i\nEnd Sub\n");
-        for n in ["x", "y", "i"] {
-            assert!(t.slot(n).is_some(), "{} has a slot", n);
-        }
-        assert_eq!(t.slot("zzz"), None, "an unused name has no slot");
-        assert_eq!(t.len(), 3);
-    }
-
-    #[test]
-    fn slots_are_unique() {
-        let t = table_of("Sub S(a)\n  b = a\n  c = b\nEnd Sub\n");
-        let mut slots: Vec<usize> = ["a", "b", "c"].iter().map(|n| t.slot(n).unwrap()).collect();
-        slots.sort();
-        slots.dedup();
-        assert_eq!(slots.len(), 3);
-    }
-
+    /// The names the walker finds in a program's own top-level statements,
+    /// lowercased and sorted for comparison.
     fn names_of(src: &str) -> Vec<String> {
         let prog = oxbasic_parser::parse(src).expect("the source parses");
         let stmts: Vec<Stmt> = prog

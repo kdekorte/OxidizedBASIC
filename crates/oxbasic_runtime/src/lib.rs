@@ -10,7 +10,8 @@ mod files;
 #[cfg(feature = "jit")]
 mod jit;
 use files::Field;
-mod slots;
+#[cfg(feature = "jit")]
+mod varnames;
 mod stdlib;
 mod vbbinary;
 mod vbtypes;
@@ -226,9 +227,6 @@ pub(crate) struct Frame {
     body: Rc<Vec<Stmt>>,
     /// How many `GoSub`s are running in this frame (a `Return` needs one).
     gosub_depth: usize,
-    /// The frame's cells by slot (see `SlotTable`): kept in step with `locals`
-    /// by `bind`, so a slot read is an index, not a name lookup.
-    slots: Vec<Option<Rc<RefCell<Variant>>>>,
 }
 
 impl Frame {
@@ -236,7 +234,6 @@ impl Frame {
         Frame {
             name: String::new(),
             is_main: true,
-            slots: Vec::new(),
             locals: NameMap::default(),
             local_types: NameMap::default(),
             ret_name: None,
@@ -251,11 +248,10 @@ impl Frame {
         }
     }
 
-    fn proc(decl: &ProcDecl, slot_count: usize) -> Frame {
+    fn proc(decl: &ProcDecl) -> Frame {
         Frame {
             name: decl.name.to_lowercase(),
             is_main: false,
-            slots: vec![None; slot_count],
             locals: NameMap::default(),
             local_types: NameMap::default(),
             ret_name: match decl.kind {
@@ -391,9 +387,6 @@ pub struct Interpreter<'out> {
     pub base_dir: Option<std::path::PathBuf>,
     pub(crate) decls: Vec<Rc<ProcDecl>>,
     pub(crate) proc_index: NameMap<usize>,
-    /// Each procedure's slot table (by its index in `decls`): the names it uses,
-    /// each with the slot that holds its cell. Built by `add_program`.
-    pub(crate) slot_tables: Vec<slots::SlotTable>,
     top_level: Vec<Stmt>,
     pub(crate) globals: NameMap<Rc<RefCell<Variant>>>,
     pub(crate) global_types: NameMap<String>,
@@ -517,7 +510,6 @@ impl<'out> Interpreter<'out> {
         let mut it = Interpreter {
             decls: Vec::new(),
             proc_index: NameMap::default(),
-            slot_tables: Vec::new(),
             top_level: Vec::new(),
             globals: NameMap::default(),
             global_types: NameMap::default(),
@@ -564,8 +556,6 @@ impl<'out> Interpreter<'out> {
                 Item::Proc(p) => {
                     self.proc_index
                         .insert(p.name.to_lowercase(), self.decls.len());
-                    let table = slots::table_for(&p.params, &p.body);
-                    self.slot_tables.push(table);
                     self.decls.push(Rc::new(p.clone()));
                 }
                 Item::Stmt(s) => {
@@ -895,7 +885,7 @@ impl<'out> Interpreter<'out> {
             return err(28, "out of stack space");
         }
         let decl = self.decls[idx].clone();
-        let mut callee = Frame::proc(&decl, self.slot_tables[idx].len());
+        let mut callee = Frame::proc(&decl);
         let nparams = decl.params.len();
         let has_param_array = decl.params.iter().any(|p| p.param_array);
         if args.len() > nparams && !has_param_array {
@@ -1038,27 +1028,13 @@ impl<'out> Interpreter<'out> {
         Ok(())
     }
 
-    /// Bind `name` to `cell` in frame `f` (or the globals for the main module),
-    /// and record it in the frame's slot when the procedure has one for it. The
-    /// name map stays the source of truth; the slot is an index to the same cell.
+    /// Bind `name` to `cell` in frame `f`, or in the globals for the main module.
     fn bind(&mut self, f: &mut Frame, name: String, cell: Rc<RefCell<Variant>>) {
         if f.is_main {
             self.globals.insert(name, cell);
         } else {
-            if let Some(slot) = self.slot_index_of(f, &name) {
-                f.slots[slot] = Some(cell.clone());
-            }
             f.locals.insert(name, cell);
         }
-    }
-
-    /// The slot of `name` in frame `f`'s procedure, if it has one.
-    fn slot_index_of(&self, f: &Frame, name: &str) -> Option<usize> {
-        if f.slots.is_empty() {
-            return None;
-        }
-        let idx = *self.proc_index.get(&f.name)?;
-        self.slot_tables.get(idx)?.slot(name)
     }
 
     /// The `DefInt`-style type of an undeclared `name`, from its first letter.
@@ -2693,7 +2669,7 @@ impl<'out> Interpreter<'out> {
                 return err(28, "out of stack space");
             }
             let decl = self.decls[idx].clone();
-            let mut callee = Frame::proc(&decl, self.slot_tables[idx].len());
+            let mut callee = Frame::proc(&decl);
             let nparams = decl.params.len();
             let nargs = arg_exprs.len();
             if nargs > nparams && !decl.params.iter().any(|p| p.param_array) {
@@ -2814,15 +2790,6 @@ impl<'out> Interpreter<'out> {
                 Lit::Nothing => Variant::Nothing,
             }),
             Expr::Var(name) => self.eval_var(name, f),
-            // a procedure's variable, by its slot: the cell is in the frame when
-            // the variable is bound; otherwise the name-based read decides (for a
-            // variable that is implicit, constant or the function's result)
-            Expr::Slot { name, slot } => {
-                if let Some(Some(rc)) = f.slots.get(*slot) {
-                    return Ok(rc.borrow().clone());
-                }
-                self.eval_var(name, f)
-            }
             // `.Caption` inside a With block: read the member of the With object
             Expr::WithRef(name) => {
                 let member = self.resolve_with(name)?;
@@ -3411,33 +3378,3 @@ pub(crate) fn format_date(serial: f64) -> String {
     }
 }
 
-#[cfg(test)]
-mod bind_tests {
-    use super::*;
-
-    /// Each name bound in a procedure's frame has its slot holding the same cell
-    /// as the name map, so a read by slot sees exactly what a read by name sees.
-    #[test]
-    fn a_bound_name_has_its_slot_holding_the_same_cell() {
-        struct Sink;
-        impl Output for Sink {
-            fn write(&mut self, _s: &str) {}
-        }
-        let src = "Sub Calc(a)\n  b = a + 1\nEnd Sub\n";
-        let prog = oxbasic_parser::parse(src).expect("parses");
-        let mut sink = Sink;
-        let mut it = Interpreter::new(&prog, &mut sink);
-        it.add_program(&prog);
-        let idx = it.proc_index["calc"];
-        let decl = it.decls[idx].clone();
-        let mut f = Frame::proc(&decl, it.slot_tables[idx].len());
-        it.bind(&mut f, "a".to_string(), Rc::new(RefCell::new(Variant::Long(1))));
-        it.bind(&mut f, "b".to_string(), Rc::new(RefCell::new(Variant::Long(2))));
-        for name in ["a", "b"] {
-            let slot = it.slot_tables[idx].slot(name).expect("the table has a slot");
-            let by_slot = f.slots[slot].as_ref().expect("the slot is filled");
-            let by_name = f.locals.get(name).expect("the name is bound");
-            assert!(Rc::ptr_eq(by_slot, by_name), "{}: slot and name hold one cell", name);
-        }
-    }
-}
