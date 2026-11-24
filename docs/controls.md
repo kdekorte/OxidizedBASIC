@@ -399,6 +399,46 @@ page's top border. A press on a tab in the strip selects that page. A `Tab` the
 program sets is shown in a form window that is already open, not only in one
 opened afterwards.
 
+### DataGrid
+| Member | Kind | Type | Run time | Design time |
+|---|---|---|---|---|
+| `Rows`, `Cols` | property | Long | R/W | R/W |
+| `FixedRows`, `FixedCols` | property | Long | R/W | R/W |
+| `Editable` | property | Boolean | R/W | R/W |
+| `Row`, `Col` | property | Long | R/W (the current cell) | — |
+| `TopRow`, `LeftCol` | property | Long | R/W (the first scrolling row and column in view) | — |
+| `TextMatrix(r, c)` | property | String | R/W | — |
+| `Text` | property | String | R: the current cell, or the text being typed into it | — |
+| `ColWidth(c)`, `RowHeight(r)` | property | Single | R/W | — |
+| `ScrollBars` | property | Integer | R | R/W |
+| `AddItem text` | method | | yes | |
+| `RemoveItem row` | method | | yes | |
+| `Clear` | method | | yes | |
+| `SetFocus` | method | | yes | |
+
+The first `FixedRows` rows and `FixedCols` columns are headers: they stay
+in view and cannot be edited. `Row`/`Col` are the current cell; setting them
+scrolls the cell into view. A cell is read-only unless `Editable` is true.
+
+Events, in the order they run:
+
+- `LeaveCell`, `RowColChange`, `EnterCell`: the current cell moves (a click,
+  an arrow key, Tab, Enter, or the program setting `Row`/`Col`).
+- `Scroll`: the visible rows or columns change (the wheel, a scrollbar, or a
+  move that scrolls the cell into view).
+- `Change`: each keystroke while a cell is being typed into. `Text` is the
+  text typed so far, so the program can follow the typing.
+- `ValidateEdit(Row, Col, Cancel)`: before a typed value is stored. `Text`
+  is the value being committed; set `Cancel = 1` to refuse it. The cell
+  keeps its old value.
+- `AfterEdit(Row, Col)`: after a value is stored.
+- `Click`, `MouseDown`, `MouseMove`, `MouseUp`, `KeyDown`, `KeyPress`,
+  `KeyUp`, `GotFocus`, `LostFocus`: as for the other controls.
+
+Typing into the current cell starts an edit over its text. **Enter** or
+**Tab** commits it; **Esc** cancels; **F2** edits the text as it is. The
+arrow keys, Home and End, and PageUp/PageDown move the current cell.
+
 ### Menu
 A form's menu bar is not a control: it is the form's `menus` list. Each item
 has a `name` (its handler is `name_Click`), a

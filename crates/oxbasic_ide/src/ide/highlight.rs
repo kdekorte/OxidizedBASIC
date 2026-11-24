@@ -401,6 +401,31 @@ mod tests {
     }
 
     #[test]
+    fn the_drawing_statements_are_keywords() {
+        let pset = kinds("PSet (3, 4), 0");
+        assert!(pset.contains(&("PSet".to_string(), Tok::Keyword)), "{:?}", pset);
+        let circle = kinds("Circle (50, 50), 20");
+        assert!(circle.contains(&("Circle".to_string(), Tok::Keyword)), "{:?}", circle);
+        let line = kinds("Line (0, 0)-(10, 10)");
+        assert!(line.contains(&("Line".to_string(), Tok::Keyword)), "{:?}", line);
+    }
+
+    #[test]
+    fn a_line_variable_is_not_a_drawing_statement() {
+        // `Line` is also a variable name: an assignment keeps it an identifier
+        let toks = kinds("Line = 5");
+        assert!(toks.contains(&("Line".to_string(), Tok::Ident)), "{:?}", toks);
+    }
+
+    #[test]
+    fn a_method_line_with_step_is_coloured() {
+        let toks = kinds("Picture1.Line -Step(5, 5)");
+        assert!(toks.contains(&("Line".to_string(), Tok::Keyword)), "{:?}", toks);
+        assert!(toks.contains(&("Step".to_string(), Tok::Keyword)), "{:?}", toks);
+    }
+
+
+    #[test]
     fn the_grammar_keeps_the_whole_line_and_its_spacing() {
         let line = "lbl.Caption = \"a\" & b";
         let joined: String = kinds(line).iter().map(|(t, _)| t.as_str()).collect();
@@ -525,3 +550,5 @@ mod grammar_used_tests {
 
 
 }
+
+

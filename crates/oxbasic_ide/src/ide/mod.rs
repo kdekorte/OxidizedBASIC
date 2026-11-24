@@ -168,6 +168,7 @@ gpui::actions!(
         RemoveDocument,
         RunProgram,
         StepProgram,
+        StepIntoProgram,
         StopProgram,
         ViewCode,
         ViewObject,
@@ -196,6 +197,7 @@ pub(super) fn bind_shortcuts(cx: &mut App) {
         gpui::KeyBinding::new("cmd-r", RunProgram, None),
         gpui::KeyBinding::new("cmd-shift-r", StopProgram, None),
         gpui::KeyBinding::new("f7", ViewCode, None),
+        gpui::KeyBinding::new("f8", StepIntoProgram, None),
         gpui::KeyBinding::new("shift-f7", ViewObject, None),
         gpui::KeyBinding::new("cmd-z", EditUndo, None),
         gpui::KeyBinding::new("cmd-shift-z", EditRedo, None),
@@ -697,6 +699,15 @@ impl Ide {
         self.launch(true);
     }
 
+    /// Step Into (F8): run the current statement, entering a sub it calls.
+    fn step_into_program(&mut self) {
+        if let Some(s) = &self.session {
+            s.send(DebugCommand::StepInto);
+            return;
+        }
+        self.launch(true);
+    }
+
     fn stop_program(&mut self, cx: &mut Context<Self>) {
         if let Some(s) = &self.session.take() {
             s.send(DebugCommand::Stop);
@@ -758,7 +769,17 @@ impl Ide {
     /// control (`lstFruit.RemooveItem`). The form's controls are the names the
     /// module may use.
     pub(super) fn current_diagnostic(&self) -> Option<code_model::Diagnostic> {
-        let controls: Vec<String> = self.form.controls.iter().map(|c| c.name.clone()).collect();
+        // the names the module may use: this form's controls, and the
+        // procedures of every other module of the project (a call to a Sub or
+        // Function defined in Module1 is not an unknown name here)
+        let mut controls: Vec<String> = self.form.controls.iter().map(|c| c.name.clone()).collect();
+        for d in &self.workspace.docs {
+            if d.kind == crate::ide::workspace::DocKind::Module || d.kind == crate::ide::workspace::DocKind::Form {
+                for p in code_model::find_procedures(&d.lines) {
+                    controls.push(p.name);
+                }
+            }
+        }
         let kinds: Vec<(String, String)> = self
             .form
             .controls
@@ -1405,6 +1426,10 @@ impl Render for Ide {
             }))
             .on_action(cx.listener(|this, _: &StepProgram, _win, cx| {
                 this.step_program();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &StepIntoProgram, _win, cx| {
+                this.step_into_program();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &StopProgram, _win, cx| {

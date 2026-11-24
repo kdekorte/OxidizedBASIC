@@ -323,6 +323,93 @@ pub fn diagnostic(lines: &[String]) -> Option<Diagnostic> {
 }
 
 
+/// The names a module declares: its `Dim` and `Const` names, the parameters
+/// and names of its procedures (a Function's name holds its result), and the
+/// variables of `For` loops. A name in an expression that is none of these,
+/// nor a control, a procedure or a built-in, is not defined.
+fn declared_names(stmts: &[oxbasic_ast::Stmt], out: &mut std::collections::HashSet<String>) {
+    use oxbasic_ast::Stmt;
+    for s in stmts {
+        match s {
+            Stmt::Dim(decls) => {
+                for d in decls {
+                    out.insert(d.name.to_lowercase());
+                }
+            }
+            // a name first assigned is a variable (VB creates it then)
+            Stmt::Assign { target: oxbasic_ast::Expr::Var(name), .. } => {
+                out.insert(name.to_lowercase());
+            }
+            Stmt::Const(decls) => {
+                for d in decls {
+                    out.insert(d.name.to_lowercase());
+                }
+            }
+            Stmt::If { arms, else_body } => {
+                for a in arms {
+                    declared_names(&a.body, out);
+                }
+                if let Some(b) = else_body {
+                    declared_names(b, out);
+                }
+            }
+            Stmt::For { var, body, .. } => {
+                out.insert(var.to_lowercase());
+                declared_names(body, out);
+            }
+            Stmt::ForEach { var, body, .. } => {
+                out.insert(var.to_lowercase());
+                declared_names(body, out);
+            }
+            Stmt::DoWhile { body, .. }
+            | Stmt::DoLoop { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::With { body, .. } => declared_names(body, out),
+            Stmt::Select { arms, else_body, .. } => {
+                for a in arms {
+                    declared_names(&a.body, out);
+                }
+                if let Some(b) = else_body {
+                    declared_names(b, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The first name an expression uses that the module does not define (see
+/// [`declared_names`]), with the name. Member access and `With` references are
+/// not checked here: the object they name is not known statically.
+fn undefined_in(expr: &oxbasic_ast::Expr, known: &std::collections::HashSet<String>) -> Option<String> {
+    use oxbasic_ast::Expr;
+    match expr {
+        Expr::Var(name) | Expr::Call { name, .. } => {
+            let lower = name.to_lowercase();
+            if known.contains(&lower)
+                || oxbasic_runtime::is_builtin(&lower)
+                || oxbasic_runtime::is_builtin_constant(&lower)
+            {
+                // a call's arguments are checked too
+                if let Expr::Call { args, .. } = expr {
+                    return args.iter().find_map(|a| undefined_in(a, known));
+                }
+                None
+            } else {
+                Some(name.clone())
+            }
+        }
+        Expr::Unary { expr, .. } => undefined_in(expr, known),
+        Expr::Binary { lhs, rhs, .. } => undefined_in(lhs, known).or_else(|| undefined_in(rhs, known)),
+        Expr::MethodCall { obj, args, .. } => {
+            undefined_in(obj, known).or_else(|| args.iter().find_map(|a| undefined_in(a, known)))
+        }
+        Expr::Member { obj, .. } => undefined_in(obj, known),
+        Expr::Lit(_) | Expr::WithRef(_) => None,
+    }
+}
+
+
 /// The first bare word in `lines` that names nothing the module can run: not
 /// a built-in statement or function, a procedure of the module, a control of
 /// the form (`controls`), or a label. `Elsee` on its own line is such a word
@@ -347,6 +434,25 @@ pub fn unknown_name(lines: &[String], controls: &[String]) -> Option<Diagnostic>
         known.insert(c.to_lowercase());
     }
     known.insert("form".to_string());
+    // the Err object is always there (`Err.Number`, `Err.Clear`)
+    known.insert("err".to_string());
+    // the names the module declares: its variables, constants, parameters and
+    // loop variables (a name in an expression must be one of these)
+    let mut declared: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for item in &program.items {
+        match item {
+            oxbasic_ast::Item::Stmt(s) => declared_names(std::slice::from_ref(s), &mut declared),
+            oxbasic_ast::Item::Proc(p) => {
+                for param in &p.params {
+                    declared.insert(param.name.to_lowercase());
+                }
+                // a Function's name holds its result inside its body
+                declared.insert(p.name.to_lowercase());
+                declared_names(&p.body, &mut declared);
+            }
+        }
+    }
+    known.extend(declared);
 
     // walk the statements in order, remembering the source line of each
     let mut line = 0usize;
@@ -364,6 +470,13 @@ pub fn unknown_name(lines: &[String], controls: &[String]) -> Option<Diagnostic>
             }
             match s {
                 Stmt::LineMarker(l) => *line = *l,
+                Stmt::Assign { value, .. } => {
+                    if found.is_none() {
+                        if let Some(name) = undefined_in(value, known) {
+                            *found = Some((*line, name));
+                        }
+                    }
+                }
                 Stmt::Call { target: Expr::Var(name), args, bare: true } if args.is_empty() => {
                     let lower = name.to_lowercase();
                     if !known.contains(&lower) && !oxbasic_runtime::is_builtin(&lower) {
@@ -823,6 +936,43 @@ mod tests {
         // the syntax error is the report here, not an unknown name
         assert_eq!(unknown_name(&lines("Print (2"), &[]), None);
     }
+    #[test]
+    fn a_misspelled_name_inside_an_expression_is_flagged() {
+        let l = lines("Sub Main()\n  Dim x As Long\n  x = Helpr(2)\nEnd Sub");
+        let d = unknown_name(&l, &[]).expect("Helpr is not defined");
+        assert_eq!(d.row, 2);
+        assert!(d.message.contains("Helpr"), "{}", d.message);
+    }
+
+    #[test]
+    fn declared_names_builtins_and_procedures_inside_expressions_are_not_flagged() {
+        let l = lines(
+            "Function Twice(n)\n  Twice = n * 2\nEnd Function\nSub Main()\n  Dim a(3) As Long\n  Dim total As Long\n  total = Twice(a(1)) + Len(\"x\")\nEnd Sub",
+        );
+        assert_eq!(unknown_name(&l, &[]), None);
+    }
+    #[test]
+    fn a_builtin_constant_and_err_inside_an_expression_are_not_flagged() {
+        let l = lines("Sub Main()\n  Dim s As String\n  s = \"a\" & vbCrLf\n  Print Err.Number\nEnd Sub");
+        assert_eq!(unknown_name(&l, &[]), None);
+    }
+
+    #[test]
+    fn a_variable_first_assigned_is_declared_for_later_lines() {
+        // VB creates `count` on its first assignment; using it later is fine
+        let l = lines("count = 0\nSub Main()\n  count = count + 1\nEnd Sub");
+        assert_eq!(unknown_name(&l, &[]), None);
+    }
+
+    #[test]
+    fn a_control_name_inside_an_expression_is_known() {
+        let l = lines("Sub Main()\n  Dim n As Long\n  n = lstFruit.ListCount\nEnd Sub");
+        assert_eq!(unknown_name(&l, &controls(&["lstFruit"])), None);
+    }
+
+
+
+
 
     fn kinds(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
@@ -873,3 +1023,4 @@ mod tests {
         assert_eq!(unknown_member(&l, &kinds(&[("Frame1", "Frame")])), None);
     }
 }
+

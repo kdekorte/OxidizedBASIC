@@ -444,6 +444,9 @@ pub enum DebugAction {
     /// Execute the current statement, then pause at the next statement
     /// at the same (or shallower) call depth.
     StepOver,
+    /// Execute the current statement, then pause at the next statement at
+    /// any call depth, so a sub or function called here is entered.
+    StepInto,
     /// Stop the program.
     Abort,
 }
@@ -708,6 +711,8 @@ impl<'out> Interpreter<'out> {
         match action {
             DebugAction::Continue => self.step_depth = None,
             DebugAction::StepOver => self.step_depth = Some(self.depth),
+            // a pause is due whatever the depth: `depth <= usize::MAX` always
+            DebugAction::StepInto => self.step_depth = Some(usize::MAX),
             DebugAction::Abort => return err(DEBUG_ABORT, "execution aborted by the debugger"),
         }
         Ok(())
@@ -1238,6 +1243,12 @@ impl<'out> Interpreter<'out> {
         }
         Ok(())
     }
+}
+
+/// Whether `name` is one of the runtime's built-in constants (`vbCrLf`,
+/// `vbCritical`...), which a program may use without declaring them.
+pub fn is_builtin_constant(name: &str) -> bool {
+    builtin_constants().contains_key(&name.to_lowercase())
 }
 
 fn builtin_constants() -> NameMap<Variant> {

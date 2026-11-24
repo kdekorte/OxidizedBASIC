@@ -13,7 +13,7 @@ phases. For every keyword the language accepts, see
 the toolbox on the left, the project and properties on the right, and the
 Immediate pane below.*
 
-## Status — Phases 1 & 2 complete, Phase 3 (IDE) in progress
+## Status — Phases 1, 2 & 3 complete; Phase 4 (JIT and packaging) next
 
 ### Phase 1: syntax parser & core runtime
 - **Parser** (`oxbasic_parser`): `pest` grammar for the classic VB6/VBA
@@ -83,8 +83,10 @@ Immediate pane below.*
     run (a misspelled `Else` such as `Elsee`, or a call to a sub that does not
     exist) is marked the same way, as an unknown name. A misspelled member of
     a control (`lstFruit.RemooveItem`) is marked when the control's kind has
-    its member list written down: ListBox, ComboBox and PictureBox for now.
-    Names inside an expression are not checked yet.
+    its member list written down: ListBox, ComboBox, PictureBox and DataGrid.
+    A name inside an expression is checked too: `x = Helpr(2)` is marked,
+    while declared variables, procedures (in any module of the project),
+    controls, built-ins, built-in constants (`vbCrLf`) and `Err` are known.
   - **Visual form designer**: the form canvas renders the `.oxform`
     layout; click to select controls, **drag to move** them and **drag
     the eight selection handles** to resize them (like VB6), and add
@@ -271,7 +273,7 @@ of the form's menu shows disabled.
 - The IDE's editor has no find/replace, word wrap, or multiple carets;
   undo history is per document and is cleared when you switch documents
   or a rename changes the code. The debugger supports breakpoints,
-  step-over, and watch (no step-into).
+  step-over, step-into (F8), and watch.
 - `MsgBox` prints to the console/output pane (a native GPUI dialog is a
   follow-up).
 - The file dialog filters after the user picks a file, so the picker shows

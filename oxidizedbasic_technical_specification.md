@@ -166,8 +166,8 @@ The OxidizedBASIC IDE is a native GPUI application providing sub-millisecond edi
 
 ### Phase 3: IDE Development (Months 6–9)
 - Build the visual Form Designer in GPUI Kit. (Done: drag, resize handles, toolbox, Property Inspector.)
-- Integrate Tree-sitter syntax highlighting editor and Property Inspector. (Done: the editor parses the whole module once and colours every row from that parse, so a block's `Sub` and `End If` lines get grammar colours. A row the grammar cannot colour falls back to a hand-written tokenizer. Open: the drawing statements `Line`, `PSet` and `Circle` are not in the grammar, because `Line` is also a valid variable name and a keyword token cannot be told apart from it; those rows fall back to the plain colours.)
-- Implement debug controls (Breakpoints, Step-over, Variable Watch). (Done. Step-into is not implemented.)
+- Integrate Tree-sitter syntax highlighting editor and Property Inspector. (Done: the editor parses the whole module once and colours every row from that parse, so a block's `Sub` and `End If` lines get grammar colours. A row the grammar cannot colour falls back to a hand-written tokenizer. The drawing statements `Line`, `PSet` and `Circle` are in the grammar: `PSet` and `Circle` always, and `Line` only when a point follows it (`Line (x, y)` or `Line -Step(x, y)`), so `Line = 5` stays a variable.)
+- Implement debug controls (Breakpoints, Step-over, Step-into (F8), Variable Watch). (Done.)
 - Editor diagnostics are done: a line the parser cannot read is underlined, and its message shows in the status line with the caret on it (`parse_diagnostic` in the parser's `check`). Only the first error is marked. The editor stores lines in a `Vec<String>`, not a rope, by decision: a rope was benchmarked on a 20,000-line module and was about 5x faster for edits (2.1ms against 11.0ms for 4,000 edits), but a typical BASIC module is a few hundred lines where both are instant, and the editing core (caret, selection, undo) would have to be rewritten to gain it. Code folding is done for blocks (Sub, Function, loops, If, Select, With, Type, Enum).
 
 ### Phase 4: JIT Codegen & Packaging (Months 10–12)

@@ -283,6 +283,49 @@ fn debugger_steps_and_watches() {
 }
 
 #[test]
+fn debugger_step_into_enters_a_called_sub() {
+    use oxbasic_runtime::{DebugAction, Interpreter, Output, PausedInfo};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Sink(String);
+    impl Output for Sink {
+        fn write(&mut self, s: &str) {
+            self.0.push_str(s);
+        }
+    }
+
+    let src = "Sub Add1()\n  Total = Total + 1\nEnd Sub\nDim Total As Long\nTotal = 0\nAdd1\nPrint Total\n";
+    let prog = oxbasic_parser::parse(src).unwrap();
+    let mut sink = Sink(String::new());
+    let mut rt = Interpreter::new(&prog, &mut sink);
+    let pauses: Rc<RefCell<Vec<PausedInfo>>> = Rc::new(RefCell::new(vec![]));
+    {
+        let pauses = pauses.clone();
+        rt.set_debug_hook(Box::new(move |info: &PausedInfo| {
+            pauses.borrow_mut().push(info.clone());
+            // step into everything: the sub's own statement must pause too
+            if pauses.borrow().len() >= 12 {
+                DebugAction::Continue
+            } else {
+                DebugAction::StepInto
+            }
+        }));
+    }
+    rt.run().unwrap();
+    let p = pauses.borrow();
+    // the pause on the `Add1` call is followed by one inside the sub
+    let call = p.iter().position(|i| i.line == 6).expect("paused on the call");
+    assert!(
+        p.iter().skip(call + 1).any(|i| i.proc.eq_ignore_ascii_case("Add1")),
+        "step into entered Add1: {:?}",
+        p.iter().map(|i| (i.line, i.proc.clone())).collect::<Vec<_>>()
+    );
+    assert_eq!(sink.0, " 1 \n", "the program still runs to its end");
+}
+
+
+#[test]
 fn debugger_breakpoints() {
     use oxbasic_runtime::{DebugAction, Interpreter, Output};
     use std::collections::HashSet;

@@ -275,6 +275,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -363,6 +367,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -380,6 +388,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -431,6 +443,29 @@
         },
         {
           "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "circle_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
           "named": true
         }
       ]
@@ -576,6 +611,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -668,6 +707,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -685,6 +728,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -747,6 +794,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -835,6 +886,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -852,6 +907,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -911,6 +970,10 @@
         },
         {
           "type": "call_statement",
+          "named": true
+        },
+        {
+          "type": "circle_statement",
           "named": true
         },
         {
@@ -1006,6 +1069,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -1023,6 +1090,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -1338,6 +1409,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -1434,6 +1509,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -1451,6 +1530,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -1562,6 +1645,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -1658,6 +1745,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -1675,6 +1766,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -1722,6 +1817,29 @@
       "types": [
         {
           "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "line_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
           "named": true
         }
       ]
@@ -1972,6 +2090,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -2060,6 +2182,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -2081,6 +2207,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -2113,6 +2243,29 @@
         },
         {
           "type": "with_statement",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "pset_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
           "named": true
         }
       ]
@@ -2242,6 +2395,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -2330,6 +2487,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -2347,6 +2508,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -2494,6 +2659,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -2586,6 +2755,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -2603,6 +2776,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -2681,6 +2858,10 @@
           "named": true
         },
         {
+          "type": "circle_statement",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -2773,6 +2954,10 @@
           "named": true
         },
         {
+          "type": "line_statement",
+          "named": true
+        },
+        {
           "type": "mid_statement",
           "named": true
         },
@@ -2790,6 +2975,10 @@
         },
         {
           "type": "procedure_definition",
+          "named": true
+        },
+        {
+          "type": "pset_statement",
           "named": true
         },
         {
@@ -2945,6 +3134,10 @@
   },
   {
     "type": "Case",
+    "named": false
+  },
+  {
+    "type": "Circle",
     "named": false
   },
   {
@@ -3200,6 +3393,10 @@
     "named": false
   },
   {
+    "type": "PSet",
+    "named": false
+  },
+  {
     "type": "Preserve",
     "named": false
   },
@@ -3343,6 +3540,10 @@
     "type": "line_continuation",
     "named": true,
     "extra": true
+  },
+  {
+    "type": "step",
+    "named": false
   },
   {
     "type": "string",

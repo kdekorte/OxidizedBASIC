@@ -24,6 +24,8 @@ pub enum DebugCommand {
     Continue,
     /// Step over the current statement.
     StepOver,
+    /// Step into the next statement, entering a sub or function called here.
+    StepInto,
     /// Abort the program.
     Stop,
     /// Invoke form `form`'s event handler (e.g. `Command1_Click`) on the
@@ -486,6 +488,7 @@ fn run_program(
                     Ok(DebugCommand::Step) | Ok(DebugCommand::StepOver) => {
                         return DebugAction::StepOver
                     }
+                    Ok(DebugCommand::StepInto) => return DebugAction::StepInto,
                     Ok(DebugCommand::Stop) | Err(_) => return DebugAction::Abort,
                     // typing while paused still reaches the form
                     Ok(DebugCommand::Edit(form, e)) => apply_edit(&host, form, e),
@@ -992,6 +995,29 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn step_into_session_enters_the_sub_on_the_call_line() {
+        let (evt_tx, evt_rx) = channel();
+        let bps = Arc::new(Mutex::new(HashSet::new()));
+        let src = "Sub Bump()\n  y = 2\nEnd Sub\nBump\nx = 1\n".to_string();
+        let session = DebugSession::start(src, bps, evt_tx);
+        session.send(DebugCommand::Step);
+        let first = match evt_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            DebugEvent::Paused(info) => info,
+            other => panic!("expected pause, got {:?}", other.kind_name()),
+        };
+        // the first pause is on the call (line 4), in the module
+        assert_eq!(first.line, 4);
+        session.send(DebugCommand::StepInto);
+        let next = match evt_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            DebugEvent::Paused(info) => info,
+            other => panic!("expected pause, got {:?}", other.kind_name()),
+        };
+        assert!(next.proc.eq_ignore_ascii_case("Bump"), "Step Into entered Bump: {}", next.proc);
+        session.send(DebugCommand::Stop);
+    }
+
+
     fn step_session_pauses_at_each_statement() {
         let (evt_tx, evt_rx) = channel();
         let bps = Arc::new(Mutex::new(HashSet::new()));

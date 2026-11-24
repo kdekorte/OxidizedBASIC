@@ -100,6 +100,7 @@ pub(super) fn file_menu_bar(recent: &recent::RecentList) -> Vec<gpui::Menu> {
             items: vec![
                 gpui::MenuItem::action("Run / Continue", RunProgram),
                 gpui::MenuItem::action("Step Over", StepProgram),
+                gpui::MenuItem::action("Step Into", StepIntoProgram),
                 gpui::MenuItem::action("Stop", StopProgram),
             ],
         },

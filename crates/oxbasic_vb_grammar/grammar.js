@@ -86,6 +86,9 @@ module.exports = grammar({
         $.gosub_statement,
         $.stop_statement,
         $.goto_statement,
+        $.pset_statement,
+        $.circle_statement,
+        $.line_statement,
         $.call_statement,
         $.file_open_statement,
         $.file_close_statement,
@@ -424,6 +427,27 @@ module.exports = grammar({
 
     // Erase a, b: resets arrays
     erase_statement: ($) => seq(kw('Erase'), commaSep1($._target)),
+
+    // Drawing statements (the parser checks their arguments; here they only
+    // need colouring). `Line` is a word a program may also use as a variable,
+    // so it is a statement only when a point follows it: `Line (x, y)` or
+    // `Line -Step(x, y)`. `Line = 5` stays an assignment.
+    pset_statement: ($) =>
+      seq(optional(seq($.identifier, '.')), kw('PSet'), $._draw_args),
+    circle_statement: ($) =>
+      seq(optional(seq($.identifier, '.')), kw('Circle'), $._draw_args),
+    // the arguments of a drawing statement: points, numbers and commas. They
+    // are plain tokens here, not expressions, so the grammar is unambiguous.
+    _draw_args: ($) => repeat1(choice($.number, $.identifier, $.string, ',', '(', ')', '-', '.', 'Step', 'step')),
+    line_statement: ($) =>
+      prec(
+        2,
+        seq(
+          optional(seq($.identifier, '.')),
+          kw('Line'),
+          choice(seq('(', $._draw_args), seq('-', $._draw_args)),
+        ),
+      ),
 
     // ReDim [Preserve] a(n), b(n): resizes dynamic arrays
     redim_statement: ($) =>

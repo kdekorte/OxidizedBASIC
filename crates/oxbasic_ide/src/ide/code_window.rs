@@ -509,6 +509,10 @@ impl Ide {
                 this.step_program();
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &StepIntoProgram, _win, cx| {
+                this.step_into_program();
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &StopProgram, _win, cx| {
                 this.stop_program(cx);
                 cx.notify();
