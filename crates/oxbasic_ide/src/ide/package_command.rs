@@ -101,17 +101,19 @@ fn app_name(bundle: &std::path::Path) -> String {
 /// build (`cargo run`) finds it in the repo's packaging folder instead. Returns
 /// `None` when neither is there, and the package then has the default icon.
 pub(super) fn app_icon() -> Option<std::path::PathBuf> {
+    // The About window draws a picture with GPUI's image loader, which reads
+    // PNG (not .icns), so the bundle carries the largest icon as a PNG too.
     if let Ok(exe) = std::env::current_exe() {
-        // Contents/MacOS/<exe> -> Contents/Resources/OxidizedBASIC.icns
+        // Contents/MacOS/<exe> -> Contents/Resources/OxidizedBASIC.png
         if let Some(contents) = exe.parent().and_then(|m| m.parent()) {
-            let in_app = contents.join("Resources").join("OxidizedBASIC.icns");
+            let in_app = contents.join("Resources").join("OxidizedBASIC.png");
             if in_app.exists() {
                 return Some(in_app);
             }
         }
     }
     let in_repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../packaging/icons/OxidizedBASIC.icns");
+        .join("../../packaging/icons/OxidizedBASIC_1024.png");
     in_repo.exists().then_some(in_repo)
 }
 

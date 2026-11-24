@@ -94,5 +94,16 @@ mod tests {
     #[test]
     fn the_app_is_named_oxidizedbasic() {
         assert_eq!(APP_NAME, "OxidizedBASIC");
+
+    /// The About window draws the app icon with the image loader, which reads
+    /// PNG: the icon it is given must be one (not the .icns the bundle also has).
+    #[test]
+    fn the_about_icon_is_a_png_the_window_can_draw() {
+        let icon = super::super::package_command::app_icon().expect("an app icon is found");
+        assert_eq!(icon.extension().and_then(|e| e.to_str()), Some("png"));
+        let bytes = std::fs::read(&icon).expect("the icon file reads");
+        assert_eq!(&bytes[0..4], &[0x89, b'P', b'N', b'G'], "a PNG file");
+    }
+
     }
 }

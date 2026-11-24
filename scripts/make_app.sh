@@ -41,6 +41,8 @@ rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp target/release/oxbasic "$BUNDLE/Contents/MacOS/${APP_NAME}"
 cp "$ICNS" "$BUNDLE/Contents/Resources/${APP_NAME}.icns"
+# the About window shows a picture, and GPUI loads PNG (not .icns)
+cp packaging/icons/${APP_NAME}_1024.png "$BUNDLE/Contents/Resources/${APP_NAME}.png"
 
 # the double-click passes no arguments; `ide` with none opens a new project
 cat > "$BUNDLE/Contents/MacOS/${APP_NAME}-launch" <<'LAUNCHER'

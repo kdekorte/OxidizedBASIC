@@ -172,7 +172,9 @@ pub fn write_package(spec: &PackageSpec) -> Result<(), String> {
     .map_err(|e| format!("cannot write the launcher: {}", e))?;
     set_executable(&macos.join(format!("{}-launch", spec.name)))?;
 
-    // the project, as it is now: its files, relative to the project folder
+    // the project, as it is now: its files, relative to the project folder.
+    // The project file itself is written below, naming the icon the bundle
+    // holds (the .icns), since the original picture is not copied.
     for f in &files {
         let from = project_dir.join(f);
         let to = project_in_app.join(f);
@@ -180,11 +182,26 @@ pub fn write_package(spec: &PackageSpec) -> Result<(), String> {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {}", parent.display(), e))?;
         }
+        if f == &files[0] {
+            let mut project = oxbasic_ui::project::Project::load(&spec.project)?;
+            project.icon = if spec.icon.is_some() {
+                format!("{}.icns", spec.name)
+            } else {
+                String::new()
+            };
+            project.save(&to)?;
+            continue;
+        }
         std::fs::copy(&from, &to).map_err(|e| format!("cannot copy {}: {}", from.display(), e))?;
     }
 
     if let Some(icon) = &spec.icon {
-        write_icns(icon, &resources.join(format!("{}.icns", spec.name)))?;
+        // Finder reads the app icon from Resources (CFBundleIconFile names it);
+        // the bundled project finds the same file beside itself
+        let app_icon = resources.join(format!("{}.icns", spec.name));
+        write_icns(icon, &app_icon)?;
+        std::fs::copy(&app_icon, project_in_app.join(format!("{}.icns", spec.name)))
+            .map_err(|e| format!("cannot copy the icon for the project: {}", e))?;
     }
 
     std::fs::write(contents.join("Info.plist"), info_plist(spec))
@@ -240,7 +257,14 @@ fn write_icns(from: &Path, to: &Path) -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| format!("cannot copy the icon: {}", e));
     }
-    let work = std::env::temp_dir().join(format!("oxbasic-icon-{}", std::process::id()));
+    let work = std::env::temp_dir().join(format!(
+        "oxbasic-icon-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     let _ = std::fs::remove_dir_all(&work);
     let set = work.join("AppIcon.iconset");
     std::fs::create_dir_all(&set).map_err(|e| format!("cannot make the icon set: {}", e))?;
@@ -661,6 +685,12 @@ mod bundle_tests {
             assert_eq!(again.icon, "icon.icns");
             std::fs::remove_dir_all(file.parent().unwrap()).ok();
         }
+}
+
+#[cfg(test)]
+mod icon_tests {
+    use super::*;
+    use std::path::PathBuf;
 
     /// A PNG icon becomes a real .icns (macOS only: it needs sips and iconutil).
     #[test]
@@ -682,5 +712,30 @@ mod bundle_tests {
             .join("../../examples/showcase/OxidizedBASIC Showcase Icon.png")
     }
 
+    /// A project with a PNG icon packages, and the bundled project names an
+    /// icon that is really in the bundle (else the app stops at start-up).
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_bundled_project_names_an_icon_the_bundle_contains() {
+        let (dir, project) = make_project("iconbundle");
+        let bundle = dir.join("out").join("Icon.app");
+        let mut s = spec(&dir, project, bundle.clone(), "icon");
+        s.icon = Some(example_icon_png());
+        write_package(&s).expect("packages");
+        let inside = bundle.join("Contents/Resources/project");
+        let bundled = oxbasic_ui::project::Project::load(&inside.join("hello.oxproj"))
+            .expect("the bundled project loads");
+        assert_eq!(bundled.icon, "icon.icns", "the project names the icon it ships");
+        assert!(inside.join(&bundled.icon).exists(), "and that icon is in the bundle");
+        // Finder reads the app icon from Resources, the name Info.plist gives
+        let plist = std::fs::read_to_string(bundle.join("Contents/Info.plist")).expect("plist");
+        assert!(plist.contains("<string>icon</string>"), "Info.plist names the icon");
+        assert!(
+            bundle.join("Contents/Resources/icon.icns").exists(),
+            "Finder finds the app icon in Resources"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
+}
+
 }
