@@ -101,39 +101,149 @@ constants such as `vbCrLf`.
 
 ## Built-in functions
 
-Math: `Abs`, `Sgn`, `Int`, `Fix`, `Sqr`, `Sin`, `Cos`, `Tan`, `Atn`, `Exp`,
-`Log`, `Rnd`, `Randomize`, `Round` (rounds half to even), `Timer`.
+### Math
 
-Strings: `Len`, `Left`, `Right`, `Mid`, `InStr`, `InStrRev`, `Replace`,
-`UCase`, `LCase`, `Trim`, `LTrim`, `RTrim`, `Space`, `String`, `StrReverse`,
-`Chr`, `Asc`, `Str`, `Val`, `StrComp`, `Split`, `Join`, `Hex`, `Oct`.
+| Function | Returns | What it does |
+|---|---|---|
+| `Abs(x)` | Same type as `x` | The absolute value. |
+| `Sgn(x)` | Long | `1` if `x` is positive, `-1` if negative, `0` if zero. |
+| `Int(x)` | Number | The largest whole number not above `x`: `Int(-2.5)` is `-3`. |
+| `Fix(x)` | Number | `x` with the fraction removed, toward zero: `Fix(-2.5)` is `-2`. |
+| `Sqr(x)` | Double | The square root. Error 5 when `x` is negative. |
+| `Sin(x)`, `Cos(x)`, `Tan(x)`, `Atn(x)` | Double | Sine, cosine, tangent and arctangent, in radians. |
+| `Exp(x)` | Double | e raised to `x`. |
+| `Log(x)` | Double | The natural logarithm. Error 5 when `x` is not positive. |
+| `Round(x [, digits])` | Number | `x` rounded to `digits` decimal places (default 0). A number exactly halfway goes to the even neighbour: `Round(2.5)` is `2`, `Round(3.5)` is `4`. |
+| `Rnd` | Double | A pseudo-random number from 0 up to, not including, 1. |
+| `Randomize [seed]` | (statement) | Seeds `Rnd`. With no seed it uses the clock. The same seed gives the same sequence. |
+| `Timer` | Single | Seconds since midnight. |
+| `Hex(n)` | String | `n` in hexadecimal, capitals: `Hex(255)` is `FF`. |
+| `Oct(n)` | String | `n` in octal: `Oct(8)` is `10`. |
 
-Choice: `IIf`, `Choose`, `Switch`.
+### Strings
 
-Conversion: `CInt`, `CLng`, `CDbl`, `CSng`, `CCur`, `CVar`, `CBool`, `CStr`,
-`CDate`.
+| Function | Returns | What it does |
+|---|---|---|
+| `Len(s)` | Long | The number of characters in `s`. |
+| `Left(s, n)` | String | The first `n` characters. |
+| `Right(s, n)` | String | The last `n` characters. |
+| `Mid(s, start [, n])` | String | `n` characters from position `start` (1-based), or to the end when `n` is left out. Error 5 when `start` is below 1. |
+| `InStr([start,] s, find)` | Long | The position of `find` in `s` (1-based), searched from `start`; `0` when not found. With `start` the search begins there. |
+| `InStrRev(s, find)` | Long | The position of the last `find` in `s`; `0` when not found. |
+| `Replace(s, find, repl)` | String | Every `find` in `s` replaced by `repl`. |
+| `UCase(s)`, `LCase(s)` | String | `s` in capitals or in lower case. |
+| `Trim(s)`, `LTrim(s)`, `RTrim(s)` | String | `s` without spaces at both ends, at the start, or at the end. |
+| `Space(n)` | String | `n` spaces. |
+| `String(n, c)` | String | `n` copies of the character `c` (a string or a character code). |
+| `StrReverse(s)` | String | `s` backwards. |
+| `Chr(code)` | String | The character with that code. Error 5 for an invalid code. |
+| `Asc(s)` | Long | The code of the first character of `s`. Error 5 for an empty string. |
+| `Str(n)` | String | `n` as text. A non-negative number gets a leading space, as `Print` gives it: `Str(5)` is ` 5`, `Str(-5)` is `-5`. |
+| `Val(s)` | Double | The number at the start of `s`, ignoring leading spaces and stopping at the first character that is not part of a number: `Val("3.5 apples")` is `3.5`. `0` when there is none. |
+| `StrComp(a, b)` | Long | `-1`, `0` or `1` as `a` sorts before, equal to, or after `b`. |
+| `Split(s [, delim])` | Array | `s` cut at each `delim` (a space by default) into a zero-based array of pieces. |
+| `Join(array [, delim])` | String | The array's items joined by `delim` (a space by default). |
+| `Hex`, `Oct` | String | See Math. |
 
-Type tests: `IsNumeric`, `IsArray`, `IsEmpty`, `IsNull`, `IsDate`, `VarType`,
-`TypeName`.
+### Choice
 
-Arrays: `Array(…)`, `LBound`, `UBound`. Both follow `Option Base`.
+| Function | Returns | What it does |
+|---|---|---|
+| `IIf(cond, a, b)` | Either | `a` when `cond` is true, otherwise `b`. Both are evaluated. |
+| `Choose(i, v1, v2, ...)` | Either | The `i`th value (1-based). Null when `i` is outside the list. |
+| `Switch(c1, v1, c2, v2, ...)` | Either | The value after the first true condition. Null when none is true. |
 
-Dates and time: `Now`, `Date`, `Time`, `Year`, `Month`, `Day`, `Weekday`,
-`Hour`, `Minute`, `Second`, `DateSerial`, `TimeSerial`, `DateAdd`,
-`DateValue`. A date is a serial number: whole days since 1899-12-30, with the
-time of day as the fraction.
+### Conversion
 
-Formatting: `Format(value, pattern)`. Named formats are `General Number`,
-`Currency`, `Fixed`, `Standard`, `Percent`, `Scientific`, `Yes/No`,
-`True/False` and `On/Off`. Numeric patterns use `0` (a digit), `#` (a digit
-if one is there), `,` (thousands separators), `.` (the decimal point), `%`
-(multiply by 100), and `E+` or `E-` (scientific notation). Date patterns use
-`yyyy`, `yy`, `mmmm`, `mmm`, `mm`, `m`, `dddd`, `ddd`, `dd`, `d`, `hh`, `nn`,
-`ss`, `q` (quarter), `w` (weekday number), `AM/PM` and `A/P`, with quoted or
-`\`-escaped literal text.
+| Function | Returns | What it does |
+|---|---|---|
+| `CInt(x)`, `CLng(x)` | Integer, Long | `x` rounded to a whole number. A half goes to the even neighbour, as `Round` does. |
+| `CDbl(x)`, `CSng(x)`, `CCur(x)`, `CVar(x)` | Double | `x` as a number. |
+| `CBool(x)` | Boolean | `False` for zero, `True` for anything else. |
+| `CStr(x)` | String | `x` as text, without the leading space that `Str` adds. |
+| `CDate(x)` | Date | `x` as a date serial. A string is not parsed here: use `DateValue`. |
 
-Dialogs and the interface: `MsgBox`, `InputBox`, `OpenFileDialog`,
-`SaveFileDialog`, `DoEvents`, `Beep`, `LoadPicture`.
+### Type tests
+
+| Function | Returns | What it does |
+|---|---|---|
+| `IsNumeric(x)` | Boolean | True for a number, or for a string that reads as one. |
+| `IsArray(x)` | Boolean | True for an array. |
+| `IsEmpty(x)` | Boolean | True for a variable that has never been given a value. |
+| `IsNull(x)` | Boolean | True for `Null`. |
+| `IsDate(x)` | Boolean | True for a date value (not for a string). |
+| `VarType(x)` | Long | The type code: 0 Empty, 1 Null, 2 Integer, 3 Long, 4 Single, 5 Double, 6 Currency, 7 Date, 8 String, 9 Object, 11 Boolean, 8204 Array. |
+| `TypeName(x)` | String | The type's name: `Long`, `String`, `Boolean`, `Empty` and so on. |
+
+### Arrays
+
+| Function | Returns | What it does |
+|---|---|---|
+| `Array(v1, v2, ...)` | Array | An array of the values given, starting at the lower bound (`Option Base`). |
+| `LBound(a [, dim])` | Long | The first index of the array (per dimension). |
+| `UBound(a [, dim])` | Long | The last index of the array (per dimension). Error 9 when the dimension does not exist. |
+
+### Dates and time
+
+A date is a serial number: whole days since 1899-12-30, with the time of day as
+the fraction. So `Now` is a date with a time, and `Date` is `Now` with the time
+dropped.
+
+| Function | Returns | What it does |
+|---|---|---|
+| `Now` | Date | The current date and time. |
+| `Date` | Date | Today's date, with no time. |
+| `Time` | Date | The current time of day, as a fraction of a day. |
+| `Year(d)`, `Month(d)`, `Day(d)` | Long | The parts of a date. |
+| `Weekday(d)` | Long | The day of the week, 1 for Sunday to 7 for Saturday. |
+| `Hour(d)`, `Minute(d)`, `Second(d)` | Long | The parts of a time. |
+| `DateSerial(y, m, d)` | Date | The date for a year, month and day. |
+| `TimeSerial(h, m, s)` | Date | The time of day as a fraction of a day. |
+| `DateAdd(unit, n, d)` | Date | `d` moved by `n` units. Units: `yyyy` years, `m` months (the day is kept where it exists), `d`, `y` or `w` days, `ww` weeks, `h` hours, `n` minutes, `s` seconds. An unknown unit is error 5. |
+| `DateValue(s)` | Date | The date a string holds, such as `"2024-03-05"`. |
+
+### Formatting
+
+`Format(value, pattern)` writes a value in a form. The pattern is either a named
+format or a picture made of the codes below.
+
+Named numeric formats:
+
+| Name | Shows |
+|---|---|
+| `General Number` | The number as it is. |
+| `Currency` | Thousands separators and two decimals: `1234.5` is `1,234.50`. No currency sign is added. |
+| `Fixed` | Two decimals, no separators: `3` is `3.00`. |
+| `Standard` | Thousands separators and two decimals: `1234.5` is `1,234.50`. |
+| `Percent` | Times 100 with a `%` and two decimals: `0.5` is `50.00%`. |
+| `Scientific` | Scientific notation with two decimals. |
+| `Yes/No`, `True/False`, `On/Off` | The words for a number: zero gives the second word, non-zero the first (`Format(12, "Yes/No")` is `Yes`). |
+
+Picture codes for numbers:
+
+- `0` a digit, always shown (padded with zeros).
+- `#` a digit, shown only if there is one.
+- `,` thousands separators.
+- `.` the decimal point.
+- `%` multiplies by 100 and shows `%`.
+- `E+` or `E-` scientific notation, as in `0.0E+00`.
+
+Picture codes for dates: `yyyy`, `yy` (year); `mmmm`, `mmm`, `mm`, `m` (month
+name, short name, two digits, one digit); `dddd`, `ddd`, `dd`, `d` (day name,
+short name, two digits, one digit); `hh`, `nn`, `ss` (hour, minute, second);
+`q` (quarter); `w` (weekday number); `AM/PM` and `A/P` (a 12-hour clock). Quote
+literal text, or escape a character with a backslash.
+
+### Dialogs and the interface
+
+| Function or statement | What it does |
+|---|---|
+| `MsgBox(prompt)` | Writes `prompt` and a line break to the output, and returns `1`. |
+| `InputBox(prompt)` | Writes `prompt` and reads one line from the input, which it returns. |
+| `OpenFileDialog(filter)`, `SaveFileDialog(filter)` | Show the file dialog. A cancelled dialog, or a file the filter rejects, gives `""`. |
+| `DoEvents` | Lets the window and pending events run. |
+| `Beep` | A statement that does nothing here. |
+| `LoadPicture(file)` | Loads a picture for a PictureBox's `Picture`. |
 
 ## File I/O
 

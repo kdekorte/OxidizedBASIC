@@ -64,6 +64,70 @@ fn string_functions_give_the_documented_values() {
     assert_eq!(out("Print Join(Array(\"a\", \"b\"), \"-\")"), "a-b\n");
     assert_eq!(out("Dim parts\nparts = Split(\"a,b,c\", \",\")\nPrint parts(1)"), "b\n");
 }
+#[test]
+fn reference_claims_for_the_new_function_details() {
+    // Split is zero-based, and Join defaults to a space
+    assert_eq!(out("Dim p\np = Split(\"a,b,c\", \",\")\nPrint p(0)"), "a\n");
+    assert_eq!(out("Dim p\np = Split(\"a b\")\nPrint Join(p)"), "a b\n");
+    // Randomize with a seed gives the same sequence each time
+    let twice = "Randomize 7\nPrint Rnd()\nRandomize 7\nPrint Rnd()";
+    let got = out(twice);
+    let lines: Vec<&str> = got.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0], lines[1], "the same seed repeats the value");
+    // Named numeric formats
+    assert_eq!(out("Print Format(3, \"Fixed\")"), "3.00\n");
+    assert_eq!(out("Print Format(1234.5, \"Standard\")"), "1,234.50\n");
+    assert_eq!(out("Print Format(0, \"Yes/No\")"), "No\n");
+    assert_eq!(out("Print Format(0, \"True/False\")"), "False\n");
+    // DateSerial carries an out-of-range month into the next year
+    assert_eq!(out("Print Format(DateSerial(2024, 13, 1), \"yyyy-mm-dd\")"), "2025-01-01\n");
+    // Weekday: 1 is Sunday. 2024-03-03 was a Sunday.
+    assert_eq!(out("Print Weekday(DateSerial(2024, 3, 3))"), " 1 \n");
+    // CBool: zero is False, anything else True
+    assert_eq!(out("Print CBool(0)"), "False\n");
+    // CStr has no leading space, unlike Str
+    assert_eq!(out("Print \"[\" & CStr(5) & \"]\""), "[5]\n");
+    // IsDate is False for a string that looks like a date
+    assert_eq!(out("Print IsDate(\"2024-03-05\")"), "False\n");
+    // Format with a date picture
+    assert_eq!(out("Print Format(DateSerial(2024, 3, 5), \"mmmm d, yyyy\")"), "March 5, 2024\n");
+}
+
+
+#[test]
+fn documented_edge_cases_behave_as_the_reference_says() {
+    // Choose gives Null for an index outside the list
+    assert_eq!(out("Print IsNull(Choose(5, \"a\", \"b\"))"), "True\n");
+    // Switch gives Null when no expression is true
+    assert_eq!(out("Print IsNull(Switch(0, \"a\"))"), "True\n");
+    // Round takes an optional digits argument
+    assert_eq!(out("Print Round(3.14159, 2)"), " 3.14 \n");
+    // Str puts a space before a non-negative number, not a negative one
+    assert_eq!(out("Print \"[\" & Str(5) & \"]\""), "[ 5]\n");
+    assert_eq!(out("Print \"[\" & Str(-5) & \"]\""), "[-5]\n");
+    // Val reads only the leading number
+    assert_eq!(out("Print Val(\"  3.5 apples\")"), " 3.5 \n");
+    // Len counts characters
+    assert_eq!(out("Print Len(\"héllo\")"), " 5 \n");
+    // DateAdd in months keeps the day, and DateSerial normalises the month
+    assert_eq!(out("Print Format(DateAdd(\"m\", 1, DateSerial(2024, 1, 15)), \"yyyy-mm-dd\")"), "2024-02-15\n");
+    // Mid with a start below 1 is error 5
+    assert!(run("Print Mid(\"abc\", 0, 1)\n").unwrap_err().contains("5"));
+    // Asc of an empty string is error 5
+    assert!(run("Print Asc(\"\")\n").unwrap_err().contains("5"));
+    // Sqr and Log of a bad argument are error 5
+    assert!(run("Print Sqr(-1)\n").unwrap_err().contains("5"));
+    assert!(run("Print Log(0)\n").unwrap_err().contains("5"));
+    // RGB takes parts 0 to 255
+    assert!(run("Print RGB(256, 0, 0)\n").unwrap_err().contains("5"));
+    // MsgBox writes its prompt to the output
+    assert_eq!(out("MsgBox \"hi\""), "hi\n");
+    // Beep does nothing visible
+    assert_eq!(out("Beep\nPrint \"x\""), "x\n");
+}
+
+
 
 #[test]
 fn choice_and_conversion_functions_give_the_documented_values() {
