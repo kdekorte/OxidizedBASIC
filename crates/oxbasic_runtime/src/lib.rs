@@ -7,6 +7,8 @@
 
 mod fastmap;
 mod files;
+#[cfg(feature = "jit")]
+mod jit;
 use files::Field;
 mod slots;
 mod stdlib;

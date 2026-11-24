@@ -8,3 +8,28 @@ license.workspace = true
 [dependencies]
 oxbasic_ast = { workspace = true }
 oxbasic_parser = { workspace = true }
+
+[features]
+# The Cranelift JIT for numeric For loops (docs/jit.md). Off by default: the
+# interpreter alone is unchanged without it.
+jit = ["dep:cranelift-codegen", "dep:cranelift-frontend", "dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-native"]
+
+[dependencies.cranelift-codegen]
+version = "0.138"
+optional = true
+
+[dependencies.cranelift-frontend]
+version = "0.138"
+optional = true
+
+[dependencies.cranelift-jit]
+version = "0.138"
+optional = true
+
+[dependencies.cranelift-module]
+version = "0.138"
+optional = true
+
+[dependencies.cranelift-native]
+version = "0.138"
+optional = true
