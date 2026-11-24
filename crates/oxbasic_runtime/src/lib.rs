@@ -384,6 +384,9 @@ pub struct Interpreter<'out> {
     pub base_dir: Option<std::path::PathBuf>,
     pub(crate) decls: Vec<Rc<ProcDecl>>,
     pub(crate) proc_index: NameMap<usize>,
+    /// Each procedure's slot table (by its index in `decls`): the names it uses,
+    /// each with the slot that holds its cell. Built by `add_program`.
+    pub(crate) slot_tables: Vec<slots::SlotTable>,
     top_level: Vec<Stmt>,
     pub(crate) globals: NameMap<Rc<RefCell<Variant>>>,
     pub(crate) global_types: NameMap<String>,
@@ -495,6 +498,7 @@ impl<'out> Interpreter<'out> {
         let mut it = Interpreter {
             decls: Vec::new(),
             proc_index: NameMap::default(),
+            slot_tables: Vec::new(),
             top_level: Vec::new(),
             globals: NameMap::default(),
             global_types: NameMap::default(),
@@ -535,6 +539,7 @@ impl<'out> Interpreter<'out> {
                 Item::Proc(p) => {
                     self.proc_index
                         .insert(p.name.to_lowercase(), self.decls.len());
+                    self.slot_tables.push(slots::table_for(&p.params, &p.body));
                     self.decls.push(Rc::new(p.clone()));
                 }
                 Item::Stmt(s) => {
