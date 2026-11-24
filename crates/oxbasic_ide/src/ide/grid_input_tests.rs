@@ -176,7 +176,7 @@ fn typing_fires_change_on_each_key_with_the_text_so_far(cx: &mut gpui::TestAppCo
 /// The fill rule (multiply each non-blank Qty by 10, leave blanks alone) runs
 /// in the program when its button is clicked: a typed 400 becomes 4000.
 #[gpui::test]
-#[ignore = "the typed value does not reach the cell in this form: not yet diagnosed"]
+#[ignore = "fails in this test's form: typed digits do not reach the cell (still under investigation)"]
 fn fill_multiplies_a_typed_value_and_leaves_blanks(cx: &mut gpui::TestAppContext) {
     let src = "Sub cmdFill_Click()\n  Dim r, q\n  For r = 1 To Grid1.Rows - 1\n    q = Grid1.TextMatrix(r, 1)\n    If q <> \"\" Then\n      Grid1.TextMatrix(r, 1) = Str(Val(q) * 10)\n    End If\n  Next\n  Label1.Caption = \"filled\"\nEnd Sub\n";
     // this test's own form: the grid, its label, and the Fill button

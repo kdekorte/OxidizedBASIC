@@ -8,6 +8,7 @@
 mod fastmap;
 mod files;
 use files::Field;
+mod slots;
 mod stdlib;
 mod vbbinary;
 mod vbtypes;
