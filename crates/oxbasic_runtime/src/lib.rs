@@ -856,7 +856,8 @@ impl<'out> Interpreter<'out> {
                 let start = i.min(args.len());
                 let items: Vec<Variant> = args[start..].to_vec();
                 let n = items.len();
-                callee.locals.insert(
+                self.bind(
+                    &mut callee,
                     p.name.to_lowercase(),
                     Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(
                         VbArray {
@@ -881,18 +882,14 @@ impl<'out> Interpreter<'out> {
                     }
                     None => Variant::Empty,
                 };
-                callee
-                    .locals
-                    .insert(p.name.to_lowercase(), Rc::new(RefCell::new(v)));
+                self.bind(&mut callee, p.name.to_lowercase(), Rc::new(RefCell::new(v)));
                 continue;
             }
             let v = match &p.ty {
                 Some(t) => coerce_typed(&args[i], t)?,
                 None => args[i].clone(),
             };
-            callee
-                .locals
-                .insert(p.name.to_lowercase(), Rc::new(RefCell::new(v)));
+            self.bind(&mut callee, p.name.to_lowercase(), Rc::new(RefCell::new(v)));
         }
         self.depth += 1;
         let body = decl.body.clone();
@@ -987,12 +984,31 @@ impl<'out> Interpreter<'out> {
             None => value,
         };
         let rc = Rc::new(RefCell::new(value));
-        if f.is_main {
-            self.globals.insert(ln.to_string(), rc);
-        } else {
-            f.locals.insert(ln.to_string(), rc);
-        }
+        self.bind(f, ln.to_string(), rc);
         Ok(())
+    }
+
+    /// Bind `name` to `cell` in frame `f` (or the globals for the main module),
+    /// and record it in the frame's slot when the procedure has one for it. The
+    /// name map stays the source of truth; the slot is an index to the same cell.
+    fn bind(&mut self, f: &mut Frame, name: String, cell: Rc<RefCell<Variant>>) {
+        if f.is_main {
+            self.globals.insert(name, cell);
+        } else {
+            if let Some(slot) = self.slot_index_of(f, &name) {
+                f.slots[slot] = Some(cell.clone());
+            }
+            f.locals.insert(name, cell);
+        }
+    }
+
+    /// The slot of `name` in frame `f`'s procedure, if it has one.
+    fn slot_index_of(&self, f: &Frame, name: &str) -> Option<usize> {
+        if f.slots.is_empty() {
+            return None;
+        }
+        let idx = *self.proc_index.get(&f.name)?;
+        self.slot_tables.get(idx)?.slot(name)
     }
 
     /// The `DefInt`-style type of an undeclared `name`, from its first letter.
@@ -1241,16 +1257,13 @@ impl<'out> Interpreter<'out> {
             None => self.default_value(ty.as_deref())?,
         };
         let rc = Rc::new(RefCell::new(value));
+        self.bind(f, ln.clone(), rc);
         if f.is_main {
-            self.globals.insert(ln.clone(), rc);
             if let Some(t) = ty {
                 self.global_types.insert(ln, t.to_lowercase());
             }
-        } else {
-            f.locals.insert(ln.clone(), rc);
-            if let Some(t) = ty {
-                f.local_types.insert(ln, t.to_lowercase());
-            }
+        } else if let Some(t) = ty {
+            f.local_types.insert(ln, t.to_lowercase());
         }
         Ok(())
     }
@@ -1547,11 +1560,7 @@ impl<'out> Interpreter<'out> {
                         };
                         let rc = Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(arr)))));
                         let ln = d.name.to_lowercase();
-                        if f.is_main {
-                            self.globals.insert(ln, rc);
-                        } else {
-                            f.locals.insert(ln, rc);
-                        }
+                        self.bind(f, ln, rc);
                         continue;
                     };
                     let mut borrowed = rc.borrow_mut();
@@ -2120,11 +2129,7 @@ impl<'out> Interpreter<'out> {
                             },
                         )))));
                         let ln = name.to_lowercase();
-                        if f.is_main {
-                            self.globals.insert(ln, rc.clone());
-                        } else {
-                            f.locals.insert(ln, rc.clone());
-                        }
+                        self.bind(f, ln, rc.clone());
                         rc
                     }
                 };
@@ -2646,7 +2651,8 @@ impl<'out> Interpreter<'out> {
                     for e in &arg_exprs[i.min(nargs)..] {
                         items.push(self.eval(e, f)?);
                     }
-                    callee.locals.insert(
+                    self.bind(
+                        &mut callee,
                         p.name.to_lowercase(),
                         Rc::new(RefCell::new(Variant::Array(Rc::new(RefCell::new(
                             VbArray {
@@ -2687,11 +2693,7 @@ impl<'out> Interpreter<'out> {
                                 }
                                 let rc = Rc::new(RefCell::new(Variant::Empty));
                                 let l = vn.to_lowercase();
-                                if f.is_main {
-                                    self.globals.insert(l, rc.clone());
-                                } else {
-                                    f.locals.insert(l, rc.clone());
-                                }
+                                self.bind(f, l, rc.clone());
                                 Some(rc)
                             }
                         }
@@ -2703,7 +2705,7 @@ impl<'out> Interpreter<'out> {
                 };
                 match shared {
                     Some(rc) => {
-                        callee.locals.insert(p.name.to_lowercase(), rc);
+                        self.bind(&mut callee, p.name.to_lowercase(), rc);
                     }
                     None => {
                         let v = self.eval(arg, f)?;
@@ -3343,5 +3345,36 @@ pub(crate) fn format_date(serial: f64) -> String {
         format!("{:04}-{:02}-{:02}", y, m, d)
     } else {
         format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, hh, mm, ss)
+    }
+}
+
+#[cfg(test)]
+mod bind_tests {
+    use super::*;
+
+    /// Each name bound in a procedure's frame has its slot holding the same cell
+    /// as the name map, so a read by slot sees exactly what a read by name sees.
+    #[test]
+    fn a_bound_name_has_its_slot_holding_the_same_cell() {
+        struct Sink;
+        impl Output for Sink {
+            fn write(&mut self, _s: &str) {}
+        }
+        let src = "Sub Calc(a)\n  b = a + 1\nEnd Sub\n";
+        let prog = oxbasic_parser::parse(src).expect("parses");
+        let mut sink = Sink;
+        let mut it = Interpreter::new(&prog, &mut sink);
+        it.add_program(&prog);
+        let idx = it.proc_index["calc"];
+        let decl = it.decls[idx].clone();
+        let mut f = Frame::proc(&decl, it.slot_tables[idx].len());
+        it.bind(&mut f, "a".to_string(), Rc::new(RefCell::new(Variant::Long(1))));
+        it.bind(&mut f, "b".to_string(), Rc::new(RefCell::new(Variant::Long(2))));
+        for name in ["a", "b"] {
+            let slot = it.slot_tables[idx].slot(name).expect("the table has a slot");
+            let by_slot = f.slots[slot].as_ref().expect("the slot is filled");
+            let by_name = f.locals.get(name).expect("the name is bound");
+            assert!(Rc::ptr_eq(by_slot, by_name), "{}: slot and name hold one cell", name);
+        }
     }
 }
