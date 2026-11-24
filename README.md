@@ -294,8 +294,8 @@ of the form's menu shows disabled.
 ## Roadmap
 
 - Phase 4: Cranelift JIT backend and `.app` packaging. Started: integer `For`
-  loops compile to native code with the `jit` feature
-  (`cargo build --release -p oxbasic_ide --features oxbasic_runtime/jit`), which
+  loops compile to native code (the `jit` feature, on by default; set
+  `OXBASIC_JIT=0` to turn it off), which
   runs `examples/basica.bas` in 0.01 to 0.02 s instead of 1.26 s; see
-  `docs/jit.md`. Still to do: more loop types, calls and arrays, turning the
-  feature on in the shipped build, and a signed, notarised `.app`.
+  `docs/jit.md`. Still to do: more loop types, calls and arrays, and a signed,
+  notarised `.app`.

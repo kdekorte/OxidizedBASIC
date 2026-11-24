@@ -10,8 +10,10 @@ oxbasic_ast = { workspace = true }
 oxbasic_parser = { workspace = true }
 
 [features]
-# The Cranelift JIT for numeric For loops (docs/jit.md). Off by default: the
-# interpreter alone is unchanged without it.
+# The Cranelift JIT for integer For loops (docs/jit.md). On by default; build
+# with `--no-default-features` for an interpreter-only runtime, or set the
+# environment variable OXBASIC_JIT=0 to turn it off for one run.
+default = ["jit"]
 jit = ["dep:cranelift-codegen", "dep:cranelift-frontend", "dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-native"]
 
 [dependencies.cranelift-codegen]

@@ -995,7 +995,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn step_into_session_enters_the_sub_on_the_call_line() {
         let (evt_tx, evt_rx) = channel();
         let bps = Arc::new(Mutex::new(HashSet::new()));
@@ -1018,6 +1017,7 @@ mod tests {
     }
 
 
+    #[test]
     fn step_session_pauses_at_each_statement() {
         let (evt_tx, evt_rx) = channel();
         let bps = Arc::new(Mutex::new(HashSet::new()));

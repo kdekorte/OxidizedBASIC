@@ -67,10 +67,13 @@ next step must add and measure.
 
 ## Wired into the interpreter
 
-With the `jit` feature the interpreter's `For` handler (`try_jit_for` in
-`crates/oxbasic_runtime/src/jit.rs`) runs a qualifying loop as native code and
-falls back to the interpreter otherwise. Build with
-`cargo build --release -p oxbasic_ide --features oxbasic_runtime/jit`.
+With the `jit` feature, which is on by default, the interpreter's `For` handler
+(`try_jit_for` in `crates/oxbasic_runtime/src/jit.rs`) runs a qualifying loop as
+native code and falls back to the interpreter otherwise. To turn it off:
+
+- for one run, set the environment variable `OXBASIC_JIT=0`;
+- for one interpreter, call `Interpreter::set_jit(false)`;
+- for a build without Cranelift, use `--no-default-features` on `oxbasic_runtime`.
 
 A loop is compiled only when all of these hold:
 
@@ -95,11 +98,14 @@ loop, reading its variables and writing them back.
 
 Tests: `crates/oxbasic_runtime/src/jit_tests.rs` runs each loop both ways and
 compares every variable; `crates/oxbasic_runtime/tests/jit_loops.rs` runs whole
-programs. Both need `--features jit`.
+programs. `crates/oxbasic_runtime/tests/jit_examples.rs` runs the console
+examples (`demo.bas`, `fib.bas`, `hello.bas`, `basica.bas`) and ten loop
+programs with the JIT on and off, and checks that the output is the same and
+that the loops expected to compile did. They also pass with
+`--no-default-features`.
 
 ## Still to do
 
-- Turn the feature on in the shipped IDE build (it is off by default).
 - Loops over `Integer`, `Single` or `Double` variables, arrays, and calls.
 - Cache compiled loops across runs in the IDE (each run compiles again).
 

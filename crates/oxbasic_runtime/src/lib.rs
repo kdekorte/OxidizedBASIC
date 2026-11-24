@@ -435,6 +435,12 @@ pub struct Interpreter<'out> {
     /// per run, with the cache emptied there.
     #[cfg(feature = "jit")]
     pub(crate) jit_cache: HashMap<usize, Option<Rc<jit::Compiled>>>,
+    /// Whether `For` loops may be compiled (see `set_jit`).
+    #[cfg(feature = "jit")]
+    pub(crate) jit_on: bool,
+    /// How many `For` loops ran as compiled code (see `jit_loops_run`).
+    #[cfg(feature = "jit")]
+    pub(crate) jit_runs: usize,
 }
 
 /// Debugger pause notification: where execution stopped and what the
@@ -535,6 +541,10 @@ impl<'out> Interpreter<'out> {
             base_dir: None,
             #[cfg(feature = "jit")]
             jit_cache: HashMap::new(),
+            #[cfg(feature = "jit")]
+            jit_on: jit::env_enabled(),
+            #[cfg(feature = "jit")]
+            jit_runs: 0,
         };
         it.add_program(prog);
         it
@@ -669,6 +679,31 @@ impl<'out> Interpreter<'out> {
         breakpoints: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<usize>>>,
     ) {
         self.breakpoints = Some(breakpoints);
+    }
+
+    /// How many `For` loops have run as compiled code so far (always 0 without
+    /// the `jit` feature, or with the JIT turned off).
+    pub fn jit_loops_run(&self) -> usize {
+        #[cfg(feature = "jit")]
+        {
+            self.jit_runs
+        }
+        #[cfg(not(feature = "jit"))]
+        {
+            0
+        }
+    }
+
+    /// Turn the JIT on or off for this interpreter. It starts on unless the
+    /// environment variable `OXBASIC_JIT` is `0`. Without the `jit` feature it
+    /// does nothing.
+    pub fn set_jit(&mut self, on: bool) {
+        #[cfg(feature = "jit")]
+        {
+            self.jit_on = on;
+        }
+        #[cfg(not(feature = "jit"))]
+        let _ = on;
     }
 
     /// Install the debugger pause hook. It is called whenever a

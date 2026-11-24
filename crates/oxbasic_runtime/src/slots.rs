@@ -23,11 +23,6 @@ impl SlotTable {
     pub fn len(&self) -> usize {
         self.names.len()
     }
-
-    /// Whether the table has no slots.
-    pub fn is_empty(&self) -> bool {
-        self.names.is_empty()
-    }
 }
 
 /// The slot table of a procedure: its parameters first (so a parameter's slot
@@ -317,125 +312,6 @@ fn stmt_names(s: &Stmt, out: &mut Vec<String>) {
         }
     }
 }
-/// Rewrite a procedure body so each variable it reads or writes by a name that
-/// has a slot is a `Slot`. The runtime keeps this copy; the parser's tree is not
-/// touched. A name with no slot (a global, a constant, an unknown name) stays a
-/// `Var` and is read by name as before.
-pub fn resolve_body(body: &[Stmt], table: &SlotTable) -> Vec<Stmt> {
-    body.iter().map(|s| resolve_stmt(s, table)).collect()
-}
-
-fn resolve_expr(e: &Expr, t: &SlotTable) -> Expr {
-    match e {
-        Expr::Var(name) => match t.slot(name) {
-            Some(slot) => Expr::Slot { name: name.clone(), slot },
-            None => e.clone(),
-        },
-        Expr::Slot { .. } | Expr::Lit(_) | Expr::WithRef(_) => e.clone(),
-        Expr::Call { name, args } => Expr::Call {
-            name: name.clone(),
-            args: args.iter().map(|a| resolve_expr(a, t)).collect(),
-        },
-        Expr::Member { obj, name } => Expr::Member {
-            obj: Box::new(resolve_expr(obj, t)),
-            name: name.clone(),
-        },
-        Expr::MethodCall { obj, name, args } => Expr::MethodCall {
-            obj: Box::new(resolve_expr(obj, t)),
-            name: name.clone(),
-            args: args.iter().map(|a| resolve_expr(a, t)).collect(),
-        },
-        Expr::Unary { op, expr } => Expr::Unary {
-            op: *op,
-            expr: Box::new(resolve_expr(expr, t)),
-        },
-        Expr::Binary { op, lhs, rhs } => Expr::Binary {
-            op: *op,
-            lhs: Box::new(resolve_expr(lhs, t)),
-            rhs: Box::new(resolve_expr(rhs, t)),
-        },
-    }
-}
-
-fn resolve_opt(e: &Option<Expr>, t: &SlotTable) -> Option<Expr> {
-    e.as_ref().map(|e| resolve_expr(e, t))
-}
-
-fn resolve_block(b: &[Stmt], t: &SlotTable) -> Vec<Stmt> {
-    b.iter().map(|s| resolve_stmt(s, t)).collect()
-}
-
-fn resolve_stmt(s: &Stmt, t: &SlotTable) -> Stmt {
-    let e = |x: &Expr| resolve_expr(x, t);
-    let o = |x: &Option<Expr>| resolve_opt(x, t);
-    let b = |x: &[Stmt]| resolve_block(x, t);
-    match s {
-        Stmt::Assign { target, value } => Stmt::Assign {
-            target: e(target),
-            value: e(value),
-        },
-        Stmt::If { arms, else_body } => Stmt::If {
-            arms: arms
-                .iter()
-                .map(|a| oxbasic_ast::IfArm {
-                    cond: e(&a.cond),
-                    body: b(&a.body),
-                })
-                .collect(),
-            else_body: else_body.as_ref().map(|x| b(x)),
-        },
-        Stmt::For { var, start, end, step, body } => Stmt::For {
-            var: var.clone(),
-            start: e(start),
-            end: e(end),
-            step: o(step),
-            body: b(body),
-        },
-        Stmt::ForEach { var, coll, body } => Stmt::ForEach {
-            var: var.clone(),
-            coll: e(coll),
-            body: b(body),
-        },
-        Stmt::DoWhile { cond, body, until } => Stmt::DoWhile {
-            cond: e(cond),
-            body: b(body),
-            until: *until,
-        },
-        Stmt::While { cond, body } => Stmt::While {
-            cond: e(cond),
-            body: b(body),
-        },
-        Stmt::DoLoop { body, cond } => Stmt::DoLoop {
-            body: b(body),
-            cond: cond.as_ref().map(|(x, u)| (e(x), *u)),
-        },
-        Stmt::With { obj, body } => Stmt::With {
-            obj: e(obj),
-            body: b(body),
-        },
-        Stmt::Call { target, args, bare } => Stmt::Call {
-            target: e(target),
-            args: args.iter().map(|a| e(a)).collect(),
-            bare: *bare,
-        },
-        Stmt::Print { items, trailing_sep } => Stmt::Print {
-            items: items
-                .iter()
-                .map(|it| PrintItem {
-                    expr: e(&it.expr),
-                    sep: it.sep,
-                })
-                .collect(),
-            trailing_sep: *trailing_sep,
-        },
-        // Every other form is copied unchanged: it either names no procedure
-        // variable in an expression the fast path reads, or is rare enough that
-        // its reads stay by name (the walker still checks all of them).
-        other => other.clone(),
-    }
-}
-
-
 
 #[cfg(test)]
 mod tests {

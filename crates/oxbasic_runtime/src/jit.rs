@@ -11,10 +11,6 @@
 use oxbasic_ast::{BinaryOp, Expr, Lit, Stmt, UnaryOp};
 use std::collections::HashMap;
 
-/// The integer variables a compiled loop reads and writes, by lower-case name,
-/// with their values before the loop.
-pub type Vars = HashMap<String, i64>;
-
 /// Whether `body` is entirely within the first step's subset.
 pub fn supported(body: &[Stmt]) -> bool {
     body.iter().all(stmt_supported)
@@ -85,6 +81,13 @@ pub use native::{compile_for, Compiled};
 #[cfg(feature = "jit")]
 const MIN_TRIPS: i64 = 1000;
 
+/// Whether the JIT starts on: it does, unless the environment variable
+/// `OXBASIC_JIT` is `0`.
+#[cfg(feature = "jit")]
+pub(crate) fn env_enabled() -> bool {
+    std::env::var("OXBASIC_JIT").map_or(true, |v| v != "0")
+}
+
 #[cfg(feature = "jit")]
 impl crate::Interpreter<'_> {
     /// Run the `For` loop `s` as native code when it qualifies; `Ok(true)` when
@@ -93,8 +96,14 @@ impl crate::Interpreter<'_> {
     /// refusal leaves the interpreter to do the whole loop.
     pub(crate) fn try_jit_for(&mut self, s: &Stmt, f: &mut crate::Frame) -> crate::ExecResult<bool> {
         use crate::Variant;
-        // compiled code cannot pause at a breakpoint or step
-        if self.debug_hook.is_some() || self.breakpoints.is_some() {
+        // compiled code cannot pause at a breakpoint or step: a loop is only
+        // compiled when none is set and no step is pending (a breakpoint added
+        // while a compiled loop runs takes effect after it)
+        let breakpoints_set = self
+            .breakpoints
+            .as_ref()
+            .is_some_and(|b| b.lock().map_or(true, |b| !b.is_empty()));
+        if !self.jit_on || breakpoints_set || self.step_depth.is_some() {
             return Ok(false);
         }
         let Stmt::For { var, start, end, step, body } = s else {
@@ -173,6 +182,7 @@ impl crate::Interpreter<'_> {
         let Some(out) = compiled.run(&values) else {
             return Ok(false);
         };
+        self.jit_runs += 1;
         for (n, v) in compiled.names.iter().zip(out) {
             let v = Variant::Long(v as i32);
             match self.lookup_ref(f, n) {
@@ -270,7 +280,7 @@ mod native {
         let mut ctx = module.make_context();
         ctx.func.signature = sig;
         let mut fbc = FunctionBuilderContext::new();
-        let mut generated = true;
+        let generated;
         {
             let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbc);
             let entry = b.create_block();
@@ -387,7 +397,7 @@ mod native {
                             (self.in_long_range(r), false)
                         }
                         // logical on a Boolean, bitwise on an integer
-                        UnaryOp::Not if isb => (self.b.ins().bxor_imm(v, 1), true),
+                        UnaryOp::Not if isb => (self.b.ins().bxor_imm_s(v, 1), true),
                         UnaryOp::Not => (self.b.ins().bnot(v), false),
                     }
                 }
@@ -413,8 +423,8 @@ mod native {
                         // error in the interpreter: the answer is not valid, and
                         // the divide runs by one so it cannot trap.
                         BinaryOp::IntDiv | BinaryOp::Mod => {
-                            let is_zero = self.b.ins().icmp_imm(IntCC::Equal, r, 0);
-                            let nonzero = self.b.ins().icmp_imm(IntCC::NotEqual, r, 0);
+                            let is_zero = self.b.ins().icmp_imm_s(IntCC::Equal, r, 0);
+                            let nonzero = self.b.ins().icmp_imm_s(IntCC::NotEqual, r, 0);
                             self.require(nonzero);
                             let one = self.b.ins().iconst(types::I64, 1);
                             let safe = self.b.ins().select(is_zero, one, r);
@@ -458,7 +468,7 @@ mod native {
                     let join = self.b.create_block();
                     for arm in arms {
                         let c = self.expr(&arm.cond)?;
-                        let truthy = self.b.ins().icmp_imm(IntCC::NotEqual, c, 0);
+                        let truthy = self.b.ins().icmp_imm_s(IntCC::NotEqual, c, 0);
                         let then_b = self.b.create_block();
                         let next = self.b.create_block();
                         self.b.ins().brif(truthy, then_b, &[], next, &[]);
@@ -484,7 +494,7 @@ mod native {
                         None => self.b.ins().iconst(types::I64, 1),
                     };
                     // a zero step is an error in the interpreter
-                    let nonzero = self.b.ins().icmp_imm(IntCC::NotEqual, st, 0);
+                    let nonzero = self.b.ins().icmp_imm_s(IntCC::NotEqual, st, 0);
                     self.require(nonzero);
                     let i = self.b.declare_var(types::I64);
                     self.b.def_var(i, s0);
@@ -495,7 +505,7 @@ mod native {
                     self.b.ins().brif(nonzero, head, &[], exit, &[]);
                     self.b.switch_to_block(head);
                     let iv = self.b.use_var(i);
-                    let up = self.b.ins().icmp_imm(IntCC::SignedGreaterThanOrEqual, st, 0);
+                    let up = self.b.ins().icmp_imm_s(IntCC::SignedGreaterThanOrEqual, st, 0);
                     let le = self.b.ins().icmp(IntCC::SignedLessThanOrEqual, iv, e0);
                     let ge = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, iv, e0);
                     let go = self.b.ins().select(up, le, ge);
